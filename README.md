@@ -1,6 +1,6 @@
 # PAX Cookbook
 
-**The Operational Experience Layer for PAX**
+**The Operational Experience Layer for PAX (Portable Audit eXporter)**
 
 > **Coming soon.** PAX Cookbook is in active development. This repository is a public preview of the project's direction and operational philosophy ahead of its initial release.
 
