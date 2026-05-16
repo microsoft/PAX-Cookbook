@@ -194,6 +194,4 @@ PAX Cookbook is built for organizations that need:
 
 PAX Cookbook is in active development.
 
-The initial release focuses on the core operational experience: recipe authoring, guided cooks with live execution visibility, cook history, and the foundational dashboard templates. The project is being built in deliberate, well-scoped increments so each capability lands with full operational quality before the next is added.
-
-No installation will be required to evaluate. When the initial release is published, it will follow the same operational model described above — download, unzip, run from PowerShell, start cooking — with the orchestration layer remaining intentionally thin and PAX remaining authoritative.
+When the initial release is published, it will follow the same operational model described above — download, unzip, run from PowerShell, start cooking — with the orchestration layer remaining intentionally thin and PAX remaining authoritative.
