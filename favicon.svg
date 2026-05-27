@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PAX Cookbook">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <path d="M18 22h28v6H18z" fill="#fff" opacity=".95"/>
+  <path d="M14 28h36v18a4 4 0 0 1-4 4H18a4 4 0 0 1-4-4z" fill="#fff" opacity=".9"/>
+  <path d="M22 36h20M22 42h14" stroke="#1e3a8a" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="32" cy="20" r="3" fill="#fff"/>
+</svg>
