@@ -1,197 +1,123 @@
-# PAX Cookbook
+<p align="center">
+  <a href="https://microsoft.github.io/PAX-Cookbook/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)"  srcset="images/pax-cookbook-logo-readme-dark.png">
+      <source media="(prefers-color-scheme: light)" srcset="images/pax-cookbook-logo-readme.png">
+      <img src="images/pax-cookbook-logo-readme.png" alt="PAX Cookbook" width="480">
+    </picture>
+  </a>
+</p>
 
-**The Operational Experience Layer for PAX (Portable Audit eXporter)**
+<h3 align="center">Turn PAX audit exports into guided, repeatable workflows.</h3>
 
-> **Coming soon.** PAX Cookbook is in active development. This repository is a public preview of the project's direction and operational philosophy ahead of its initial release.
+<p align="center"><sub>The PAX Cookbook app&nbsp;&nbsp;·&nbsp;&nbsp;Mini-Kitchen browser companion</sub></p>
 
-PAX Cookbook transforms the [PAX Purview Audit Log Processor PowerShell script](https://github.com/Microsoft/PAX) from a powerful command-line tool into a guided, repeatable, enterprise-friendly operational experience — without changing the underlying PAX Purview Audit Log Processor PowerShell script at all.
+<p align="center">
+  <a href="https://microsoft.github.io/PAX-Cookbook/"><kbd>&nbsp;&nbsp;Get started at the PAX Cookbook site&nbsp;&nbsp;</kbd></a>
+  &nbsp;&nbsp;
+  <a href="https://microsoft.github.io/PAX-Cookbook/mini-kitchen/"><kbd>&nbsp;&nbsp;Open Mini-Kitchen (browser companion)&nbsp;&nbsp;</kbd></a>
+</p>
 
-Built as a local-first orchestration shell around PAX, Cookbook simplifies complex data collection workflows through recipes, guided execution, operational visibility, and automation-ready workflows while preserving the full power and transparency of native PAX execution.
-
----
-
-## Why PAX Cookbook?
-
-PAX has evolved into an incredibly flexible enterprise data collection engine capable of:
-
-- pulling Microsoft audit and telemetry sources at scale
-- supporting rollup architectures
-- supporting multiple output destinations
-- powering advanced Power BI reporting solutions
-- enabling operational automation scenarios
-
-That flexibility also means:
-
-- many switches
-- many workflow combinations
-- many storage and output paths
-- increasing operational complexity
-
-PAX Cookbook solves that problem.
-
----
-
-## Recipe-Based Workflows
-
-Save repeatable PAX workflows as reusable **Recipes**.
-
-Recipes guide users through:
-
-- what data to collect
-- where outputs go
-- which authentication method to use
-- rollup configuration
-- operational settings
-
-Advanced users still retain:
-
-- native command visibility
-- raw argument passthrough
-- the full flexibility of PAX
+<p align="center"><sub>
+  <a href="#what-youll-find">Overview</a>
+  &nbsp;·&nbsp;
+  <a href="#which-one-should-i-use">Which one?</a>
+  &nbsp;·&nbsp;
+  <a href="#download">Download</a>
+  &nbsp;·&nbsp;
+  <a href="#documentation">Docs</a>
+  &nbsp;·&nbsp;
+  <a href="#feedback">Feedback</a>
+</sub></p>
 
 ---
 
-## Guided Operational Experience
+> **New here?** The [PAX Cookbook site](https://microsoft.github.io/PAX-Cookbook/) (hosted on github.io) is the fastest way in — product overview, Mini-Kitchen, and a one-click path to the current download.
 
-Cookbook replaces long command examples and documentation-heavy workflows with a clean guided experience built around five simple steps:
+<br>
 
-1. **What** — choose the data to collect
-2. **When** — choose the time window
-3. **Where** — choose the output destination
-4. **Advanced** — tune optional behavior
-5. **Cook** — run the recipe
+## What you'll find
 
-The result:
-
-- faster onboarding
-- fewer configuration mistakes
-- repeatable operational consistency
-
----
-
-## Native PAX Transparency
-
-Cookbook does **not** replace PAX.
-
-PAX remains:
-
-- fully standalone
-- fully script-driven
-- fully executable outside Cookbook
-
-Cookbook simply orchestrates native commands and provides:
-
-- workflow simplification
-- execution visibility
-- operational history
-- recipe management
-
-Every cook shows the exact native PAX command being executed.
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3 align="center"><a href="https://microsoft.github.io/PAX-Cookbook/">PAX Cookbook</a></h3>
+      <p align="center"><sub>The full app</sub></p>
+      <p>A guided experience for using PAX with repeatable workflows, organized outputs, and operational structure for local runs against your tenant.</p>
+      <p align="center"><a href="https://microsoft.github.io/PAX-Cookbook/"><kbd>&nbsp;Visit the site →&nbsp;</kbd></a></p>
+    </td>
+    <td width="50%" valign="top">
+      <h3 align="center"><a href="https://microsoft.github.io/PAX-Cookbook/mini-kitchen/">Mini-Kitchen</a></h3>
+      <p align="center"><sub>Browser-only command builder</sub></p>
+      <p>A separate, browser-based helper for people running the PAX PowerShell script directly. Builds copy-ready PAX commands and <code>.paxlite</code> recipe files.</p>
+      <p align="center"><a href="https://microsoft.github.io/PAX-Cookbook/mini-kitchen/"><kbd>&nbsp;Open Mini-Kitchen →&nbsp;</kbd></a></p>
+    </td>
+  </tr>
+</table>
 
 ---
 
-## Real-Time Cook Visibility
+## What it does
 
-Watch cooks execute live through an embedded terminal experience.
+### PAX Cookbook &middot; the full app
 
-Track:
+- Guided recipe workflows for common PAX collection patterns
+- Local-first operational model — runs on your machine, against your tenant
+- Orchestrates the PAX PowerShell script without changing how it executes
+- Helps prepare credential-aware local runs
+- Organized output structure so results are easy to locate and reuse
+- Logs, history, and run management for repeatable operational use
+- Reduces script-parameter guesswork and makes PAX workflows easier to repeat
 
-- execution progress
-- validation
-- warnings
-- failures
-- runtime metrics
-- operational logs
+### Mini-Kitchen &middot; browser companion
 
-Cook History provides searchable operational visibility across prior runs.
+A separate, web-based helper for people who run the PAX PowerShell script on their own. Mini-Kitchen is **not** the PAX Cookbook app.
 
----
+- Runs entirely in your browser
+- Builds copy-ready PAX PowerShell commands from guided options
+- Surfaces warnings, assumptions, notes, and the permissions a command requires
+- Saves recipes locally in your browser and restores your latest draft
+- Exports `.paxlite` files for later import into the full Cookbook
 
-## Dashboard-Aligned Templates
-
-Cookbook includes guided templates aligned to Microsoft reporting ecosystems powered by PAX.
-
-Initial templates include:
-
-- **M365 Usage Analytics Dashboard**
-- **AI-in-One Dashboard**
-
-Templates accelerate setup while still allowing full customization.
+> **Note:** Mini-Kitchen does not run PAX, connect to your tenant, collect credentials, or validate paths or permissions. It builds commands you copy and run yourself.
 
 ---
 
-## Enterprise-Friendly by Design
+## Which one should I use?
 
-Cookbook is intentionally designed to minimize security and deployment friction.
-
-No:
-
-- installers
-- services
-- daemons
-- package managers
-- browser extensions
-- cloud-hosted infrastructure
-
-Cookbook runs locally using:
-
-- PowerShell 7+
-- Python 3.9+
-- a localhost browser experience
-
-The operational model is intentionally simple:
-
-1. Download
-2. Run PowerShell
-3. Launch Cookbook
-4. Start cooking
+| Use **Mini-Kitchen** (browser companion) when… | Use **PAX Cookbook** (the app) when… |
+| --- | --- |
+| You run the PAX PowerShell script directly. | You want a managed local workflow for PAX. |
+| You want to quickly build a copy-ready PAX command. | You need credential-aware local runs. |
+| You want to save a browser recipe or export a `.paxlite` file. | You need logs, history, and repeatable operational runs. |
 
 ---
 
-## Architecture Philosophy
+## Download
 
-PAX Cookbook is intentionally:
+The easiest way to get started is through the [PAX Cookbook site](https://microsoft.github.io/PAX-Cookbook/), where the download buttons point to the current release.
 
-- local-first
-- lightweight
-- transparent
-- minimal-dependency
-- operationally focused
+Releases are also available directly from [GitHub Releases](https://github.com/microsoft/PAX-Cookbook/releases).
 
-It is **not**:
-
-- a cloud platform
-- a workflow engine
-- a server product
-- a replacement for Power BI
-- a replacement for PAX
-
-The goal is simple:
-
-> Keep the orchestration layer thin.
-> Keep PAX authoritative.
-> Make complex workflows dramatically easier to operate.
+<p align="center">
+  <a href="https://microsoft.github.io/PAX-Cookbook/"><kbd>&nbsp;&nbsp;Open the PAX Cookbook site&nbsp;&nbsp;</kbd></a>
+</p>
 
 ---
 
-## Designed for Real Operational Work
+## Documentation
 
-PAX Cookbook is built for organizations that need:
+> **Note:** Full product documentation is coming soon. For now, the [PAX Cookbook site](https://microsoft.github.io/PAX-Cookbook/) is the best starting point for using PAX Cookbook and Mini-Kitchen.
 
-- repeatable audit collection workflows
-- operational consistency
-- easier onboarding
-- simplified rollup workflows
-- reduced CLI complexity
-- visibility into execution history
-- automation-ready operational foundations
-
-…without sacrificing the flexibility and power that made PAX valuable in the first place.
+- [PAX Cookbook site](https://microsoft.github.io/PAX-Cookbook/)
+- [Mini-Kitchen (browser companion)](https://microsoft.github.io/PAX-Cookbook/mini-kitchen/)
 
 ---
 
-## Current Status
+## Feedback
 
-PAX Cookbook is in active development.
+Issues and feedback can be submitted through [GitHub Issues](https://github.com/microsoft/PAX-Cookbook/issues).
 
-When the initial release is published, it will follow the same operational model described above — download, unzip, run from PowerShell, start cooking — with the orchestration layer remaining intentionally thin and PAX remaining authoritative.
+---
+
+<p align="center"><sub>PAX Cookbook is designed to make PAX workflows easier to understand, repeat, and operate.</sub></p>
