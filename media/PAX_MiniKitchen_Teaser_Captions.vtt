@@ -1,0 +1,201 @@
+﻿WEBVTT
+
+NOTE
+STYLE
+   ::cue {
+   font-family: Arial;
+   font-size: 50;
+   font-weight: normal;
+   text-align: center;
+   color: #ffffff;
+   background-color: #000000;
+}
+
+1
+00:00:00.000 --> 00:00:01.100
+
+
+2
+00:00:01.100 --> 00:00:07.133
+Audit, usage, and user data can answer some of the most important questions about Microsoft 365
+
+3
+00:00:07.133 --> 00:00:12.866
+and Copilot adoption. But getting that data repeatedly is where the friction starts.
+
+4
+00:00:12.866 --> 00:00:14.199
+
+
+5
+00:00:14.200 --> 00:00:20.466
+The portals are great for interactive review. But when you need repeatable exports for dashboards
+
+6
+00:00:20.466 --> 00:00:26.466
+and analysis, manual steps add up fast. And scripted exports bring their
+
+7
+00:00:26.466 --> 00:00:26.499
+
+
+8
+00:00:26.500 --> 00:00:32.933
+own setup work. Dates. Paths. Auth options. Switches. Output folders.
+
+9
+00:00:32.933 --> 00:00:33.066
+
+
+10
+00:00:33.066 --> 00:00:39.166
+Permissions. Command syntax. That setup should not be the hardest part of getting
+
+11
+00:00:39.166 --> 00:00:39.199
+
+
+12
+00:00:39.200 --> 00:00:45.200
+to insight. That is why PAX exists. PAX gives teams a
+
+13
+00:00:45.200 --> 00:00:51.400
+powerful PowerShell engine for audit and user data exports, without forcing every team to piece together
+
+14
+00:00:51.400 --> 00:00:51.433
+
+
+15
+00:00:51.433 --> 00:00:57.566
+export logic from scratch. PAX brings the engine. But someone still
+
+16
+00:00:57.566 --> 00:01:02.699
+has to build the right command. That is where PAX Cookbook Mini-Kitchen comes in.
+
+17
+00:01:02.700 --> 00:01:03.900
+
+
+18
+00:01:03.900 --> 00:01:10.033
+Mini-Kitchen is a guided browser-only command builder for PAX. It helps you choose the
+
+19
+00:01:10.033 --> 00:01:10.066
+
+
+20
+00:01:10.066 --> 00:01:16.499
+right recipe, review the options, and create a copy-ready command. Start with a dashboard
+
+21
+00:01:16.500 --> 00:01:22.700
+recipe. For example, the AI-in-One dashboard preset gives you a practical starting
+
+22
+00:01:22.700 --> 00:01:22.733
+
+
+23
+00:01:22.733 --> 00:01:28.833
+point for a real reporting workflow. From there, Mini-Kitchen guides the command
+
+24
+00:01:28.833 --> 00:01:34.299
+setup step-by-step. Choose the scenario. Set the date range.
+
+25
+00:01:34.300 --> 00:01:35.466
+
+
+26
+00:01:35.466 --> 00:01:40.866
+Review the script and output locations. Choose the authentication approach.
+
+27
+00:01:40.866 --> 00:01:42.066
+
+
+28
+00:01:42.066 --> 00:01:48.266
+Then check the generated command before you use it. Mini-Kitchen is not running the export.
+
+29
+00:01:48.266 --> 00:01:49.499
+
+
+30
+00:01:49.500 --> 00:01:55.266
+It is not connecting to your tenant. And it is not collecting credentials or secrets.
+
+31
+00:01:55.266 --> 00:01:56.499
+
+
+32
+00:01:56.500 --> 00:02:01.866
+It is helping you build the command so you can review it, copy it, and run PAX yourself.
+
+33
+00:02:01.866 --> 00:02:03.032
+
+
+34
+00:02:03.033 --> 00:02:07.966
+Users still need the right permissions when they run PAX, just like any tenant data export.
+
+35
+00:02:07.966 --> 00:02:09.199
+
+
+36
+00:02:09.200 --> 00:02:15.366
+When the command is ready, the recipe does not have to be a one-time setup. Mini-Kitchen can save
+
+37
+00:02:15.366 --> 00:02:21.466
+recipes in your browser. You can export a portable .paxlite file. And
+
+38
+00:02:21.466 --> 00:02:21.499
+
+
+39
+00:02:21.500 --> 00:02:27.800
+you can import that file later to reuse or share the recipe setup. That makes repeatable
+
+40
+00:02:27.800 --> 00:02:34.366
+export workflows easier to rebuild, review, and standardize. And when you need scheduling,
+
+41
+00:02:34.366 --> 00:02:40.632
+automation, run history, and managed local workflows, those recipes can grow into the full PAX Cookbook
+
+42
+00:02:40.633 --> 00:02:40.666
+
+
+43
+00:02:40.666 --> 00:02:46.666
+app. PAX Cookbook Mini-Kitchen. A guided path from the data you need to
+
+44
+00:02:46.666 --> 00:02:46.866
+
+
+45
+00:02:46.866 --> 00:02:53.199
+the PAX command you can run. Browser-only. Free and open source.
+
+46
+00:02:53.200 --> 00:02:54.466
+
+
+47
+00:02:54.466 --> 00:03:00.899
+Published through Microsoft on GitHub. Start at PAXcookbook.com/Mini-Kitchen.
+
