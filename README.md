@@ -10,6 +10,8 @@
 
 <h3 align="center">Turn PAX audit exports into guided, repeatable workflows.</h3>
 
+<h4 align="center">— COMING SOON —</h4>
+
 <p align="center"><sub>The PAX Cookbook app&nbsp;&nbsp;·&nbsp;&nbsp;Mini-Kitchen browser companion</sub></p>
 
 <p align="center">
