@@ -1,0 +1,279 @@
+/* PAX Cookbook - design tokens.
+ *
+ * CSS custom properties only. No selectors other than :root and the
+ * dark-mode override. No rules. Every other stylesheet reads from
+ * here; hard-coded color values must not appear elsewhere.
+ *
+ * Categories:
+ *   - Color: surfaces, text, borders, accent, status, overlay
+ *   - Space scale (4 px rhythm)
+ *   - Radius scale
+ *   - Typography (system font stacks + size scale)
+ *   - Effects (shadows, focus ring)
+ *   - Layout (topbar height, nav rail width, content max-width)
+ *
+ * Dark mode is driven exclusively by prefers-color-scheme via the
+ * @media block at the bottom. Only color tokens change in dark mode;
+ * spacing, radii, type, and layout values are constant.
+ */
+
+:root {
+    /* --- Color: surfaces ------------------------------------- */
+    --c-bg:                    #f4f4f3;   /* page background        */
+    --c-bg-surface:            #ffffff;   /* cards, tables, panels  */
+    --c-bg-surface-alt:        #f6f7f8;   /* table header, striping */
+    --c-bg-elevated:           #1f2630;   /* topbar                 */
+    --c-bg-rail:               #ffffff;   /* nav rail               */
+
+    /* --- Color: text ---------------------------------------- */
+    --c-fg:                    #1f1f1f;
+    --c-fg-muted:              #5a5a5a;
+    --c-fg-subtle:             #7e858f;
+    --c-fg-on-elevated:        #f0f1f3;   /* text on topbar         */
+    --c-fg-on-elevated-muted:  #cfd4db;
+
+    /* --- Color: borders ------------------------------------- */
+    --c-border:                #e2e3e5;
+    --c-border-strong:         #d4d5d8;
+    --c-border-topbar:         #0e1218;   /* visually anchors topbar */
+
+    /* --- Color: accent -------------------------------------- */
+    --c-accent:                #2f6ad6;
+    --c-accent-hover:          #3a78e2;
+    --c-accent-active:         #1f4ea5;
+    --c-accent-fg:             #ffffff;
+    --c-accent-soft-bg:        #e8f0fc;   /* nav active, info banner */
+
+    /* --- Color: links --------------------------------------- */
+    /* Restrained PAX navy used for every hyperlink, help-panel  */
+    /* topic anchor, row action, breadcrumb, and the active      */
+    /* nav-item accent bar. Distinct from --c-accent (which      */
+    /* still drives primary button fill, focus ring, accent      */
+    /* borders, info-banner chrome) so link text never reads as  */
+    /* generic bright browser blue.                              */
+    --c-link:                  #173B63;
+    --c-link-hover:            #0F2F57;
+    --c-link-active:           #0B2442;
+
+    /* --- Color: status -------------------------------------- */
+    --c-success:               #1b7a3b;
+    --c-success-soft:          #6dd58c;   /* used on dark surfaces  */
+    --c-success-bg:            #e6f4ea;
+    --c-warn:                  #8a6005;
+    --c-warn-bg:               #fcf5d8;
+    --c-error:                 #b91c1c;
+    --c-error-soft:            #f0a5a5;
+    --c-error-bg:              #fdecec;
+
+    /* --- Color: overlays (used on elevated/dark surfaces) --- */
+    --c-overlay-soft:          rgba(255, 255, 255, 0.06);
+    --c-overlay-hover:         rgba(255, 255, 255, 0.10);
+
+    /* --- Color: topbar action buttons (on dark topbar) ------ */
+    /* V1.S15: stronger fill + visible outline so Reload/Help/Lock */
+    /* read as real buttons against the dark topbar background.    */
+    --c-topbar-btn-bg:         rgba(255, 255, 255, 0.12);
+    --c-topbar-btn-bg-hover:   rgba(255, 255, 255, 0.20);
+    --c-topbar-btn-border:     rgba(255, 255, 255, 0.22);
+    --c-topbar-btn-border-hover: rgba(255, 255, 255, 0.34);
+
+    /* --- Color: hover on standard surfaces ------------------ */
+    --c-bg-hover:              rgba(0, 0, 0, 0.04);
+    --c-bg-hover-strong:       rgba(0, 0, 0, 0.07);
+
+    /* --- Color: log console -------------------------------- */
+    /* The cook log console is a terminal-style affordance and  */
+    /* is dark in BOTH light and dark themes. These tokens are  */
+    /* therefore constant across themes (no override below).    */
+    --c-console-bg:                  #0b0b0b;
+    --c-console-fg:                  #e6e6e6;
+    --c-console-rule:                #555555;
+    --c-console-notice:              #cccccc;
+    --c-console-notice-unavailable:  #999999;
+    --c-console-notice-error:        #f08080;
+    --c-console-notice-terminal:     #99c2ff;
+
+    /* --- Space scale (4 px rhythm) -------------------------- */
+    --space-1:                 4px;
+    --space-2:                 8px;
+    --space-3:                 12px;
+    --space-4:                 16px;
+    --space-5:                 24px;
+    --space-6:                 32px;
+    --space-7:                 48px;
+
+    /* --- Radius -------------------------------------------- */
+    --radius-s:                4px;
+    --radius-m:                6px;
+    --radius-l:                10px;
+
+    /* --- Typography ---------------------------------------- */
+    --type-sans:               -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI",
+                               Roboto, "Helvetica Neue", Arial, sans-serif;
+    --type-mono:               Consolas, "Cascadia Mono", "Source Code Pro", Menlo, monospace;
+
+    --font-12:                 12px;
+    --font-13:                 13px;
+    --font-14:                 14px;
+    --font-16:                 16px;
+    --font-20:                 20px;
+    --font-24:                 24px;
+
+    /* --- Effects ------------------------------------------- */
+    --shadow-1:                0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-2:                0 2px 8px rgba(0, 0, 0, 0.10);
+    --focus-ring:              0 0 0 2px rgba(47, 106, 214, 0.45);
+
+    /* --- Layout (constant across themes) -------------------- */
+    --topbar-h:                52px;
+    --rail-w:                  220px;
+    --rail-w-collapsed:        56px;
+    --content-max:             1280px;
+    /* Nav list left indent: scoots the nav-item icons/labels    */
+    /* right under the rail logo. Applied to .nav-list so the    */
+    /* rail width stays constant; collapsed/mobile rail clears   */
+    /* this padding via its media-query override.                */
+    --nav-indent:              32px;
+    /* V1.S15: help panel docked width on desktop. The panel is */
+    /* fixed-position; .app-body gets a matching right padding  */
+    /* when body.help-panel-open is set so main content shifts. */
+    --help-panel-w:            400px;
+
+    /* ============================================================ */
+    /* UX-1 redesign tokens                                          */
+    /*                                                                */
+    /* Additive palette + layout vocabulary for the shell redesign:  */
+    /* dark navy left rail, white top bar, light content canvas.     */
+    /* These tokens are consumed only by the new shell/Home selectors*/
+    /* appended to styles.css; pre-existing tokens above are left    */
+    /* intact so the legacy pages render unchanged through this      */
+    /* checkpoint.                                                    */
+    /* ============================================================ */
+
+    /* Brand + rail.
+       Light desktop-workspace rail: white surface, dark navy text, a
+       light-blue tint for the selected item with a royal-blue accent bar
+       and blue icon/label. Mirrors the approved Home/Recipes mockups. */
+    --ux-nav-bg:               #FFFFFF;
+    --ux-nav-bg-deep:          #F0F4FB;
+    --ux-nav-active-bg:        #E8F0FE;
+    --ux-nav-active-text:      #2563EB;
+    --ux-nav-accent:           #2563EB;
+    --ux-nav-rail-border:      #E6E9F0;
+    --ux-nav-text:             #1F2A3D;
+    --ux-nav-muted:            #6B7280;
+    --ux-nav-border:           rgba(15, 23, 42, 0.08);
+    --ux-nav-hover:            rgba(15, 23, 42, 0.045);
+
+    --ux-brand-900:            #0B1A2E;
+    --ux-brand-800:            #102744;
+    --ux-brand-700:            #173B63;
+    --ux-brand-600:            #1F4FB6;
+    --ux-chef-sky:             #4DA3FF;
+    --ux-chef-sky-soft:        #DCEEFF;
+
+    /* Surfaces */
+    --ux-surface-page:         #F5F7FB;
+    --ux-surface-card:         #FFFFFF;
+    --ux-surface-warm:         #FFF7E8;
+    --ux-surface-cool:         #F0F4FB;
+
+    /* Borders */
+    --ux-border-soft:          #E5EAF2;
+    --ux-border-strong:        #C9D2E2;
+
+    /* Text */
+    --ux-text-primary:         #0E1A2B;
+    --ux-text-secondary:       #4A5B73;
+    --ux-text-muted:           #7A8AA1;
+    --ux-text-eyebrow:         #173B63;
+
+    /* Links */
+    --ux-link:                 #173B63;
+    --ux-link-hover:            #102744;
+
+    /* Buttons */
+    --ux-button-primary-bg:    #2563EB;
+    --ux-button-primary-hover: #1D4ED8;
+    --ux-button-primary-text:  #FFFFFF;
+    --ux-button-secondary-bg:  #FFFFFF;
+    --ux-button-secondary-border: #C9D2E2;
+    --ux-button-secondary-text: #0E1A2B;
+
+    /* Status */
+    --ux-status-success:       #1B7A3B;
+    --ux-status-success-bg:    #E6F4EA;
+    --ux-status-warning:       #8A6005;
+    --ux-status-warning-bg:    #FCF5D8;
+    --ux-status-danger:        #B91C1C;
+    --ux-status-danger-bg:     #FDECEC;
+    --ux-status-info:          #1F4FB6;
+    --ux-status-info-bg:       #E8F0FC;
+
+    /* Layout overrides for the redesigned shell */
+    --ux-rail-w:               248px;
+    --ux-topbar-h:             56px;
+    --ux-card-radius:          12px;
+    --ux-card-radius-lg:       14px;
+    --ux-card-shadow:          0 1px 2px rgba(11, 26, 46, 0.04);
+
+    /* Eyebrow / type scale extensions */
+    --ux-font-eyebrow:         11px;
+    --ux-font-h1:              44px;
+    --ux-font-h2:              28px;
+    --ux-font-h3:              18px;
+    --ux-font-pill:            11px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --c-bg:                    #14171c;
+        --c-bg-surface:            #1f2329;
+        --c-bg-surface-alt:        #262a31;
+        --c-bg-elevated:           #15181c;
+        --c-bg-rail:               #1a1e23;
+
+        --c-fg:                    #e8e9ea;
+        --c-fg-muted:              #a4a9b1;
+        --c-fg-subtle:             #777c84;
+        --c-fg-on-elevated:        #f0f1f3;
+        --c-fg-on-elevated-muted:  #a8adb4;
+
+        --c-border:                #2c3138;
+        --c-border-strong:         #3a4049;
+        --c-border-topbar:         #000000;
+
+        --c-accent:                #4f8af2;
+        --c-accent-hover:          #6098f5;
+        --c-accent-active:         #2f6ad6;
+        --c-accent-fg:             #ffffff;
+        --c-accent-soft-bg:        #1c2c47;
+
+        /* Link tokens (dark theme). Slightly lifted steel-blue    */
+        /* family so navy text stays readable on dark surfaces,    */
+        /* while still reading as restrained PAX blue and not as   */
+        /* generic bright browser link blue.                       */
+        --c-link:                  #6f97c8;
+        --c-link-hover:            #8aabd4;
+        --c-link-active:           #5980b3;
+
+        --c-success:               #6dd58c;
+        --c-success-soft:          #6dd58c;
+        --c-success-bg:            #143c20;
+        --c-warn:                  #d8b75c;
+        --c-warn-bg:               #3a2f0d;
+        --c-error:                 #f0a5a5;
+        --c-error-soft:            #f0a5a5;
+        --c-error-bg:              #3a1818;
+
+        --c-overlay-soft:          rgba(255, 255, 255, 0.05);
+        --c-overlay-hover:         rgba(255, 255, 255, 0.08);
+
+        --c-bg-hover:              rgba(255, 255, 255, 0.04);
+        --c-bg-hover-strong:       rgba(255, 255, 255, 0.07);
+
+        --shadow-1:                0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow-2:                0 2px 8px rgba(0, 0, 0, 0.5);
+        --focus-ring:              0 0 0 2px rgba(79, 138, 242, 0.55);
+    }
+}

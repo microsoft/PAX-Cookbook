@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-store">
+    <title>PAX Cookbook</title>
+    <!--
+      Document icon chain. These links set the in-document favicon that
+      WebView2 surfaces in browser-style chrome. The Windows taskbar and
+      Alt-Tab icon for the appliance window are NOT taken from this chain --
+      they come from the WinForms host window icon (WebViewShell.cs realizes
+      the 256 frame via LoadImage and sends WM_SETICON ICON_BIG/ICON_SMALL)
+      and from the exe's embedded ApplicationIcon. Both resolve to the same
+      source .ico below.
+
+      The canonical PAX chef hat ships as a multi-size .ico with frames at
+      16/20/24/32/40/48/64/96/128/256, plus a standalone 256 PNG. The .ico is
+      listed FIRST so the largest matching frame is available. The PNG remains
+      in the chain (and in the manifest) as a clean 256-px source for any
+      consumer that cannot decode ICO.
+
+      /favicon.ico at the web root is a copy of the same multi-size .ico, so
+      the automatic /favicon.ico fetch also lands on the full frame set.
+
+      The .ico file is also referenced by the Start Menu / Desktop shortcut
+      IconLocation entries -- Explorer picks the best frame for each tile size.
+    -->
+    <link rel="icon" type="image/x-icon" sizes="16x16 20x20 24x24 32x32 40x40 48x48 64x64 96x96 128x128 256x256" href="images/pax-cookbook-app-icon.ico?v=x16cgatefix6">
+    <link rel="icon" type="image/png" sizes="256x256" href="images/pax-cookbook-app-icon-256.png?v=uxr11">
+    <link rel="manifest" href="manifest.webmanifest?v=uxr11">
+    <link rel="stylesheet" href="assets/tokens.css?v=ux10a">
+    <link rel="stylesheet" href="assets/styles.css?v=ux10g">
+    <style>
+      /* The integrated content iframe fills the main content area edge to
+         edge; the React surface manages its own inner padding and scroll. */
+      #page-root.app-main { padding: 0; overflow: hidden; display: flex; }
+      #mk-content-frame { flex: 1 1 auto; width: 100%; height: 100%; border: 0; display: block; }
+    </style>
+    <script src="assets/boot.js?v=uxr8"></script>
+    <script defer src="assets/api.js?v=uxr8"></script>
+    <script defer src="assets/manual-cook-reauth.js?v=x16c"></script>
+    <script defer src="assets/broker-status.js?v=uxr8"></script>
+    <script defer src="assets/notifications.js?v=uxr22"></script>
+    <script defer src="vendor/ajv/ajv.bundle.js?v=uxr8"></script>
+    <script defer src="assets/permissions-catalog.js?v=uxr8"></script>
+    <script defer src="assets/permissions-resolver.js?v=uxr8"></script>
+    <script defer src="assets/permissions-viewer.js?v=uxr8"></script>
+    <script defer src="assets/help-panel.js?v=ux6c"></script>
+    <script defer src="assets/close-app.js?v=x16cgatefix7"></script>
+    <script defer src="assets/lock-overlay.js?v=uxr19"></script>
+    <script defer src="assets/pax-engine-overlay.js?v=x16cgate2"></script>
+    <script defer src="assets/integrated-shell.js?v=ux9d"></script>
+</head>
+<body class="ux-redesign">
+    <a class="skip-link" href="#page-root">Skip to main content</a>
+    <noscript>
+        <p class="noscript-notice">PAX Cookbook is a local-first appliance and requires JavaScript to render the appliance surface. Enable scripting for this origin and reload.</p>
+    </noscript>
+    <div class="app">
+        <header class="topbar">
+            <a href="#/home" class="nav-rail-brand" aria-label="PAX Cookbook home">
+                <img src="images/pax-cookbook-logo-horizontal-blue.png" alt="PAX Cookbook" class="topbar-logo">
+            </a>
+            <div class="topbar-actions" role="group" aria-label="Application actions">
+                <button id="reload-button" type="button" class="btn-topbar" title="Refresh the current page from the broker.">
+                    <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-reload"></use></svg>
+                    <span class="topbar-btn-label">Reload</span>
+                </button>
+                <button id="help-button" type="button" class="btn-topbar" aria-haspopup="dialog" aria-controls="help-panel" aria-expanded="false">
+                    <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-help"></use></svg>
+                    <span class="topbar-btn-label">Help</span>
+                </button>
+                <button id="lock-session-button" type="button" class="btn-topbar" title="Clear this session and return to the launcher.">
+                    <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-lock"></use></svg>
+                    <span class="topbar-btn-label">Lock Session</span>
+                </button>
+                <button id="close-app-button" type="button" class="btn-topbar btn-topbar-danger" title="Close the Cookbook window or stop the server.">
+                    <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-power"></use></svg>
+                    <span class="topbar-btn-label">Close App</span>
+                </button>
+            </div>
+        </header>
+        <div class="app-body">
+            <nav class="nav-rail" aria-label="Primary navigation">
+                <ul class="nav-list">
+                    <li>
+                        <a href="#/home" class="nav-item">
+                            <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="#icon-nav-home"></use></svg>
+                            <span class="nav-label">Home</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#/recipes" class="nav-item">
+                            <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="#icon-recipes"></use></svg>
+                            <span class="nav-label">Recipes</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#/bakes" class="nav-item">
+                            <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="#icon-bakes"></use></svg>
+                            <span class="nav-label">Bakes</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#/pantry" class="nav-item">
+                            <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="#icon-pantry"></use></svg>
+                            <span class="nav-label">Pantry</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#/keys" class="nav-item">
+                            <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="#icon-keys"></use></svg>
+                            <span class="nav-label">Chef&rsquo;s Keys</span>
+                        </a>
+                    </li>
+                    <li class="nav-sep" role="separator" aria-hidden="true"></li>
+                    <li>
+                        <a href="#/settings" class="nav-item">
+                            <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="#icon-settings"></use></svg>
+                            <span class="nav-label">Settings</span>
+                        </a>
+                    </li>
+                </ul>
+                <div class="nav-rail-bottom">
+                </div>
+            </nav>
+            <main id="page-root" class="app-main" tabindex="-1">
+                <iframe id="mk-content-frame" title="PAX Cookbook" src="about:blank"></iframe>
+            </main>
+        </div>
+        <footer class="app-footer" aria-label="Appliance status summary">
+            <div class="app-footer-left">
+                <span id="app-footer-dot" class="app-footer-dot" aria-hidden="true"></span>
+                <span id="app-footer-state" class="app-footer-state">Checking status&hellip;</span>
+            </div>
+            <div class="app-footer-center">
+                <svg class="app-footer-shield" aria-hidden="true" focusable="false"><use href="#icon-trust-lock"></use></svg>
+                <span>Tenant data stays in your environment</span>
+            </div>
+            <div class="app-footer-right">
+                <span class="app-footer-meta">Workspace:</span>
+                <span id="app-footer-workspace" class="app-footer-meta app-footer-workspace">Checking&hellip;</span>
+                <span class="app-footer-sep" aria-hidden="true">&bull;</span>
+                <span id="app-footer-app" class="app-footer-meta">App</span>
+                <span class="app-footer-sep" aria-hidden="true">&bull;</span>
+                <span id="app-footer-pax" class="app-footer-meta">PAX Engine</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Help panel: slide-out right-side companion. Built and managed by help-panel.js.
+         The shell renders only the structural skeleton + dismissable backdrop; topic
+         content is injected from the registry on open. Hidden by default. -->
+    <aside id="help-panel" class="help-panel" hidden aria-hidden="true" aria-labelledby="help-panel-title" role="dialog" aria-modal="false">
+        <header class="help-panel-header">
+            <button type="button" id="help-panel-home" class="help-panel-icon-btn" title="Help home" aria-label="Help home">
+                <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-home"></use></svg>
+            </button>
+            <h2 id="help-panel-title" class="help-panel-title">Help</h2>
+            <button type="button" id="help-panel-close" class="help-panel-icon-btn" title="Close help panel" aria-label="Close help panel">
+                <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-close"></use></svg>
+            </button>
+        </header>
+        <div class="help-panel-search-row">
+            <label class="help-panel-search-label" for="help-panel-search">
+                <svg class="help-panel-search-icon" aria-hidden="true" focusable="false"><use href="#icon-search"></use></svg>
+                <input type="search" id="help-panel-search" class="help-panel-search-input" placeholder="Search help topics" autocomplete="off" aria-label="Search help topics">
+            </label>
+        </div>
+        <div id="help-panel-body" class="help-panel-body" tabindex="-1"></div>
+    </aside>
+    <div id="help-panel-scrim" class="help-panel-scrim" hidden></div>
+
+    <!-- Close confirmation modal. Built and managed by close-app.js.
+         Hidden by default. Every close path opens this same modal: the
+         topbar Close App button, the native window X, the taskbar
+         right-click Close, and Alt+F4. The native shell intercepts the
+         window-close request and asks this modal to open (via a WebView2
+         host message); the modal's buttons send the operator's choice
+         back to the shell. -->
+    <aside id="close-app-modal" class="close-app-modal" hidden role="dialog" aria-modal="true" aria-labelledby="close-app-modal-title" aria-describedby="close-app-modal-body">
+        <header class="close-app-modal-header">
+            <h2 id="close-app-modal-title" class="close-app-modal-title">Close PAX Cookbook?</h2>
+        </header>
+        <div id="close-app-modal-body" class="close-app-modal-body">
+            <p>PAX Cookbook can keep running in the background so bakes can continue, or you can close it completely.</p>
+            <p>Closing the app will stop the local Cookbook server and stop any bakes that are currently running.</p>
+        </div>
+        <footer class="close-app-modal-footer">
+            <button type="button" id="close-app-cancel" class="close-app-btn close-app-btn-neutral">Cancel</button>
+            <button type="button" id="close-app-minimize" class="close-app-btn close-app-btn-secondary">Minimize to tray</button>
+            <button type="button" id="close-app-confirm" class="close-app-btn close-app-btn-danger">Close app</button>
+        </footer>
+    </aside>
+    <div id="close-app-modal-scrim" class="close-app-modal-scrim" hidden></div>
+
+    <svg class="icon-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="icon-recipes" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 4.5C6.5 3.5 4.5 3 2.5 3.5v9c2-.5 4 0 5.5 1 1.5-1 3.5-1.5 5.5-1v-9C11.5 3 9.5 3.5 8 4.5z M8 4.5v9"/>
+        </symbol>
+        <symbol id="icon-pantry" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M3.5 2.5h9v1.5h-9z M4 4h8v9.5H4z M6 7h4 M6 9.5h4"/>
+        </symbol>
+        <symbol id="icon-runs" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 2.5a5.5 5.5 0 1 1-5.3 4 M2.5 2.5v3h3 M8 5v3l2 1.5"/>
+        </symbol>
+        <symbol id="icon-bakes" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M2.5 2.5h11v11h-11z M2.5 6h11 M4.5 4.25h.1 M6.5 4.25h.1 M11.5 4.25h.1 M4.5 9.5h7"/>
+        </symbol>
+        <symbol id="icon-tastes" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M5.5 2h5 M6 2v3.5L3 12a1 1 0 0 0 .9 1.5h8.2a1 1 0 0 0 .9-1.5L10 5.5V2 M4.5 9.5h7"/>
+        </symbol>
+        <symbol id="icon-keys" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M6.5 10.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6z M9.5 7.5h5 M13 7.5v2 M11.5 7.5v1.5"/>
+        </symbol>
+        <symbol id="icon-nav-home" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M2.5 8L8 3l5.5 5 M4 7.5v6h8v-6 M7 13.5v-3h2v3"/>
+        </symbol>
+        <symbol id="icon-settings" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M9.5 1.5h-3l-.3 1.7a5 5 0 0 0-1.3.55l-1.4-1-2.1 2.1 1 1.4a5 5 0 0 0-.55 1.3L.5 7.5v1l1.7.3a5 5 0 0 0 .55 1.3l-1 1.4 2.1 2.1 1.4-1a5 5 0 0 0 1.3.55l.3 1.7h3l.3-1.7a5 5 0 0 0 1.3-.55l1.4 1 2.1-2.1-1-1.4a5 5 0 0 0 .55-1.3l1.7-.3v-1l-1.7-.3a5 5 0 0 0-.55-1.3l1-1.4-2.1-2.1-1.4 1a5 5 0 0 0-1.3-.55z M10 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0z"/>
+        </symbol>
+        <symbol id="icon-auth" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 1.5l5 2v4.5c0 3.4-2.2 5.8-5 6.5-2.8-.7-5-3.1-5-6.5V3.5z M6 8.5l1.5 1.5L10.5 7"/>
+        </symbol>
+        <symbol id="icon-trust-shield" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 1.5l5 2v4.5c0 3.4-2.2 5.8-5 6.5-2.8-.7-5-3.1-5-6.5V3.5z"/>
+        </symbol>
+        <symbol id="icon-trust-check" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 1.5l5 2v4.5c0 3.4-2.2 5.8-5 6.5-2.8-.7-5-3.1-5-6.5V3.5z M5.5 8L7 9.5 10.5 6"/>
+        </symbol>
+        <symbol id="icon-trust-lock" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M4 7.5h8a.5.5 0 0 1 .5.5v5.5a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V8a.5.5 0 0 1 .5-.5z M5.5 7.5V5a2.5 2.5 0 0 1 5 0v2.5"/>
+        </symbol>
+        <symbol id="icon-trust-doc" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M4 2h6l2 2v10H4z M10 2v2h2 M5.5 7h5 M5.5 9.5h5 M5.5 12h3"/>
+        </symbol>
+        <symbol id="icon-folder" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M2 4.5a.5.5 0 0 1 .5-.5h3l1.5 1.5h6.5a.5.5 0 0 1 .5.5v6.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5V4.5z"/>
+        </symbol>
+        <symbol id="icon-status-workspace" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M2 4.5a.5.5 0 0 1 .5-.5h3l1.5 1.5h6.5a.5.5 0 0 1 .5.5v6.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5V4.5z"/>
+        </symbol>
+        <symbol id="icon-status-code" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M5 5L2.5 8 5 11 M11 5l2.5 3L11 11 M9.5 4l-3 8"/>
+        </symbol>
+        <symbol id="icon-status-bake" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 14.5a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13z M5.5 8L7 9.5 10.5 6"/>
+        </symbol>
+        <symbol id="icon-status-search" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M7 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z M10.5 10.5l3 3"/>
+        </symbol>
+        <symbol id="icon-status-key" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M10.5 6.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M10.5 6.5L14 6.5 M13 6.5v2 M11.5 6.5v1.5"/>
+        </symbol>
+        <symbol id="icon-status-updates" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M13.5 3.5v3h-3 M13 6a5 5 0 1 0 1.3 5.2"/>
+        </symbol>
+        <symbol id="icon-status-shortcuts" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M2.5 3h11a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-7a.5.5 0 0 1 .5-.5z M5 13.5h6 M8 11v2.5"/>
+        </symbol>
+        <symbol id="icon-card-ai" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 2l1.2 2.8L12 6l-2.8 1.2L8 10 6.8 7.2 4 6l2.8-1.2z M12 11l.6 1.4L14 13l-1.4.6L12 15l-.6-1.4L10 13l1.4-.6z"/>
+        </symbol>
+        <symbol id="icon-card-chart" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M2.5 13.5h11 M4 13V9 M7 13V5.5 M10 13V8 M13 13V6.5"/>
+        </symbol>
+        <symbol id="icon-card-users" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M6 6.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0z M14 6.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0z M1 13c0-1.7 1.3-3 3-3s3 1.3 3 3 M9 13c0-1.7 1.3-3 3-3s3 1.3 3 3"/>
+        </symbol>
+        <symbol id="icon-clipboard" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M5 3.5h6v1.5h-6z M4 4h-.5a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5H12 M5.5 8h5 M5.5 10.5h5"/>
+        </symbol>
+        <symbol id="icon-chevron-right" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+                  d="M6 4l4 4-4 4"/>
+        </symbol>
+        <symbol id="icon-success" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 14.5a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13z M5 8L7 10 11 6"/>
+        </symbol>
+        <symbol id="icon-failed" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 14.5a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13z M5.5 5.5l5 5 M10.5 5.5l-5 5"/>
+        </symbol>
+        <symbol id="icon-help" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 14.5a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13z M5.7 6.2a2.3 2.3 0 0 1 4.6 0c0 1.4-1.5 1.8-2.1 2.5-.3.4-.3.9-.3 1.3 M8 11.6v0.1"/>
+        </symbol>
+        <symbol id="icon-lock" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M4 7.5h8a.5.5 0 0 1 .5.5v5.5a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V8a.5.5 0 0 1 .5-.5z M5.5 7.5V5a2.5 2.5 0 0 1 5 0v2.5 M8 10v1.5"/>
+        </symbol>
+        <symbol id="icon-reload" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M13.5 3.5v3h-3 M13 6a5 5 0 1 0 1.3 5.2"/>
+        </symbol>
+        <symbol id="icon-close" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                  d="M4 4l8 8 M12 4l-8 8"/>
+        </symbol>
+        <symbol id="icon-home" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M2.5 8L8 3l5.5 5 M4 7.5v6h8v-6 M7 13.5v-3h2v3"/>
+        </symbol>
+        <symbol id="icon-search" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M7 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z M10.5 10.5l3 3"/>
+        </symbol>
+        <symbol id="icon-question" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 14.5a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13z M5.7 6.2a2.3 2.3 0 0 1 4.6 0c0 1.4-1.5 1.8-2.1 2.5-.3.4-.3.9-.3 1.3 M8 11.6v0.1"/>
+        </symbol>
+        <symbol id="icon-power" viewBox="0 0 16 16">
+            <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+                  d="M5 4.5a5 5 0 1 0 6 0 M8 2v6"/>
+        </symbol>
+    </svg>
+</body>
+</html>
+

@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Exe (console subsystem) is retained so command-mode invocations
+         (status/stop/version/protocol) still write to a parent console.
+         WinForms message-loop usage is opt-in inside the WebView2 host
+         and does not require WinExe. -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>PAXCookbook</RootNamespace>
+    <AssemblyName>PAXCookbook</AssemblyName>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+    <!-- MSB3277: Microsoft.Web.WebView2 ships both WinForms and WPF
+         assemblies; the WPF DLL references WindowsBase 5.0 while .NET 8
+         ships 4.0. We do NOT use the WPF surface (UseWPF=false) so the
+         resolved 4.0 is correct and the conflict warning is benign. -->
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    <!-- Phase 8: app icon foundation. The .ico is used both as the EXE's
+         embedded icon (ApplicationIcon) and as an embedded resource so
+         the WinForms HostForm can apply it to the window/taskbar. -->
+    <ApplicationIcon>Resources\PAXCookbook.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Expose internal members (e.g. NativeBrokerHost.SelectPort) to
+         the unit-test assembly so port-selection logic can be unit-
+         tested without making the helper public. -->
+    <InternalsVisibleTo Include="PAXCookbook.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\PAXCookbook.ico">
+      <LogicalName>PAXCookbook.Resources.PAXCookbook.ico</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PAXCookbook.Shared\PAXCookbook.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Microsoft Edge WebView2 Evergreen runtime is consumed at runtime
+         (NOT bundled). This package only ships the managed wrapper and
+         the loader; the actual browser runtime is detected by
+         WebView2RuntimeDetector before any window is created. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3967.48" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Option C native broker host. The in-process Kestrel server
+         replaces the spawned pwsh.exe broker so there is no visible
+         console window. Framework reference (not a PackageReference)
+         because the runtime is already provided by the
+         Microsoft.WindowsDesktop.App shared framework alongside
+         Microsoft.NETCore.App. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- Stage 3c: read-only SQLite workspace surface for the native
+         broker. Version 8.0.10 matches the Microsoft.Data.Sqlite.dll
+         bundled under app\lib\sqlite for the PowerShell broker, so
+         the two implementations see identical SQLite semantics during
+         the parallel-implementation window before the production
+         switch in Stage 3j. The bundled DLLs are kept in place for
+         the PowerShell broker until that switch lands. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+  </ItemGroup>
+</Project>

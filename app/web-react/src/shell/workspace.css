@@ -1,0 +1,3241 @@
+/*
+ * Desktop workspace visual system for the Home dashboard and Recipes
+ * workspace. All classes are namespaced `dvw-*` (desktop visual workspace) so
+ * they never collide with the legacy chrome or the Mini-Kitchen builder.
+ *
+ * Built on the React token system (tokens.css). Light theme by default with a
+ * dark adaptation via prefers-color-scheme. Nothing here is behavioral.
+ */
+
+/* Embed-mode full-bleed override for workspace surfaces whose content root
+   carries the .dvw class (Home, Recipes, Taste Tests). These pages span the
+   whole window width; the capped pages (Bakes, Pantry, Chef's Keys, Settings,
+   Updates) keep the default capped column from .app--embed .app-main in
+   shell.css. */
+.app--embed .app-main:has(.dvw) {
+  max-width: none;
+  margin-inline: 0;
+  padding: var(--sp-7) clamp(20px, 3vw, 36px) var(--sp-10);
+}
+
+.dvw {
+  --dvw-gap: var(--sp-5);
+  color: var(--c-ink);
+  font-family: var(--font-sans);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* ----------------------------------------------------------------- */
+/* Header                                                             */
+/* ----------------------------------------------------------------- */
+.dvw-head {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  overflow: hidden;
+}
+
+.dvw-head__text {
+  min-width: 0;
+}
+
+.dvw-head__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-family: var(--font-display, var(--font-sans));
+  font-size: var(--fs-32);
+  line-height: var(--lh-tight, 1.15);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--c-ink-strong, var(--c-ink));
+}
+
+.dvw-head__hat {
+  font-size: 1.6rem;
+  color: var(--c-blue);
+}
+
+.dvw-head__lede {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-15, var(--fs-14));
+  color: var(--c-muted);
+  max-width: 60ch;
+}
+
+.dvw-head__art {
+  flex: 0 0 auto;
+  width: clamp(176px, 21vw, 264px);
+  height: auto;
+  opacity: 1;
+  pointer-events: none;
+}
+
+/* ----------------------------------------------------------------- */
+/* Command bar + buttons                                              */
+/* ----------------------------------------------------------------- */
+.dvw-commandbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.dvw-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  min-height: 38px;
+  border: 1px solid var(--c-btn-secondary-border);
+  border-radius: var(--r-md);
+  background: var(--c-card);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.dvw-btn:hover {
+  background: var(--c-btn-secondary-bg-hover);
+  border-color: var(--c-btn-secondary-border-hover);
+}
+
+.dvw-btn:focus-visible {
+  outline: 2px solid var(--c-blue);
+  outline-offset: 2px;
+}
+
+.dvw-btn:disabled,
+.dvw-btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dvw-btn--primary {
+  background: var(--c-btn-primary);
+  border-color: var(--c-btn-primary-border);
+  color: var(--c-btn-primary-text);
+}
+
+.dvw-btn--primary:hover {
+  background: var(--c-btn-primary-hover);
+  border-color: var(--c-btn-primary-border);
+}
+
+.dvw-btn--primary:active {
+  background: var(--c-btn-primary-active);
+  border-color: var(--c-btn-primary-border);
+}
+
+.dvw-btn--bake {
+  background: var(--c-btn-primary);
+  border-color: var(--c-btn-primary-border);
+  color: var(--c-btn-primary-text);
+}
+
+.dvw-btn--bake:hover {
+  background: var(--c-btn-primary-hover);
+  border-color: var(--c-btn-primary-border);
+}
+
+.dvw-btn--bake:active {
+  background: var(--c-btn-primary-active);
+  border-color: var(--c-btn-primary-border);
+}
+
+.dvw-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.dvw-btn--ghost:hover {
+  background: var(--c-btn-secondary-bg-hover);
+  border-color: var(--c-btn-secondary-border);
+}
+
+/* Destructive: a filled red for a committed delete (mirrors the modal danger
+   button), and a quiet danger-tinted variant for a control that initiates a
+   destructive or stop action — subtle at rest, filling red on hover. */
+.dvw-btn--danger {
+  background: var(--c-btn-danger);
+  border-color: var(--c-btn-danger);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.dvw-btn--danger:hover {
+  background: var(--c-btn-danger-hover);
+  border-color: var(--c-btn-danger-hover);
+}
+
+.dvw-btn--danger-ghost {
+  background: transparent;
+  border-color: var(--c-btn-danger-quiet);
+  color: var(--c-btn-danger-quiet);
+}
+
+.dvw-btn--danger-ghost:hover {
+  background: var(--c-btn-danger);
+  border-color: var(--c-btn-danger);
+  color: #fff;
+}
+
+/* Active/selected state: the Advanced button while its fly-in panel is open. */
+.dvw-btn--active {
+  background: var(--c-blue-soft);
+  border-color: var(--c-blue);
+  color: var(--c-blue);
+}
+
+/* Keep the selected tint on hover (the base .dvw-btn:hover would otherwise
+   wash it out to the neutral elev surface). */
+.dvw-btn--active:hover {
+  background: var(--c-blue-soft);
+  border-color: var(--c-blue-strong, var(--c-blue));
+}
+
+.dvw-btn--icon {
+  padding: var(--sp-2);
+  width: 38px;
+  justify-content: center;
+}
+
+.dvw-btn__icon {
+  font-size: 1.05rem;
+}
+
+/* Import Recipe dropdown in the Home command bar. The chevron sits inside the
+   trigger button; the menu floats below it and closes on Escape / outside-click. */
+.dvw-import-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.dvw-btn__chevron {
+  width: 0.8em;
+  height: 0.8em;
+  margin-left: 2px;
+}
+
+.dvw-import-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-surface, var(--c-page));
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2, 0 4px 16px rgba(0, 0, 0, 0.18));
+  padding: 4px;
+}
+
+.dvw-import-menu__item {
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  padding: 8px 10px;
+  border-radius: var(--r-sm, 6px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dvw-import-menu__item:hover {
+  background: var(--c-elev-1, var(--c-page));
+}
+
+/* Transient inline note shown at the bottom of the recipe detail card's
+   actions block after an export. */
+.dvw-export-status {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--c-muted);
+}
+
+.dvw-export-status--error {
+  color: var(--c-danger, #dc2626);
+}
+
+/* ----------------------------------------------------------------- */
+/* Cards (shared)                                                     */
+/* ----------------------------------------------------------------- */
+.dvw-card {
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.dvw-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.dvw-card__title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 700;
+  color: var(--c-ink-strong, var(--c-ink));
+}
+
+.dvw-card__muted {
+  margin: 0;
+  color: var(--c-muted);
+  font-size: var(--fs-14);
+}
+
+.dvw-card__foot {
+  margin-top: auto;
+  padding-top: var(--sp-2);
+}
+
+.dvw-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-blue);
+  cursor: pointer;
+}
+
+.dvw-link:hover {
+  text-decoration: underline;
+}
+
+.dvw-link:focus-visible {
+  outline: 2px solid var(--c-blue);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.dvw-link__icon {
+  font-size: 1rem;
+}
+
+/* ----------------------------------------------------------------- */
+/* Status grid + cards                                                */
+/* ----------------------------------------------------------------- */
+.dvw-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-4);
+}
+
+.dvw-status-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    'icon title'
+    'icon state'
+    'detail detail';
+  align-items: start;
+  align-content: start;
+  gap: 2px var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.dvw-status-card__icon {
+  grid-area: icon;
+  font-size: 1.4rem;
+  display: inline-flex;
+  align-self: center;
+}
+
+.dvw-status-card__title {
+  grid-area: title;
+  font-size: var(--fs-12);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-muted);
+  font-weight: 600;
+}
+
+.dvw-status-card__state {
+  grid-area: state;
+  font-size: var(--fs-16);
+  font-weight: 700;
+  color: var(--c-ink-strong, var(--c-ink));
+}
+
+.dvw-status-card__detail {
+  grid-area: detail;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-13, var(--fs-12));
+  color: var(--c-muted);
+}
+
+.dvw-status-card--ready {
+  border-left-color: var(--c-green);
+}
+.dvw-status-card--ready .dvw-status-card__icon {
+  color: var(--c-green);
+}
+
+.dvw-status-card--attention {
+  border-left-color: var(--c-amber);
+}
+.dvw-status-card--attention .dvw-status-card__icon {
+  color: var(--c-amber);
+}
+
+.dvw-status-card--neutral {
+  border-left-color: var(--c-slate);
+}
+.dvw-status-card--neutral .dvw-status-card__icon {
+  color: var(--c-slate);
+}
+
+.dvw-status-card--unknown {
+  border-left-color: var(--c-border-strong);
+}
+.dvw-status-card--unknown .dvw-status-card__icon {
+  color: var(--c-subtle, var(--c-muted));
+}
+
+/* Bakes trigger chip (manual vs scheduled). Scheduled is visually distinct. */
+.bk-trigger {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid var(--c-border-strong, var(--c-border));
+  color: var(--c-muted);
+  background: var(--c-elev-1, var(--c-page));
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.bk-trigger--scheduled {
+  border-color: var(--c-blue);
+  color: var(--c-blue);
+  background: var(--c-blue-soft, rgba(37, 99, 235, 0.1));
+}
+.bk-trigger--resume {
+  border-color: var(--c-amber);
+  color: var(--c-amber-strong, var(--c-amber));
+  background: var(--c-amber-soft, rgba(245, 158, 11, 0.12));
+}
+
+/* ----------------------------------------------------------------- */
+/* Status badges                                                      */
+/* ----------------------------------------------------------------- */
+.dvw-badge {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.dvw-badge--ready {
+  background: var(--c-green-soft, rgba(22, 163, 74, 0.12));
+  color: var(--c-green);
+  border-color: rgba(22, 163, 74, 0.25);
+}
+
+.dvw-badge--attention {
+  background: var(--c-amber-soft, rgba(245, 158, 11, 0.14));
+  color: #9a6700;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.dvw-badge--draft {
+  background: var(--c-elev-1, rgba(71, 85, 105, 0.1));
+  color: var(--c-slate);
+  border-color: var(--c-border);
+}
+
+/* ----------------------------------------------------------------- */
+/* Last Bake summary + system health                                  */
+/* ----------------------------------------------------------------- */
+.dvw-lastbake {
+  border-left: 3px solid var(--c-blue);
+}
+
+.dvw-lastbake__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.dvw-lastbake__recipe {
+  font-size: var(--fs-18, var(--fs-16));
+  font-weight: 700;
+  color: var(--c-ink-strong, var(--c-ink));
+}
+
+.dvw-lastbake__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+}
+
+.dvw-lastbake__metaitem {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.dvw-lastbake__metalabel {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-subtle, var(--c-muted));
+}
+
+.dvw-lastbake__metavalue {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+.dvw-lastbake__ago {
+  color: var(--c-muted);
+}
+
+.dvw-lastbake__file {
+  font-weight: 600;
+}
+
+.dvw-lastbake__size {
+  color: var(--c-muted);
+}
+
+.dvw-lastbake__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.dvw-lastbake__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+/* Dashboard target pill (AI-in-One / AI Business Value). */
+.dvw-dash-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--c-blue);
+  background: var(--c-blue-soft, rgba(37, 99, 235, 0.1));
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  white-space: nowrap;
+}
+
+/* Color-coded bake status badge (Bakes-page convention). */
+.dvw-bake-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.dvw-bake-badge__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dvw-bake-badge--success {
+  color: var(--c-green);
+  background: var(--c-green-soft, rgba(22, 163, 74, 0.12));
+  border-color: rgba(22, 163, 74, 0.25);
+}
+
+.dvw-bake-badge--warning {
+  color: #9a6700;
+  background: var(--c-amber-soft, rgba(245, 158, 11, 0.14));
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.dvw-bake-badge--error {
+  color: var(--c-danger);
+  background: var(--c-danger-soft, rgba(220, 38, 38, 0.1));
+  border-color: rgba(220, 38, 38, 0.25);
+}
+
+.dvw-bake-badge--running {
+  color: var(--c-blue);
+  background: var(--c-blue-soft, rgba(37, 99, 235, 0.1));
+  border-color: rgba(37, 99, 235, 0.25);
+}
+
+.dvw-bake-badge--neutral {
+  color: var(--c-slate);
+  background: var(--c-elev-1, rgba(71, 85, 105, 0.1));
+  border-color: var(--c-border);
+}
+
+/* Compact one-line system health indicator below the Last Bake card. */
+.dvw-syshealth {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.dvw-syshealth__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dvw-syshealth--ok {
+  color: var(--c-green);
+  margin: 0;
+}
+
+.dvw-syshealth--attention {
+  color: var(--c-amber-strong, var(--c-amber));
+  cursor: pointer;
+}
+
+.dvw-syshealth--attention:hover {
+  text-decoration: underline;
+}
+
+.dvw-syshealth--attention:focus-visible {
+  outline: 2px solid var(--c-amber);
+  outline-offset: 2px;
+  border-radius: var(--r-sm, 4px);
+}
+
+/* ----------------------------------------------------------------- */
+/* Home panels                                                        */
+/* ----------------------------------------------------------------- */
+.dvw-home__panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+/* Left column of the home panels: stacks Recent Recipes with the
+   "What needs attention" card beneath it, both matching the column width. */
+.dvw-home__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.dvw-recipe-list,
+.dvw-attention__list,
+.dvw-tips__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.dvw-recipe-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-md);
+}
+
+.dvw-recipe-row:hover {
+  background: var(--c-elev-1, var(--c-page));
+}
+
+.dvw-recipe-row__main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.dvw-recipe-row__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 1.2rem;
+  color: var(--c-blue);
+}
+
+.dvw-recipe-row__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dvw-recipe-row__name {
+  font-weight: 600;
+  font-size: var(--fs-14);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dvw-recipe-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.dvw-recipe-row__meta {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+.dvw-recipe-row__meta--success {
+  color: var(--c-green);
+}
+
+.dvw-recipe-row__meta--error {
+  color: var(--c-danger);
+}
+
+.dvw-recipe-row__meta--warning {
+  color: var(--c-amber-strong, var(--c-amber));
+}
+
+.dvw-recipe-row__meta--muted {
+  color: var(--c-muted);
+}
+
+.dvw-recipe-row__more {
+  color: var(--c-subtle, var(--c-muted));
+  font-size: 1.05rem;
+}
+
+/* Recent Outputs list (right column of the home two-column row). */
+.dvw-outputs__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.dvw-outputs__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  border-radius: var(--r-md);
+}
+
+.dvw-outputs__row:hover {
+  background: var(--c-elev-1, var(--c-page));
+}
+
+.dvw-outputs__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 1.1rem;
+  color: var(--c-amber-strong, var(--c-amber));
+}
+
+.dvw-outputs__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dvw-outputs__name {
+  font-weight: 600;
+  font-size: var(--fs-14);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dvw-outputs__meta {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+/* Attention panel */
+.dvw-attention__clear {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.dvw-attention__clear-icon {
+  font-size: 1.4rem;
+  color: var(--c-green);
+}
+
+.dvw-attention__row--error .dvw-attention__icon {
+  color: var(--c-danger);
+}
+
+.dvw-attention__row--warning .dvw-attention__icon {
+  color: var(--c-amber-strong, var(--c-amber));
+}
+
+.dvw-attention__row--info .dvw-attention__icon {
+  color: var(--c-blue);
+}
+
+.dvw-attention__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  border-radius: var(--r-md);
+}
+
+.dvw-attention__row:hover {
+  background: var(--c-elev-1, var(--c-page));
+}
+
+.dvw-attention__icon {
+  font-size: 1.2rem;
+  color: var(--c-amber);
+  flex: 0 0 auto;
+}
+
+.dvw-attention__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.dvw-attention__title {
+  font-weight: 600;
+  font-size: var(--fs-14);
+}
+
+.dvw-attention__sub {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+.dvw-attention__chev {
+  color: var(--c-subtle, var(--c-muted));
+}
+
+/* Quick tips panel */
+.dvw-tips__hat {
+  color: var(--c-blue);
+  font-size: 1.3rem;
+}
+
+.dvw-tips__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.dvw-tips__icon {
+  font-size: 1.2rem;
+  color: var(--c-blue);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.dvw-tips__text {
+  display: flex;
+  flex-direction: column;
+}
+
+.dvw-tips__title {
+  font-weight: 600;
+  font-size: var(--fs-14);
+}
+
+.dvw-tips__detail {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+/* ----------------------------------------------------------------- */
+/* Recipes workspace layout                                           */
+/* ----------------------------------------------------------------- */
+.dvw-recipes__cols {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.3fr) minmax(280px, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.dvw-editor-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.dvw-editor-bar__title {
+  font-size: var(--fs-18);
+  font-weight: 650;
+  color: var(--c-ink);
+}
+
+.dvw-editor-bar__art {
+  margin-left: auto;
+  width: clamp(56px, 7vw, 84px);
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* List pane */
+.dvw-list__search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-page);
+}
+
+.dvw-list__search-icon {
+  color: var(--c-muted);
+  font-size: 1.05rem;
+}
+
+.dvw-list__search-input {
+  flex: 1 1 auto;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+  outline: none;
+}
+
+.dvw-list__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.dvw-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.dvw-list__row:hover {
+  background: var(--c-elev-1, var(--c-page));
+}
+
+.dvw-list__row--selected {
+  background: var(--c-blue-soft, rgba(37, 99, 235, 0.1));
+  border-color: var(--c-blue-edge, rgba(37, 99, 235, 0.25));
+  box-shadow: inset 3px 0 0 var(--c-blue);
+}
+
+.dvw-list__row-icon {
+  font-size: 1.2rem;
+  color: var(--c-blue);
+  flex: 0 0 auto;
+}
+
+.dvw-list__row-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dvw-list__row-name {
+  font-weight: 600;
+  font-size: var(--fs-14);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dvw-list__row-meta {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+/* Per-recipe pencil edit affordance. Scoped to the RECIPES saved-recipes list
+   via the `.dvw-recipes__cols` wrapper so the shared `.dvw-list__rows` /
+   `.dvw-list__item` / `.dvw-list__row` primitives — which the Chef's Keys list
+   (.dvw-keys__cols) reuses with the same markup — are left untouched. The pencil
+   sits at the right edge of each row, hidden at rest and revealed on row hover or
+   keyboard focus. */
+.dvw-recipes__cols .dvw-list__rows > .dvw-list__item {
+  position: relative;
+}
+
+.dvw-recipes__cols .dvw-list__rows > .dvw-list__item > .dvw-list__row {
+  padding-right: 40px;
+}
+
+.dvw-list__row-edit {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-md, 8px);
+  background: transparent;
+  color: var(--c-muted);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.dvw-recipes__cols .dvw-list__rows > .dvw-list__item:hover .dvw-list__row-edit,
+.dvw-list__row-edit:focus-visible {
+  opacity: 1;
+}
+
+.dvw-list__row-edit:hover {
+  background: var(--c-elev-2, rgba(37, 99, 235, 0.08));
+  color: var(--c-blue);
+}
+
+/* "Start from a template" group at the foot of the saved-recipes list. The
+   bundled Pantry starting points surface here as compact entry points that open
+   the builder pre-filled with the template's safe defaults as a fresh, unsaved
+   draft. Cohesive with the recipe rows and the import/resume tiles, but carries
+   the Pantry teal accent so the foot affordances stay visually distinct
+   (blue = open/import, amber = resume, teal = start from a template). */
+.dvw-list__templates {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.dvw-list__templates-head {
+  margin: 0;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+
+/* Fixed "Start from a template" cards: compact portrait tiles in a responsive
+   grid. Rows size to content (cards in the same row stretch to equal height via
+   the grid default, but rows do not all match) so cards with little content are
+   not padded with blank space; the pills / file-type tag use margin-top: auto so
+   they bottom-align within each card. */
+.dvw-tpl-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: var(--sp-2);
+}
+
+.dvw-tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  background: var(--c-elev-1, var(--c-page));
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.dvw-tpl-card:hover {
+  border-color: var(--c-teal, var(--c-border-strong));
+  background: var(--c-teal-soft, var(--c-elev-2));
+}
+
+.dvw-tpl-card__btn {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.dvw-tpl-card__btn:focus-visible {
+  outline: 2px solid var(--c-teal, var(--c-blue));
+  outline-offset: 2px;
+}
+
+.dvw-tpl-card__title {
+  font-weight: 600;
+  font-size: var(--fs-12);
+  line-height: 1.25;
+  color: var(--c-ink-strong, var(--c-ink));
+}
+
+.dvw-tpl-card__desc {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-11, 11px);
+  color: var(--c-muted);
+  line-height: var(--lh-base);
+}
+
+/* Power BI + GitHub repo pills pinned to the bottom of the card, centered and
+   aligned across cards. */
+.dvw-tpl-card .repo-pills {
+  margin-top: auto;
+  align-self: center;
+  padding-top: var(--sp-1);
+}
+
+.dvw-tpl-card__filetype {
+  margin-top: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: var(--fs-11, 11px);
+  font-weight: 600;
+  border-radius: var(--r-pill, 999px);
+  border: 1px solid rgba(100, 116, 139, 0.45);
+  color: #334155;
+  background: rgba(100, 116, 139, 0.14);
+  white-space: nowrap;
+}
+
+/* Detail pane */
+.dvw-detail--empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 220px;
+}
+
+.dvw-detail__empty-icon {
+  font-size: 2.4rem;
+  color: var(--c-blue-soft, var(--c-blue));
+  opacity: 0.7;
+}
+
+.dvw-detail__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.dvw-detail__icon {
+  font-size: 1.8rem;
+  color: var(--c-blue);
+}
+
+.dvw-detail__name {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-20);
+  font-weight: 700;
+  color: var(--c-ink-strong, var(--c-ink));
+}
+
+.dvw-detail__rows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.dvw-detail__row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.dvw-detail__row:last-child {
+  border-bottom: none;
+}
+
+.dvw-detail__row-icon {
+  color: var(--c-muted);
+  font-size: 1.1rem;
+}
+
+.dvw-detail__row-label {
+  margin: 0;
+  font-size: var(--fs-13, var(--fs-14));
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+
+.dvw-detail__row-value {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-ink);
+  text-align: right;
+  word-break: break-word;
+}
+
+.dvw-detail__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* Tier 1 — primary hero: the Bake (run) button is full-width and a little
+   taller so it reads as the dominant action in the card. */
+.dvw-detail__bake {
+  width: 100%;
+  justify-content: center;
+  min-height: 44px;
+  font-size: var(--fs-15, 15px);
+}
+
+/* Tier 2 — secondary peer row: three equal-weight ghost controls (Open Editor
+   / Export / Duplicate) on a 3-column grid, none dominating. */
+.dvw-detail__secondary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+}
+
+.dvw-detail__secondary-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Tier 3 — utility row: Advanced on the left, Delete on the right, set apart
+   from the secondary row by whitespace (not a border) and kept low-emphasis. */
+.dvw-detail__utility {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.dvw-detail__util-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border: none;
+  background: none;
+  color: var(--c-muted);
+  font: inherit;
+  font-size: var(--fs-13, 13px);
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--r-sm, 6px);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.dvw-detail__util-link:hover {
+  color: var(--c-ink);
+  text-decoration: underline;
+}
+
+.dvw-detail__util-link:focus-visible {
+  outline: 2px solid var(--c-blue);
+  outline-offset: 2px;
+}
+
+.dvw-detail__util-link--active {
+  color: var(--c-blue);
+}
+
+/* Delete recipe: a subtle danger-colored text link (not a filled button) so it
+   reads as intentional to reach, well away from the Bake hero. */
+.dvw-detail__delete-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border: none;
+  background: none;
+  color: var(--c-danger, #dc2626);
+  font: inherit;
+  font-size: var(--fs-13, 13px);
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--r-sm, 6px);
+  transition: text-decoration var(--dur-fast) var(--ease-out);
+}
+
+.dvw-detail__delete-link:hover {
+  text-decoration: underline;
+}
+
+.dvw-detail__delete-link:focus-visible {
+  outline: 2px solid var(--c-danger, #dc2626);
+  outline-offset: 2px;
+}
+
+.dvw-detail__util-icon {
+  font-size: 1rem;
+}
+
+.dvw-detail__tip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--c-blue-soft, rgba(37, 99, 235, 0.08));
+  border: 1px solid var(--c-blue-edge, rgba(37, 99, 235, 0.2));
+  border-radius: var(--r-md);
+}
+
+.dvw-detail__tip-icon {
+  color: var(--c-blue);
+  font-size: 1.1rem;
+  margin-top: 1px;
+}
+
+.dvw-detail__tip-text {
+  margin: 0;
+  font-size: var(--fs-13, var(--fs-14));
+  color: var(--c-ink);
+}
+
+/* Inspector */
+.dvw-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.dvw-readiness__hat {
+  color: var(--c-blue);
+  font-size: 1.3rem;
+}
+
+.dvw-readiness__verdict {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  font-size: var(--fs-13, var(--fs-14));
+  font-weight: 600;
+}
+
+.dvw-readiness__verdict--ready {
+  background: var(--c-green-soft, rgba(22, 163, 74, 0.12));
+  color: var(--c-green);
+}
+
+.dvw-readiness__verdict--pending {
+  background: var(--c-amber-soft, rgba(245, 158, 11, 0.12));
+  color: #9a6700;
+}
+
+.dvw-readiness__error {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--c-danger-soft, rgba(220, 38, 38, 0.1));
+  color: var(--c-danger);
+  font-size: var(--fs-13, var(--fs-14));
+}
+
+.dvw-readiness__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.dvw-readiness__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.dvw-readiness__row:last-child {
+  border-bottom: none;
+}
+
+.dvw-readiness__row-icon {
+  font-size: 1.2rem;
+  flex: 0 0 auto;
+}
+
+.dvw-readiness__row--met .dvw-readiness__row-icon {
+  color: var(--c-green);
+}
+
+.dvw-readiness__row--unmet .dvw-readiness__row-icon {
+  color: var(--c-amber);
+}
+
+.dvw-readiness__row-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dvw-readiness__row-label {
+  font-weight: 600;
+  font-size: var(--fs-14);
+}
+
+.dvw-readiness__row-detail {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+.dvw-readiness__row-state {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+
+.dvw-readiness__run {
+  margin-top: var(--sp-1);
+  width: 100%;
+  justify-content: center;
+}
+
+.dvw-readiness__hint,
+.dvw-readiness__note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+.dvw-readiness__note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.dvw-readiness__note-icon {
+  color: var(--c-green);
+  font-size: 1rem;
+  margin-top: 1px;
+}
+
+/* Advanced detail blocks (shared by the Advanced fly-in panel) */
+.dvw-advanced__item {
+  border-top: 1px solid var(--c-border);
+  padding-top: var(--sp-2);
+}
+
+.dvw-advanced__item:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.dvw-advanced__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  list-style: none;
+  padding: var(--sp-2) 0;
+}
+
+.dvw-advanced__summary::-webkit-details-marker {
+  display: none;
+}
+
+.dvw-advanced__summary-icon {
+  color: var(--c-muted);
+  font-size: 1.1rem;
+}
+
+.dvw-advanced__summary-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.dvw-advanced__summary-title {
+  font-weight: 600;
+  font-size: var(--fs-14);
+}
+
+.dvw-advanced__summary-sub {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+/* The Permissions body is full-width so its empty-state callout shares the
+   same left edge as the Command Preview callout. The indent that tucks the
+   permissions list under the section title is applied to the list and the
+   loaded-empty message below, not to the body itself. */
+.dvw-advanced__body {
+  padding: var(--sp-2) 0;
+}
+
+.dvw-advanced__body > .dvw-card__muted {
+  padding-left: calc(1.1rem + var(--sp-2));
+}
+
+.dvw-advanced__code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--c-ink);
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.dvw-advanced__diag {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.dvw-advanced__diag-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-3);
+  align-items: baseline;
+}
+
+.dvw-advanced__diag-label {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+
+.dvw-advanced__diag-value {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--c-ink);
+  text-align: right;
+  word-break: break-word;
+  font-family: var(--font-mono);
+}
+
+.dvw-advanced__notes {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+.dvw-advanced__perms {
+  margin: 0;
+  padding: 0;
+  padding-left: calc(1.1rem + var(--sp-2));
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.dvw-advanced__perm {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dvw-advanced__perm-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--c-ink);
+  word-break: break-word;
+}
+
+.dvw-advanced__perm-meta {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+/* Info callout for the panel's empty-state messages (the "run a readiness
+   check" prompts in Command Preview and Permissions). Mirrors the detail
+   pane's tip box: a light blue-soft field with a subtle edge and an info icon. */
+.dvw-advanced__callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--c-blue-soft, rgba(37, 99, 235, 0.08));
+  border: 1px solid var(--c-blue-edge, rgba(37, 99, 235, 0.2));
+  border-radius: var(--r-md);
+}
+
+.dvw-advanced__callout-icon {
+  color: var(--c-blue);
+  font-size: 1.1rem;
+  margin-top: 1px;
+}
+
+.dvw-advanced__callout-text {
+  margin: 0;
+  font-size: var(--fs-13, var(--fs-14));
+  color: var(--c-ink);
+}
+
+/* ----------------------------------------------------------------- */
+/* Advanced fly-in panel — pushes the workspace left, never overlaps  */
+/* ----------------------------------------------------------------- */
+/* The 3-col grid and the panel share a flex row. The panel is a real,
+   in-flow column whose width animates from 0 (closed) to a fixed width
+   (open); the grid is flex:1 and shrinks to make room, so the panel pushes
+   content left and never covers it. No position:fixed/absolute is used. */
+.dvw-recipes__layout {
+  display: flex;
+  align-items: flex-start;
+}
+
+.dvw-recipes__layout > .dvw-recipes__cols {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dvw-advanced-panel {
+  --dvw-advanced-panel-w: clamp(320px, 30vw, 400px);
+  flex: 0 0 auto;
+  width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: width 220ms ease, margin-left 220ms ease;
+}
+
+.dvw-advanced-panel--open {
+  width: var(--dvw-advanced-panel-w);
+  margin-left: var(--sp-5);
+}
+
+.dvw-advanced-panel__inner {
+  box-sizing: border-box;
+  width: var(--dvw-advanced-panel-w);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-card);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.dvw-advanced-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.dvw-advanced-panel__title {
+  margin: 0;
+  font-size: var(--fs-18);
+  font-weight: 650;
+  color: var(--c-ink);
+}
+
+.dvw-advanced-panel__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--c-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.dvw-advanced-panel__close:hover {
+  background: var(--c-page);
+  color: var(--c-ink);
+}
+
+.dvw-advanced-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  border-top: 1px solid var(--c-border);
+  padding-top: var(--sp-3);
+}
+
+.dvw-advanced-panel__section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.dvw-advanced-panel__section-icon {
+  color: var(--c-muted);
+  font-size: 1.1rem;
+}
+
+.dvw-advanced-panel__section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* Re-assert the section separator on the Permissions <details>, which would
+   otherwise lose it to .dvw-advanced__item:first-of-type. */
+.dvw-advanced-panel__perms.dvw-advanced__item {
+  border-top: 1px solid var(--c-border);
+  padding-top: var(--sp-3);
+}
+
+.dvw-advanced-panel__copy {
+  align-self: flex-start;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dvw-advanced-panel {
+    transition: none;
+  }
+}
+
+/* ----------------------------------------------------------------- */
+/* Responsive collapse                                                */
+/* ----------------------------------------------------------------- */
+@media (max-width: 1100px) {
+  .dvw-home__panels,
+  .dvw-recipes__cols {
+    grid-template-columns: 1fr;
+  }
+  .dvw-head__art {
+    display: none;
+  }
+}
+
+/* ----------------------------------------------------------------- */
+/* Dark adaptation                                                    */
+/* ----------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  .dvw-badge--attention {
+    color: var(--c-amber);
+  }
+  .dvw-readiness__verdict--pending {
+    color: var(--c-amber);
+  }
+}
+
+/* ----------------------------------------------------------------- */
+/* Taste Tests workspace                                              */
+/* ----------------------------------------------------------------- */
+.dvw-tastetests__cols {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(340px, 1.5fr) minmax(220px, 0.9fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.tt-pane {
+  min-width: 0;
+}
+
+.tt-pane__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.tt-pane__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 0 0 auto;
+}
+
+.tt-pane__title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 700;
+  color: var(--c-ink-strong, var(--c-ink));
+}
+
+.tt-muted {
+  margin: 0;
+  color: var(--c-muted);
+  font-size: var(--fs-14);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  align-items: flex-start;
+}
+
+/* Search box */
+.tt-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-page);
+}
+
+.tt-search__icon {
+  color: var(--c-muted);
+  font-size: 1.05rem;
+}
+
+.tt-search__input {
+  flex: 1 1 auto;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+  outline: none;
+}
+
+/* Recipe list */
+.tt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.tt-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.tt-list__row:hover {
+  background: var(--c-elev-1, var(--c-page));
+}
+
+.tt-list__row--selected {
+  background: var(--c-green-soft, rgba(22, 163, 74, 0.1));
+  border-color: var(--c-green-edge, rgba(22, 163, 74, 0.25));
+  box-shadow: inset 3px 0 0 var(--c-green);
+}
+
+.tt-list__icon {
+  font-size: 1.2rem;
+  color: var(--c-green);
+  flex: 0 0 auto;
+}
+
+.tt-list__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tt-list__name {
+  font-weight: 600;
+  font-size: var(--fs-14);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tt-list__meta {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+/* Empty state */
+.tt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-4);
+}
+
+.tt-empty__icon {
+  font-size: 2.2rem;
+  color: var(--c-green);
+}
+
+.tt-empty__title {
+  margin: 0;
+  font-size: var(--fs-18);
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
+.tt-empty__body {
+  margin: 0;
+  max-width: 42ch;
+  color: var(--c-muted);
+  font-size: var(--fs-14);
+}
+
+/* Result header + verdict */
+.tt-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.tt-result__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.tt-result__title {
+  margin: 0;
+  font-size: var(--fs-18);
+  font-weight: 700;
+  color: var(--c-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tt-result__note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+.tt-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-page);
+}
+
+.tt-verdict__icon {
+  font-size: 1.3rem;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.tt-verdict--ready {
+  border-color: var(--c-green-edge, rgba(22, 163, 74, 0.3));
+}
+
+.tt-verdict--ready .tt-verdict__icon {
+  color: var(--c-green);
+}
+
+.tt-verdict--attention {
+  border-color: var(--c-amber-edge, rgba(217, 119, 6, 0.3));
+}
+
+.tt-verdict--attention .tt-verdict__icon {
+  color: var(--c-amber);
+}
+
+.tt-verdict--unknown .tt-verdict__icon,
+.tt-verdict--error .tt-verdict__icon {
+  color: var(--c-muted);
+}
+
+.tt-verdict__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tt-verdict__title {
+  font-weight: 700;
+  font-size: var(--fs-15, var(--fs-14));
+  color: var(--c-ink);
+}
+
+.tt-verdict__detail {
+  font-size: var(--fs-13, var(--fs-14));
+  color: var(--c-muted);
+}
+
+/* Checklist */
+.tt-checklist__title {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-14);
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
+.tt-checklist__rows {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.tt-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+}
+
+.tt-check__icon {
+  font-size: 1.15rem;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.tt-check--ready .tt-check__icon {
+  color: var(--c-green);
+}
+
+.tt-check--attention .tt-check__icon {
+  color: var(--c-amber);
+}
+
+.tt-check--unknown .tt-check__icon {
+  color: var(--c-muted);
+}
+
+.tt-check__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 1px;
+}
+
+.tt-check__label {
+  font-weight: 600;
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+}
+
+.tt-check__detail {
+  font-size: var(--fs-12);
+  color: var(--c-muted);
+}
+
+.tt-check__state {
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+
+/* Notes (needs prep / warnings) */
+.tt-notes {
+  margin-top: var(--sp-3);
+}
+
+.tt-notes__title {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-13, var(--fs-14));
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
+.tt-notes__list {
+  margin: 0;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-13, var(--fs-14));
+  color: var(--c-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Next-step actions */
+.tt-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+
+@media (max-width: 1100px) {
+  .dvw-tastetests__cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ----------------------------------------------------------------- */
+/* Bakes workspace                                                   */
+/* ----------------------------------------------------------------- */
+/* Bakes root carries its own copy of the base .dvw layout (flex column +
+   gap + ink/font) instead of the shared .dvw class. Dropping the bare .dvw
+   token keeps the Bakes page out of the .app--embed .app-main:has(.dvw)
+   full-bleed override, so it uses the capped column (max-width var(--container-max))
+   like Pantry / Chef's Keys / Settings, while its internal layout is unchanged. */
+.dvw-bakes {
+  --dvw-gap: var(--sp-5);
+  color: var(--c-ink);
+  font-family: var(--font-sans);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.dvw-bakes__cols {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(340px, 2fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.bk-pane {
+  min-width: 0;
+}
+
+/* Cap the bake history at roughly 7 visible rows and scroll the rest with a
+   thin, app-styled scrollbar. Scoped to the Bakes history list via
+   bk-history-list so the shared .tt-list (Taste Tests) is untouched. */
+.bk-history-list {
+  max-height: 28rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border-strong) transparent;
+}
+
+.bk-history-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.bk-history-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.bk-history-list::-webkit-scrollbar-thumb {
+  background: var(--c-border-strong);
+  border-radius: 999px;
+}
+
+.bk-history-list::-webkit-scrollbar-thumb:hover {
+  background: var(--c-muted, var(--c-border-strong));
+}
+
+.bk-empty .tt-empty__icon {
+  color: var(--c-amber);
+}
+
+.bk-status-block {
+  padding: var(--sp-4) 0;
+}
+
+/* Status accent colors shared by list icons and the detail badge. */
+.bk-status--running { color: var(--c-amber); }
+.bk-status--completed { color: var(--c-green, #2e7d32); }
+.bk-status--errored,
+.bk-status--interrupted { color: var(--c-red, #c62828); }
+.bk-status--canceled,
+.bk-status--unknown { color: var(--c-muted); }
+
+.bk-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.bk-detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.bk-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.bk-detail__cancel-error {
+  margin: 0;
+  color: var(--c-red, #c62828);
+  font-size: var(--fs-13, var(--fs-14));
+}
+
+/* X6 — the Stop bake button is a destructive action; give it a clearly
+   visible danger-colored border so users can find it (it otherwise inherits
+   the borderless ghost variant). Scoped to the Bakes detail action row, which
+   contains only the Stop bake button. */
+.bk-detail__actions .dvw-btn {
+  border-color: var(--c-danger, #dc2626);
+  color: var(--c-danger, #dc2626);
+  background: var(--c-danger-soft, rgba(220, 38, 38, 0.1));
+}
+
+.bk-detail__actions .dvw-btn:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+
+.bk-detail__actions .dvw-btn:focus-visible {
+  outline: 2px solid var(--c-danger, #dc2626);
+  outline-offset: 2px;
+}
+
+.bk-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-13, var(--fs-14));
+  font-weight: 600;
+}
+
+.bk-meta {
+  display: grid;
+  grid-template-columns: minmax(110px, max-content) 1fr;
+  gap: var(--sp-1) var(--sp-4);
+}
+
+.bk-meta__row {
+  display: contents;
+}
+
+.bk-meta__label {
+  color: var(--c-muted);
+  font-size: var(--fs-13, var(--fs-14));
+}
+
+.bk-meta__value {
+  min-width: 0;
+  word-break: break-word;
+  font-size: var(--fs-13, var(--fs-14));
+}
+
+.bk-section {
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-border);
+}
+
+.bk-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-14);
+  font-weight: 600;
+}
+
+.bk-section__icon {
+  color: var(--c-muted);
+}
+
+.bk-section__line {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-13, var(--fs-14));
+}
+
+.bk-section--error .bk-section__title {
+  color: var(--c-red, #c62828);
+}
+
+.bk-code {
+  display: block;
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-page);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-13);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.bk-inline-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-12, var(--fs-13));
+  word-break: break-all;
+}
+
+.bk-path {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-12, var(--fs-13));
+  word-break: break-all;
+}
+
+.bk-reqs {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-4);
+}
+
+.bk-reqs__item {
+  font-size: var(--fs-13, var(--fs-14));
+  color: var(--c-muted);
+}
+
+.bk-outputs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* The log file rendered as its own output-style card, set off from the output
+   file list above it (and its Total line). */
+.bk-outputs--log {
+  margin-top: var(--sp-2);
+}
+
+.bk-output {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-page);
+}
+
+.bk-output__role {
+  font-weight: 600;
+  font-size: var(--fs-13, var(--fs-14));
+}
+
+.bk-output__path {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-12, var(--fs-13));
+  color: var(--c-muted);
+  word-break: break-all;
+}
+
+.bk-output__meta {
+  font-size: var(--fs-12, var(--fs-13));
+  color: var(--c-muted);
+}
+
+/* Inline "Open folder" link-button on a bake output row. */
+.bk-output__open {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--c-blue, #2563eb);
+  font: inherit;
+  font-size: var(--fs-12, var(--fs-13));
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.bk-output__open:hover {
+  text-decoration: underline;
+}
+.bk-output__open:focus-visible {
+  outline: 2px solid var(--c-blue, #2563eb);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.bk-outputs__note {
+  margin: var(--sp-2) 0 0;
+}
+
+/* Collapsible analytics sections on the bake detail (native <details>). */
+.bk-collapse {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md, 8px);
+  margin-top: var(--sp-3);
+}
+
+.bk-collapse__summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  font-weight: 600;
+  font-size: var(--fs-14, 14px);
+  color: var(--c-ink);
+  list-style: none;
+}
+
+.bk-collapse__summary::-webkit-details-marker {
+  display: none;
+}
+
+/* CSS-only disclosure chevron so the collapsible affordance is visible without
+   the native marker. Points down when collapsed, up when open. */
+.bk-collapse__summary::after {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+  opacity: 0.55;
+}
+
+.bk-collapse[open] > .bk-collapse__summary::after {
+  transform: rotate(-135deg);
+}
+
+.bk-collapse[open] > .bk-collapse__summary {
+  border-bottom: 1px solid var(--c-border);
+}
+
+.bk-collapse__body {
+  padding: var(--sp-3);
+}
+
+.bk-collapse--nested {
+  margin-top: var(--sp-2);
+}
+
+/* Color-coded errors/warnings summary pill. The traffic-light hexes are kept
+   literal so they read in both light and dark, matching the status pills. */
+.bk-issues {
+  margin: 0 0 var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm, 6px);
+  font-size: var(--fs-13, 13px);
+  font-weight: 600;
+}
+
+.bk-issues--clean {
+  color: #166534;
+  background: rgba(22, 163, 74, 0.1);
+}
+
+.bk-issues--warn {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.bk-issues--error {
+  color: #991b1b;
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.bk-issues__lines {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-4);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-12, 12px);
+  color: var(--c-subtle);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.bk-future {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-12, 12px);
+}
+
+/* Color-coded headline banner across the top of a bake's detail — the visual
+   anchor for how the run went. Traffic-light hexes are kept literal so they
+   read in both light and dark, matching the .bk-issues pills. */
+.bk-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md, 8px);
+  border-left: 4px solid;
+}
+
+.bk-banner__headline {
+  font-size: var(--fs-15, 15px);
+  font-weight: 700;
+}
+
+.bk-banner__detail {
+  font-size: var(--fs-13, 13px);
+  opacity: 0.85;
+}
+
+.bk-banner--success {
+  background: rgba(22, 163, 74, 0.1);
+  border-left-color: #16a34a;
+  color: #166534;
+}
+
+.bk-banner--warning {
+  background: rgba(245, 158, 11, 0.12);
+  border-left-color: #f59e0b;
+  color: #92400e;
+}
+
+.bk-banner--error {
+  background: rgba(220, 38, 38, 0.1);
+  border-left-color: #dc2626;
+  color: #991b1b;
+}
+
+.bk-banner--running {
+  background: rgba(37, 99, 235, 0.1);
+  border-left-color: #2563eb;
+  color: #1e3a8a;
+}
+
+.bk-banner--neutral {
+  background: var(--c-elev-1, rgba(15, 23, 42, 0.04));
+  border-left-color: var(--c-border);
+  color: var(--c-ink);
+}
+
+/* Run-summary metric cards (reuses the Home dashboard .dvw-status-card). */
+.bk-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0;
+}
+
+.bk-outputs__total {
+  margin-top: var(--sp-2);
+}
+
+/* Left history-list status accent bar — additive over .tt-list__row's
+   transparent 1px border (every row gets a tone, so alignment stays even). */
+.bk-row--success {
+  border-left: 3px solid #16a34a;
+}
+
+.bk-row--warning {
+  border-left: 3px solid #f59e0b;
+}
+
+.bk-row--error {
+  border-left: 3px solid #dc2626;
+}
+
+.bk-row--running {
+  border-left: 3px solid #2563eb;
+}
+
+.bk-row--neutral {
+  border-left: 3px solid var(--c-border);
+}
+
+/* Abbreviated engine SHA-256 fingerprint + copy button in Run configuration. */
+.bk-engine-fp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bk-engine-fp__copy {
+  font: inherit;
+  font-size: var(--fs-12, 12px);
+  padding: 1px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-pill, 999px);
+  background: transparent;
+  color: var(--c-blue);
+  cursor: pointer;
+}
+
+.bk-log__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.bk-log__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.bk-log__autoscroll {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-13);
+  color: var(--c-text-muted, var(--c-text));
+  cursor: pointer;
+  user-select: none;
+}
+
+.bk-log__autoscroll input {
+  cursor: pointer;
+}
+
+.bk-log__pre {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-3);
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-page);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-12, var(--fs-13));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 1100px) {
+  .dvw-bakes__cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ----------------------------------------------------------------- */
+/* Chef's Keys workspace                                              */
+/* ----------------------------------------------------------------- */
+.dvw-keys {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-6);
+}
+
+.dvw-keys__cols {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.5fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+/* Auth-type badge at the trailing edge of a list row; the short label keeps it
+   from crowding the name in a narrow column. */
+.dvw-keys__row-badge {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+/* Right pane holds the inline add/edit form, the selected key's detail, or the
+   placeholder hint. A min-height keeps the empty state from collapsing. */
+.dvw-keys__right {
+  min-height: 300px;
+}
+
+.dvw-keys__hint {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--sp-3);
+  min-height: 220px;
+}
+
+/* Detail field list */
+.dvw-keys__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.dvw-keys__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.dvw-keys__field-label {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--c-muted);
+}
+
+.dvw-keys__field-value {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* Monospace identifier (GUID / thumbprint) shown in full as plain text for the
+   clean Azure properties look; wraps rather than truncating. */
+.dvw-keys__mono {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  color: var(--c-ink);
+  word-break: break-all;
+}
+
+.dvw-keys__not-set {
+  font-size: var(--fs-14);
+  font-style: italic;
+  color: var(--c-muted);
+}
+
+/* Secret status pill: Set / None only — the secret value is never shown. */
+.dvw-keys__secret {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.dvw-keys__secret--set {
+  background: var(--c-green-soft, rgba(22, 163, 74, 0.12));
+  color: var(--c-green);
+  border-color: rgba(22, 163, 74, 0.25);
+}
+
+.dvw-keys__secret--none {
+  background: var(--c-elev-1, rgba(71, 85, 105, 0.1));
+  color: var(--c-slate);
+  border-color: var(--c-border);
+}
+
+/* Detail action row (Test / Edit / Delete). */
+.dvw-keys__detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
+/* In-detail delete confirmation (in-app alertdialog). */
+.dvw-keys__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-btn-danger, #dc2626);
+  border-radius: var(--r-md);
+  background: var(--c-danger-soft, rgba(220, 38, 38, 0.08));
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+}
+
+.dvw-keys__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.dvw-keys__error {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-danger, #dc2626);
+}
+
+/* Test result (structural validation only — no Graph call, no cook). */
+.dvw-keys__test {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-page);
+}
+
+.dvw-keys__test--pass {
+  border-color: rgba(22, 163, 74, 0.3);
+  background: var(--c-green-soft, rgba(22, 163, 74, 0.1));
+}
+
+.dvw-keys__test--fail {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: var(--c-amber-soft, rgba(245, 158, 11, 0.12));
+}
+
+.dvw-keys__test-summary {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.dvw-keys__test-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-13);
+}
+
+.dvw-keys__test-list .is-ok {
+  color: var(--c-green);
+}
+
+.dvw-keys__test-list .is-fail {
+  color: var(--c-amber-strong, #9a6700);
+}
+
+/* Inline add / edit form rendered in the right pane. The fields themselves use
+   the shared mk-field styling; these rules only frame the wrapper. */
+.keys-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.keys-form__title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 700;
+  color: var(--c-ink-strong, var(--c-ink));
+}
+
+.keys-form__error {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-danger, #dc2626);
+}
+
+.keys-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
+/* =============================================================
+ * Chef's Keys — Azure properties-blade right pane.
+ * The selected key reads like an Azure resource properties page:
+ * a command toolbar (title + auth badge + Test / Edit / Delete),
+ * a Properties key/value grid, scannable test-result rows, and a
+ * quiet This-PC status section. Section headers are bold/muted
+ * text over a hairline rule — never nested cards.
+ * ============================================================= */
+
+/* Flat list rows (no rounded corners) give the left key list an Azure
+   left-nav feel. Scoped under .dvw-keys__cols so the shared .dvw-list__row
+   used by the Recipes list is unaffected; the hover background and the
+   selected-row left accent still come from the base .dvw-list__row rules. */
+.dvw-keys__cols .dvw-list__row {
+  border-radius: 0;
+}
+
+/* Command toolbar: large title + auth badge on the left, Test/Edit/Delete on
+   the right, with a hairline rule separating it from the properties below. */
+.dvw-keys__toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.dvw-keys__toolbar-titles {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.dvw-keys__detail-title {
+  margin: 0;
+  font-size: var(--fs-22, var(--fs-20));
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--c-ink-strong, var(--c-ink));
+  word-break: break-word;
+}
+
+.dvw-keys__detail-badge {
+  flex: 0 0 auto;
+}
+
+.dvw-keys__toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+/* A section is a bold/muted header plus its content (Properties, Test results,
+   This PC). Generous spacing, no card frame. */
+.dvw-keys__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.dvw-keys__section-head {
+  margin: 0;
+  font-size: var(--fs-12);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+
+.dvw-keys__section-head--muted {
+  color: var(--c-subtle, var(--c-muted));
+  font-weight: 600;
+}
+
+/* Azure key/value grid: a fixed muted label column on the left, a flexing
+   value column (monospace IDs + copy button) on the right, hairline-separated
+   rows. */
+.dvw-keys__props {
+  display: flex;
+  flex-direction: column;
+}
+
+.dvw-keys__prop {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) 1fr;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.dvw-keys__prop:last-child {
+  border-bottom: none;
+}
+
+.dvw-keys__prop-label {
+  font-size: var(--fs-13, var(--fs-14));
+  font-weight: 600;
+  color: var(--c-muted);
+}
+
+.dvw-keys__prop-value {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* On a narrow pane the label stacks above its value. */
+@media (max-width: 720px) {
+  .dvw-keys__prop {
+    grid-template-columns: 1fr;
+    gap: var(--sp-1);
+  }
+}
+
+/* Test results: a summary line tinted by outcome, then one scannable row per
+   check with a colored status icon (green check / red X) beside the detail. */
+.dvw-keys__test-summary--pass {
+  color: var(--c-green);
+}
+
+.dvw-keys__test-summary--fail {
+  color: var(--c-amber-strong, #9a6700);
+}
+
+.dvw-keys__checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.dvw-keys__check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  font-size: var(--fs-14);
+  line-height: 1.45;
+  color: var(--c-ink);
+}
+
+.dvw-keys__check-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+
+.dvw-keys__check-row--ok .dvw-keys__check-icon {
+  color: var(--c-green);
+}
+
+.dvw-keys__check-row--fail .dvw-keys__check-icon {
+  color: var(--c-danger, #dc2626);
+}
+
+.dvw-keys__check-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* This-PC status: the same key/value grid kept quiet as secondary info,
+   pinned to the bottom of the pane with a top rule to set it apart. */
+.dvw-keys__sysinfo {
+  margin-top: auto;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-border);
+}
+
+.dvw-keys__sysval {
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+}
+
+.dvw-keys__sysnote {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--c-subtle, var(--c-muted));
+  line-height: 1.45;
+}
+
+/* ---------- Settings surface (Azure-style full-width sections) ----------
+   Reuses the Chef's Keys properties pattern (.dvw-keys__section-head,
+   .dvw-keys__props, .dvw-keys__prop*, .dvw-keys__mono, .dvw-keys__sysval)
+   for the read-only key/value rows. These .dvw-settings* rules add only the
+   page-level structure: the single full-width column, section spacing, the
+   header hairline rule, and the About footer. */
+.dvw-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: 920px;
+}
+
+.dvw-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.dvw-settings__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.dvw-settings__desc {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--c-muted);
+  line-height: var(--lh-base);
+}
+
+.dvw-settings__about {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.dvw-settings__brand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.dvw-settings__brand-name {
+  font-size: var(--fs-16);
+  font-weight: 700;
+  color: var(--c-ink-strong);
+  letter-spacing: -0.01em;
+}
+
+.dvw-settings__brand-tag {
+  font-size: var(--fs-13);
+  color: var(--c-muted);
+  line-height: var(--lh-base);
+}
+
+.dvw-settings__help {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  align-self: flex-start;
+}
+
+.dvw-settings__help-label {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.dvw-settings__help-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-blue);
+  cursor: pointer;
+}
+
+.dvw-settings__help-link:hover {
+  text-decoration: underline;
+}
+
+.dvw-settings__help-link:focus-visible {
+  outline: 2px solid var(--c-blue);
+  outline-offset: 2px;
+  border-radius: var(--r-sm, 4px);
+}
+
+/* "Check for updates" entry point in the App information section. */
+.dvw-settings__updates {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  align-self: flex-start;
+  margin-top: var(--sp-3);
+}
+
+.dvw-settings__updates-label {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+/* The add/edit form modal reuses the shared .mk-modal shell (a wrapping
+   .mini-kitchen-page opts into that scoped styling); this only widens it for
+   the field stack and caps its height on short viewports. */
+.dvw-keys__form-modal {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 2 * var(--sp-5));
+  overflow-y: auto;
+}
+
+@media (max-width: 1100px) {
+  .dvw-keys__cols {
+    grid-template-columns: 1fr;
+  }
+}

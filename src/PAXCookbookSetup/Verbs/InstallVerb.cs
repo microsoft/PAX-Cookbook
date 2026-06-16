@@ -1,0 +1,188 @@
+using PAXCookbook.Shared.Contracts;
+using PAXCookbook.Shared.ExitCodes;
+using PAXCookbookSetup.Payload;
+using PAXCookbookSetup.Shell;
+
+namespace PAXCookbookSetup.Verbs;
+
+public static class InstallVerb
+{
+    public static int Run(ParsedArgs args, Manifest m, string payloadRoot,
+                          string installRoot, SetupLogger log,
+                          IPayloadOperations? payloadOps = null,
+                          IShellOperations? shellOps = null)
+    {
+        payloadOps ??= DefaultPayloadOperations.Instance;
+        log.Write("install-begin", fields: new Dictionary<string, object?>
+        {
+            ["installRoot"] = installRoot, ["appVersion"] = m.AppVersion
+        });
+
+        var validation = ManifestValidator.Validate(m, payloadRoot);
+        if (!validation.Ok)
+        {
+            log.Write("install-manifest-invalid", "error",
+                new Dictionary<string, object?> { ["errors"] = string.Join("; ", validation.Errors) });
+            return SetupExitCodes.InstallFailed;
+        }
+
+        var appRoot = Path.Combine(installRoot, "App");
+        var binRoot = Path.Combine(appRoot, "bin");
+        Directory.CreateDirectory(binRoot);
+        Directory.CreateDirectory(Path.Combine(installRoot, "Setup"));
+        Directory.CreateDirectory(Path.Combine(installRoot, "Logs", "Setup"));
+        Directory.CreateDirectory(Path.Combine(installRoot, "Logs", "App"));
+        Directory.CreateDirectory(Path.Combine(installRoot, "Logs", "Broker"));
+        Directory.CreateDirectory(Path.Combine(installRoot, "WebView2Data"));
+        Directory.CreateDirectory(Path.Combine(installRoot, "PreviousVersions"));
+
+        try
+        {
+            payloadOps.Copy(m, payloadRoot, installRoot, appRoot);
+            payloadOps.VerifyInstalled(m, installRoot);
+        }
+        catch (Exception ex)
+        {
+            log.Write("install-copy-failed", "error",
+                new Dictionary<string, object?> { ["detail"] = ex.Message });
+            return SetupExitCodes.InstallFailed;
+        }
+
+        // Phase 12 (Mode B failure repair): write the payload to a
+        // verified local cache under <installRoot>\PayloadCache so the
+        // installed PAXCookbookSetup.exe (which carries no embedded
+        // payload) can still repair/update without --payload-root.
+        // Standard uninstall removes PayloadCache; full uninstall takes
+        // the whole install root, so no cleanup divergence.
+        try
+        {
+            var cacheRoot = LocalCachePayloadSourceResolver.CachePath(installRoot);
+            var normPayload = Path.GetFullPath(payloadRoot);
+            var normCache = Path.GetFullPath(cacheRoot);
+            if (string.Equals(normPayload, normCache, StringComparison.OrdinalIgnoreCase))
+            {
+                // Repair/update routed through the cache itself; the
+                // cache IS the payload, so just re-verify it in place.
+                var v0 = PayloadManifestVerifier.Verify(cacheRoot, m);
+                if (!v0.Ok)
+                {
+                    log.Write("install-payload-cache-verify-failed", "error",
+                        new Dictionary<string, object?>
+                        {
+                            ["origin"] = "self",
+                            ["errors"] = string.Join("; ", v0.Errors)
+                        });
+                    return SetupExitCodes.InstallFailed;
+                }
+                log.Write("install-payload-cache-skip-self",
+                    fields: new Dictionary<string, object?>
+                    {
+                        ["cacheRoot"] = cacheRoot
+                    });
+            }
+            else
+            {
+                if (Directory.Exists(cacheRoot))
+                    Directory.Delete(cacheRoot, recursive: true);
+                Directory.CreateDirectory(cacheRoot);
+                payloadOps.WritePayloadCache(payloadRoot, cacheRoot);
+
+                var v = PayloadManifestVerifier.Verify(cacheRoot, m);
+                if (!v.Ok)
+                {
+                    log.Write("install-payload-cache-verify-failed", "error",
+                        new Dictionary<string, object?>
+                        {
+                            ["origin"] = "fresh",
+                            ["cacheRoot"] = cacheRoot,
+                            ["errors"] = string.Join("; ", v.Errors)
+                        });
+                    return SetupExitCodes.InstallFailed;
+                }
+                log.Write("install-payload-cache-written",
+                    fields: new Dictionary<string, object?>
+                    {
+                        ["cacheRoot"] = cacheRoot
+                    });
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Write("install-payload-cache-failed", "error",
+                new Dictionary<string, object?> { ["detail"] = ex.Message });
+            return SetupExitCodes.InstallFailed;
+        }
+
+        var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+        var state = new InstallState
+        {
+            AppVersion = m.AppVersion,
+            SetupVersion = m.SetupVersion,
+            AppExeVersion = m.AppVersion,
+            InstalledAtUtc = now,
+            UpdatedAtUtc = now,
+            InstallRoot = installRoot,
+            AppRoot = appRoot,
+            BinRoot = binRoot,
+            AppExe = Path.Combine(installRoot, m.Payload.AppExe.RelativeInstallPath),
+            WorkspaceFolderPath = "",
+            WebView2RuntimeStatus = new WebView2RuntimeStatus { DetectedAtUtc = now },
+            WebView2UserDataFolder = Path.Combine(installRoot, "WebView2Data"),
+            LastOperation = new LastOperation
+            {
+                Kind = "install", Status = "ok", At = now, ExitCode = 0
+            }
+        };
+        InstallStateStore.Save(installRoot, state);
+
+        // Phase 8: Windows shell identity (shortcuts + protocol + ARP).
+        if (shellOps is not null)
+        {
+            try
+            {
+                var sr = shellOps.Install(installRoot, m.AppVersion,
+                                          createDesktopShortcut: false);
+                log.Write("install-shell-registered",
+                    fields: new Dictionary<string, object?>
+                    {
+                        ["shortcutsCreated"] = sr.ShortcutsCreated,
+                        ["protocolRegistered"] = sr.ProtocolRegistered,
+                        ["uninstallRegistered"] = sr.UninstallRegistered,
+                        ["fileAssociationsRegistered"] = sr.FileAssociationsRegistered,
+                        ["autoStartRegistered"] = sr.AutoStartRegistered
+                    });
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal: file payload is installed; shell decoration
+                // failure is logged and reported by status verb.
+                log.Write("install-shell-failed", "warn",
+                    new Dictionary<string, object?> { ["detail"] = ex.Message });
+            }
+        }
+
+        log.Write("install-complete", fields: new Dictionary<string, object?>
+        {
+            ["appVersion"] = m.AppVersion
+        });
+        return SetupExitCodes.Ok;
+    }
+}
+
+public interface IPayloadOperations
+{
+    void Copy(Manifest m, string payloadRoot, string installRoot, string appRoot);
+    void VerifyInstalled(Manifest m, string installRoot);
+    void WritePayloadCache(string payloadRoot, string cacheRoot);
+}
+
+public sealed class DefaultPayloadOperations : IPayloadOperations
+{
+    public static readonly DefaultPayloadOperations Instance = new();
+    public void Copy(Manifest m, string payloadRoot, string installRoot, string appRoot)
+        => PayloadCopier.Copy(m, payloadRoot, installRoot, appRoot);
+    public void VerifyInstalled(Manifest m, string installRoot)
+        => PayloadCopier.VerifyInstalled(m, installRoot);
+    public void WritePayloadCache(string payloadRoot, string cacheRoot)
+        => PayloadCacheWriter.MirrorTree(payloadRoot, cacheRoot);
+}

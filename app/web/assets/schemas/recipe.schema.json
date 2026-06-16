@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paxcookbook.local/schemas/recipe.schema.json",
+  "title": "Recipe (M1, AF auth + V1.S26 supported run-shape extensions)",
+  "description": "The M1 recipe surface: corpus 04-nested organizational shape, narrowed to only the leaves M1 templates and the M1 adapter understand. M2+ leaves (parallel, reliability, observability, query.useEOM, OneLake/Fabric destination paths, schedules, tags, description) are not present and are rejected by additionalProperties:false at every level. Phase AF (auth profile / secret handling / Windows re-auth / execution boundary) extends the surface in three coupled ways: (1) auth.mode now spans WebLogin / DeviceCode / AppRegistrationSecret / AppRegistrationCertificate / ManagedIdentity -- Cookbook continues to exclude the stored-password Credential mode and the opaque cached-token Silent mode at every layer; (2) the new top-level executionMode declares where the cook is intended to run and constrains which auth modes are doctrinally valid in that environment -- interactive modes are blocked in headless / Azure-hosted environments, and ManagedIdentity is blocked in local environments that do not expose an IMDS endpoint; (3) auth.chefKeyId is an optional reference to a saved Chef's Key (CK-1, Windows-Credential-Manager-backed): App-registration recipes need a bound Chef's Key to be READY but may be SAVED without one (binding is a runtime-readiness concern, not a save gate), while WebLogin / DeviceCode may optionally bind one for unattended scheduling. No secret material is ever stored inside a recipe: the chefKeyId is a metadata reference, the Chef's Key holds the client id / certificate thumbprint, and the client secret (when applicable) lives only in Windows Credential Manager under the appliance's process identity. V1.S26 -- Brian-approved supported-run-shape additions: (a) destinations.fact.mode (outputPath | append) replaces the M2.2 appendBehavior surface; appendBehavior is preserved as a legacy alias for back-compat (fresh -> outputPath, append -> append) and is read on load but not written on save; -OutputPath and -AppendFile are projected mutually exclusively. (b) destinations.userInfo (outputPath | append) for the optional user-info output channel, mutually exclusive within itself. (c) query.mode (audit | userInfoOnly) names the supported run shape; userInfoOnly is a distinct top-level shape and forbids processing.rollup, ingredients.m365Usage.includeM365Usage=true, and audit-only query fields. (d) ingredients.m365Usage.includeCopilotInteraction (default true) gates the -ExcludeCopilotInteraction projection; false is only valid when includeM365Usage=true. (e) query.activityTypes / userIds / groupNames / agentFilter (mode+agentIds) / promptFilter expose the supported PAX filter surface; under rollup, activityTypes (if present) must equal ['CopilotInteraction']. RecordTypes, ServiceTypes, UseEOM, and the Agent365Info family are not in the supported surface and are rejected by the procedural validator (the JSON schema does not encode trailer-string content; the broker scans advanced.extraArguments).",
+
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "executionMode is OPTIONAL in v1 for backward compatibility with pre-AF recipes that do not carry this field. Absence is interpreted as 'local-manual' by the execution-mode x auth-mode matrix validator (the v1 default). Newly-authored recipes are stamped explicitly by the SPA editor at save time. M2+ may promote this field to required after a controlled migration.",
+  "required": [
+    "recipeId",
+    "recipeSchemaVersion",
+    "paxAdapterVersion",
+    "identity",
+    "ingredients",
+    "query",
+    "processing",
+    "destinations",
+    "auth"
+  ],
+
+  "properties": {
+    "recipeId":            { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+    "recipeSchemaVersion": { "type": "integer", "const": 1 },
+    "paxAdapterVersion":   { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "createdAt":           { "type": "string", "format": "date-time" },
+    "updatedAt":           { "type": "string", "format": "date-time" },
+    "executionMode":       { "type": "string", "enum": ["local-manual","local-scheduled","fabric-hosted","azure-hosted"] },
+
+    "createdBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cookbookVersion", "bundledPaxVersion", "releaseChannel"],
+      "properties": {
+        "cookbookVersion":   { "type": "string", "minLength": 1 },
+        "bundledPaxVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "releaseChannel":    { "type": "string", "minLength": 1 },
+        "fromTemplate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["templateId", "templateVersion"],
+          "properties": {
+            "templateId":      { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$" },
+            "templateVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+          }
+        }
+      }
+    },
+
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+
+    "ingredients": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["m365Usage", "entraUserData"],
+      "properties": {
+        "m365Usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["includeM365Usage"],
+          "$comment": "V1.S26: includeCopilotInteraction is OPTIONAL (defaults to true at the adapter when absent). When explicitly false, ingredients.m365Usage.includeM365Usage MUST be true (a Shape 2 prerequisite enforced procedurally by the broker and via allOf below for the SPA AJV). The adapter projects -ExcludeCopilotInteraction iff includeCopilotInteraction === false.",
+          "properties": {
+            "includeM365Usage":          { "type": "boolean" },
+            "includeCopilotInteraction": { "type": "boolean" }
+          }
+        },
+        "entraUserData": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["includeUserInfo"],
+          "properties": {
+            "includeUserInfo": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "V1.S26: query.mode names the supported run shape -- 'audit' (Shape 1/2; the default when absent) or 'userInfoOnly' (Shape 3 -- a separate top-level shape, NOT a checkbox). Shape 1/2 (audit) require query.startDate and query.endDate; Shape 3 (userInfoOnly) FORBIDS them. The required/forbidden cross-shape rules are enforced at the root-level allOf below for SPA AJV and procedurally at the broker (no unconditional field-level required so the two shapes can both validate cleanly). Shape 3 forbids ingredients.m365Usage.includeM365Usage=true, ingredients.m365Usage.includeCopilotInteraction, processing.rollup, destinations.fact, and the audit-only filter fields (activityTypes, userIds, groupNames, agentFilter, promptFilter); it also requires ingredients.entraUserData.includeUserInfo=true. activityTypes is the supported -ActivityTypes projection surface; under rollup it must equal exactly ['CopilotInteraction'] (the only rollup-compatible activity). userIds is the supported -UserIds projection surface (must be non-empty when present). groupNames is the supported -GroupNames projection surface (must be non-empty when present; adds GroupMember.Read.All to required permissions). agentFilter exposes the trio -AgentId / -AgentsOnly / -ExcludeAgents as a single mutually-exclusive object via a single mode enum: mode='agentIds' projects -AgentId <values> (agentIds required); mode='agentsOnly' projects -AgentsOnly (agentIds forbidden); mode='excludeAgents' projects -ExcludeAgents (agentIds forbidden); mode='none' projects nothing (agentIds forbidden). promptFilter is the supported -PromptFilter projection surface; enum mirrors the PAX ValidateSet ('Prompt','Response','Both','Null'). RecordTypes / ServiceTypes / UseEOM are NOT in the supported surface and are rejected by the broker if found in advanced.extraArguments.",
+      "properties": {
+        "startDate":     { "type": "string", "format": "date" },
+        "endDate":       { "type": "string", "format": "date" },
+        "mode":          { "type": "string", "enum": ["audit","userInfoOnly"] },
+        "activityTypes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "userIds":       { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "groupNames":    { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "agentFilter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "$comment": "agentFilter.mode is a single enum naming exactly one of four mutually-exclusive operations: 'none' (no agent filtering; agentIds forbidden; projects nothing), 'agentIds' (filter to a specific list; agentIds REQUIRED; projects -AgentId <values>), 'agentsOnly' (only agent activity; agentIds forbidden; projects -AgentsOnly), 'excludeAgents' (exclude all agent activity; agentIds forbidden; projects -ExcludeAgents). Because mode is a single enum field the four operations are automatically mutually exclusive; the native PAX trio (-AgentId / -AgentsOnly / -ExcludeAgents) is never emitted simultaneously by the adapter.",
+          "properties": {
+            "mode":     { "type": "string", "enum": ["none","agentIds","agentsOnly","excludeAgents"] },
+            "agentIds": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+          },
+          "allOf": [
+            { "if":   { "properties": { "mode": { "const": "none" } } },
+              "then": { "not": { "required": ["agentIds"] } } },
+            { "if":   { "properties": { "mode": { "const": "agentIds" } } },
+              "then": { "required": ["agentIds"] } },
+            { "if":   { "properties": { "mode": { "const": "agentsOnly" } } },
+              "then": { "not": { "required": ["agentIds"] } } },
+            { "if":   { "properties": { "mode": { "const": "excludeAgents" } } },
+              "then": { "not": { "required": ["agentIds"] } } }
+          ]
+        },
+        "promptFilter":  { "type": "string", "enum": ["Prompt","Response","Both","Null"] }
+      }
+    },
+
+    "processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "rollup is OPTIONAL for audit-shape recipes (query.mode='audit' or absent) -- it may be omitted entirely to pull raw Purview audit data, and is emitted as -Rollup / -RollupPlusRaw only when present -- and MUST BE ABSENT for userInfoOnly-shape recipes (query.mode='userInfoOnly'). The forbidden cross-field rule for userInfoOnly is enforced at the root-level allOf (for SPA AJV) and procedurally at the broker; the audit shape no longer requires rollup (supersedes the earlier V1.S26 audit-required rule). The 'processing' object itself remains structurally required so the recipe shape stays stable across both shapes.",
+      "properties": {
+        "rollup": { "type": "string", "enum": ["Rollup","RollupPlusRaw"] }
+      }
+    },
+
+    "destinations": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "V1.S26: destinations.fact is REQUIRED for audit-shape recipes (query.mode='audit' or absent) and FORBIDDEN for Shape 3 recipes (query.mode='userInfoOnly'); destinations.userInfo is REQUIRED for Shape 3 and conditional under audit shape. Both cross-shape requirements are enforced at the root-level allOf below for SPA AJV and procedurally at the broker; no unconditional field-level 'required' is declared here so both shapes can validate cleanly.",
+      "properties": {
+        "fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "$comment": "V1.S26: destinations.fact.mode (outputPath | append) is the new authoritative S26 surface and replaces the M2.2 appendBehavior surface for newly-authored recipes. appendBehavior (fresh | append) is preserved as a legacy alias for back-compat: when mode is absent, appendBehavior='fresh' is read as effective mode='outputPath' and appendBehavior='append' is read as effective mode='append' by the procedural validator and the adapter. When mode is present it is authoritative; appendBehavior, if also present, MUST agree with mode (fresh<->outputPath, append<->append). The adapter NEVER emits both -OutputPath and -AppendFile simultaneously: effective mode='outputPath' projects -OutputPath <path> only; effective mode='append' projects -AppendFile <appendFile> only. Legacy recipes that carry both path and appendFile under appendBehavior='append' continue to load and project as append-only (path is treated as legacy inert debris). The SPA writes only 'mode' going forward and does not continue writing 'appendBehavior' on save.",
+          "properties": {
+            "path":           { "type": "string", "minLength": 1 },
+            "mode":           { "type": "string", "enum": ["outputPath","append"] },
+            "appendBehavior": { "type": "string", "enum": ["fresh","append"] },
+            "appendFile":     { "type": "string", "minLength": 1 }
+          },
+          "allOf": [
+            { "$comment": "S26 Rule 1: mode='outputPath' requires path; appendFile forbidden.",
+              "if":   { "properties": { "mode": { "const": "outputPath" } }, "required": ["mode"] },
+              "then": { "required": ["path"], "not": { "required": ["appendFile"] } } },
+            { "$comment": "S26 Rule 2: mode='append' requires appendFile.",
+              "if":   { "properties": { "mode": { "const": "append" } }, "required": ["mode"] },
+              "then": { "required": ["appendFile"] } },
+            { "$comment": "S26 Rule 3: mode and appendBehavior must agree when both present (outputPath<->fresh).",
+              "if":   { "allOf": [ { "required": ["mode"] }, { "required": ["appendBehavior"] }, { "properties": { "mode": { "const": "outputPath" } } } ] },
+              "then": { "properties": { "appendBehavior": { "const": "fresh" } } } },
+            { "$comment": "S26 Rule 4: mode and appendBehavior must agree when both present (append<->append).",
+              "if":   { "allOf": [ { "required": ["mode"] }, { "required": ["appendBehavior"] }, { "properties": { "mode": { "const": "append" } } } ] },
+              "then": { "properties": { "appendBehavior": { "const": "append" } } } },
+            { "$comment": "M2.2 legacy Rule A: appendBehavior='append' requires appendFile (preserved for recipes without explicit mode).",
+              "if":   { "properties": { "appendBehavior": { "const": "append" } }, "required": ["appendBehavior"] },
+              "then": { "required": ["appendFile"] } },
+            { "$comment": "M2.2 legacy Rule B: appendBehavior='fresh' or absent forbids appendFile (preserved for recipes without explicit mode). Skipped when mode='append' is explicitly set (S26 Rule 2 governs).",
+              "if":   { "allOf": [
+                          { "not": { "required": ["mode"] } },
+                          { "anyOf": [
+                              { "not": { "required": ["appendBehavior"] } },
+                              { "properties": { "appendBehavior": { "const": "fresh" } } }
+                            ] }
+                       ] },
+              "then": { "not": { "required": ["appendFile"] } } },
+            { "$comment": "S26 Rule 5: at least one of {path, appendFile} must be present so the recipe carries a fact output target. The procedural validator enforces this against effective mode; this allOf entry is the SPA AJV mirror.",
+              "anyOf": [
+                { "required": ["path"] },
+                { "required": ["appendFile"] }
+              ]
+            }
+          ]
+        },
+        "userInfo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "$comment": "V1.S26: destinations.userInfo is the optional user-info output channel. mode='outputPath' projects -OutputPathUserInfo <path>; mode='append' projects -AppendUserInfo <appendFile>; the two are mutually exclusive (the adapter never emits both). userInfo is REQUIRED when query.mode='userInfoOnly' (Shape 3); OPTIONAL when query.mode='audit' (or absent) and ingredients.entraUserData.includeUserInfo=true (the user-info channel is co-located with fact by default); FORBIDDEN when ingredients.entraUserData.includeUserInfo=false and query.mode!='userInfoOnly' (no user-info data to write). Cross-shape gating is enforced procedurally at the broker and via root-level allOf below for SPA AJV.",
+          "properties": {
+            "mode":       { "type": "string", "enum": ["outputPath","append"] },
+            "path":       { "type": "string", "minLength": 1 },
+            "appendFile": { "type": "string", "minLength": 1 }
+          },
+          "allOf": [
+            { "if":   { "properties": { "mode": { "const": "outputPath" } } },
+              "then": { "required": ["path"], "not": { "required": ["appendFile"] } } },
+            { "if":   { "properties": { "mode": { "const": "append" } } },
+              "then": { "required": ["appendFile"], "not": { "required": ["path"] } } }
+          ]
+        }
+      }
+    },
+
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "$comment": "tenantId is recipe content only for the app-registration modes, where the operator types it (it projects to -TenantId); it is still pattern-validated whenever present. For the interactive modes (WebLogin, DeviceCode) and ManagedIdentity the tenant is resolved at run time. chefKeyId is an OPTIONAL reference to a saved Chef's Key (CK-1, Windows-Credential-Manager-backed): App-registration recipes need a bound Chef's Key to be READY but may be SAVED without one (binding is a runtime-readiness concern, not a save-blocking field), and WebLogin/DeviceCode may optionally bind one for unattended scheduling. No secret material is ever stored inside a recipe -- the Chef's Key holds the client id / certificate thumbprint, and any client secret lives only in Windows Credential Manager under the appliance's process identity.",
+      "properties": {
+        "mode":           { "type": "string", "enum": ["WebLogin", "DeviceCode", "AppRegistrationSecret", "AppRegistrationCertificate", "ManagedIdentity"] },
+        "tenantId":       { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "chefKeyId":      { "type": "string", "pattern": "^[A-Za-z0-9-]{1,64}$" }
+      },
+      "allOf": [
+        { "$comment": "App-registration sign-in is non-interactive, so the tenant must be declared in the recipe. Chef's Key binding is NOT required at save time (it is a readiness gate), so chefKeyId is not required here.",
+          "if": { "properties": { "mode": { "enum": ["AppRegistrationSecret", "AppRegistrationCertificate"] } }, "required": ["mode"] },
+          "then": { "required": ["tenantId"] } }
+      ]
+    },
+
+    "advanced": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extraArguments": { "type": "string" }
+      }
+    },
+
+    "importMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OPTIONAL provenance bag stamped once at recipe creation when the recipe was materialized from an external import envelope (e.g. Mini-Kitchen lite). Always omitted for recipes authored directly in Cookbook. The bag is informational only; it does not affect cook behaviour, scheduling, auth binding, or destination resolution. It is preserved verbatim across PUT updates by the broker (the SPA editor does not need to echo it back, the same way it does not need to echo createdBy). Every field is OPTIONAL except 'source' so older import envelopes can be added without breaking existing on-disk recipes.",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["mini-kitchen-lite"]
+        },
+        "importedAtUtc": { "type": "string", "format": "date-time" },
+        "originalKind": {
+          "type": "string",
+          "enum": ["pax-cookbook-mini-recipe"]
+        },
+        "originalSchemaVersion": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "originalIdentity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "description": { "type": "string", "maxLength": 4000 },
+            "tags": {
+              "type": "array",
+              "maxItems": 64,
+              "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+            }
+          }
+        },
+        "originalCreatedBy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "site": { "type": "string", "minLength": 1, "maxLength": 512 }
+          }
+        },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cookbookRecipeSchemaVersion": { "type": "integer" }
+          }
+        },
+        "commandPreview": { "type": "string", "maxLength": 8000 },
+        "permissions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "importBehavior": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": { "type": "string", "enum": ["needsPrep"] },
+            "openInPrepStation": { "type": "boolean" }
+          }
+        },
+        "mappingWarnings": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code"],
+            "properties": {
+              "code":   { "type": "string", "minLength": 1, "maxLength": 64 },
+              "path":   { "type": "string", "maxLength": 256 },
+              "detail": { "type": "string", "maxLength": 1024 }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "allOf": [
+    {
+      "$comment": "Execution-mode × auth-mode matrix. local-manual and local-scheduled both permit WebLogin, DeviceCode, AppRegistrationSecret, and AppRegistrationCertificate: a bound Chef's Key carries the scheduled-run identity (WebLogin still needs the operator present for MFA; DeviceCode delivers a sign-in code; App-registration runs fully unattended). ManagedIdentity is blocked outside Azure-hosted / Fabric-hosted environments (local desktops do not expose IMDS in a bounded/truthful way). App* modes are universally allowed.",
+      "if":   { "properties": { "executionMode": { "const": "local-manual" } } },
+      "then": { "properties": { "auth": { "properties": { "mode": { "enum": ["WebLogin","DeviceCode","AppRegistrationSecret","AppRegistrationCertificate"] } } } } }
+    },
+    {
+      "if":   { "properties": { "executionMode": { "const": "local-scheduled" } } },
+      "then": { "properties": { "auth": { "properties": { "mode": { "enum": ["WebLogin","DeviceCode","AppRegistrationSecret","AppRegistrationCertificate"] } } } } }
+    },
+    {
+      "if":   { "properties": { "executionMode": { "const": "fabric-hosted" } } },
+      "then": { "properties": { "auth": { "properties": { "mode": { "enum": ["ManagedIdentity","AppRegistrationSecret","AppRegistrationCertificate"] } } } } }
+    },
+    {
+      "if":   { "properties": { "executionMode": { "const": "azure-hosted" } } },
+      "then": { "properties": { "auth": { "properties": { "mode": { "enum": ["ManagedIdentity","AppRegistrationSecret","AppRegistrationCertificate"] } } } } }
+    },
+    {
+      "$comment": "Audit shape (query.mode='audit' or absent): query.startDate, query.endDate, and destinations.fact are REQUIRED. processing.rollup is OPTIONAL -- a recipe may pull raw Purview audit data with no rollup; when present it is emitted as -Rollup / -RollupPlusRaw, when absent the runtime command simply omits it. (Supersedes the earlier V1.S26 rule that required processing.rollup under audit.)",
+      "if":   { "anyOf": [
+                  { "not": { "properties": { "query": { "required": ["mode"] } } } },
+                  { "properties": { "query": { "properties": { "mode": { "const": "audit" } }, "required": ["mode"] } } }
+                ] },
+      "then": { "properties": {
+                  "query":        { "required": ["startDate", "endDate"] },
+                  "destinations": { "required": ["fact"] }
+                } }
+    },
+    {
+      "$comment": "V1.S26 Shape 3 (query.mode='userInfoOnly'): processing.rollup is FORBIDDEN; ingredients.m365Usage.includeM365Usage must be false; ingredients.m365Usage.includeCopilotInteraction is FORBIDDEN; ingredients.entraUserData.includeUserInfo must be true; audit-only filter fields (activityTypes, userIds, groupNames, agentFilter, promptFilter) and audit dates (startDate, endDate) are FORBIDDEN; destinations.userInfo is REQUIRED; destinations.fact is FORBIDDEN.",
+      "if":   { "properties": { "query": { "properties": { "mode": { "const": "userInfoOnly" } }, "required": ["mode"] } } },
+      "then": {
+        "properties": {
+          "processing":   { "not": { "required": ["rollup"] } },
+          "ingredients":  { "properties": {
+                              "m365Usage":     { "properties": { "includeM365Usage": { "const": false } }, "not": { "required": ["includeCopilotInteraction"] } },
+                              "entraUserData": { "properties": { "includeUserInfo": { "const": true } } }
+                            } },
+          "query":        { "allOf": [
+                              { "not": { "required": ["activityTypes"] } },
+                              { "not": { "required": ["userIds"] } },
+                              { "not": { "required": ["groupNames"] } },
+                              { "not": { "required": ["agentFilter"] } },
+                              { "not": { "required": ["promptFilter"] } },
+                              { "not": { "required": ["startDate"] } },
+                              { "not": { "required": ["endDate"] } }
+                            ] },
+          "destinations": { "required": ["userInfo"], "not": { "required": ["fact"] } }
+        }
+      }
+    },
+    {
+      "$comment": "V1.S26 Shape 1 under rollup: query.activityTypes (if present) MUST equal exactly ['CopilotInteraction'] (the only rollup-compatible activity).",
+      "if":   { "allOf": [
+                  { "properties": { "processing": { "required": ["rollup"] } } },
+                  { "properties": { "query": { "required": ["activityTypes"] } } }
+                ] },
+      "then": { "properties": { "query": { "properties": { "activityTypes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "items": { "const": "CopilotInteraction" }
+                } } } } }
+    },
+    {
+      "$comment": "V1.S26 Shape 2 gate: ingredients.m365Usage.includeCopilotInteraction=false is ONLY valid when includeM365Usage=true.",
+      "if":   { "properties": { "ingredients": { "properties": { "m365Usage": {
+                  "properties": { "includeCopilotInteraction": { "const": false } },
+                  "required":   ["includeCopilotInteraction"]
+                } } } } },
+      "then": { "properties": { "ingredients": { "properties": { "m365Usage": {
+                  "properties": { "includeM365Usage": { "const": true } }
+                } } } } }
+    },
+    {
+      "$comment": "V1.S26 destinations.userInfo presence gate: when query.mode != 'userInfoOnly', userInfo is only valid if ingredients.entraUserData.includeUserInfo=true (no user-info data is produced otherwise).",
+      "if":   { "allOf": [
+                  { "properties": { "destinations": { "required": ["userInfo"] } } },
+                  { "anyOf": [
+                      { "not": { "properties": { "query": { "required": ["mode"] } } } },
+                      { "properties": { "query": { "properties": { "mode": { "const": "audit" } } } } }
+                    ] }
+                ] },
+      "then": { "properties": { "ingredients": { "properties": { "entraUserData": {
+                  "properties": { "includeUserInfo": { "const": true } }
+                } } } } }
+    }
+  ]
+}

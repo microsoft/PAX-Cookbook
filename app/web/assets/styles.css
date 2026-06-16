@@ -1,0 +1,6034 @@
+/* PAX Cookbook - shared stylesheet.
+ *
+ * Premium operational UI for a local-first desktop-style tool:
+ *   - desktop-first, information-dense
+ *   - system font stack only (no Google Fonts, no CDN pulls)
+ *   - restrained hierarchy; Microsoft admin-center / Azure portal density
+ *   - no gradients, no glassmorphism, no animations beyond hover/focus
+ *   - 120 ms transitions, single-purpose
+ *   - subtle shadow on the topbar only; everything else uses borders
+ *
+ * All color, spacing, radius, type, and effect values flow from
+ * tokens.css. New hard-coded hex values must not be introduced here.
+ *
+ * Semantic class names only. No utility-CSS primitives. Class names
+ * describe the thing, not the styling.
+ *
+ * Required structural contract (JS reads these IDs / classes):
+ *   #recipe-status (+ .empty / .error state classes)
+ *   #recipe-table  #recipe-table-body
+ *   #broker-host   #token-status (+ .ok / .miss)
+ *   #reload-button
+ *   .col-name .col-status .col-time .col-id .col-actions
+ */
+
+* { box-sizing: border-box; }
+
+:focus { outline: none; }
+:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0ms !important;
+        animation-duration: 0ms !important;
+    }
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--c-bg);
+    color: var(--c-fg);
+    font-family: var(--type-sans);
+    font-size: var(--font-14);
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+code, pre, .mono {
+    font-family: var(--type-mono);
+    font-size: var(--font-13);
+}
+
+/* Global anchor styling. All four pseudo-class states route through
+   the dedicated link tokens (--c-link / --c-link-hover / --c-link-active)
+   so visited links never fall back to the browser-default purple, keyboard
+   focus surfaces a consistent ring, and link text reads as restrained PAX
+   navy rather than the generic bright browser link blue. The primary-button
+   --c-accent token is intentionally NOT used for link text -- it remains
+   reserved for button fill, focus rings, accent borders, and info banners.
+   text-decoration stays off by default; the existing classed anchors
+   (.skip-link, .topbar-brand, .nav-item, .btn-ghost, .breadcrumb-link,
+   .empty-onboarding-link, .help-panel-topic a, etc.) still win on
+   their own selectors via higher specificity. */
+a, a:link, a:visited {
+    color: var(--c-link);
+    text-decoration: none;
+}
+a:hover {
+    color: var(--c-link-hover);
+}
+a:active {
+    color: var(--c-link-active);
+}
+a:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-s);
+}
+
+/* ----------------------------------------------------------------- */
+/* Skip-link (Phase U: keyboard ergonomics).                          */
+/*                                                                    */
+/* Hidden by default. Becomes visible (top-left, on the surface) when */
+/* it receives keyboard focus -- e.g., the very first Tab keypress    */
+/* after page load. Activating it focuses #page-root, letting the     */
+/* operator jump past the nav rail to the page body without tabbing   */
+/* through the four nav items every reload.                           */
+/*                                                                    */
+/* Calm, restrained styling: matches the topbar palette and chip      */
+/* idiom; no animation; no transform; no decorative shadow.           */
+/* ----------------------------------------------------------------- */
+.skip-link {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface);
+    color: var(--c-fg);
+    border: 1px solid var(--c-border-strong);
+    border-radius: var(--radius-s);
+    font-size: var(--font-13);
+    text-decoration: none;
+    /* Visually hidden but kept in the accessibility tree and the      */
+    /* tab order: clip the box to a 1-pixel sliver in the corner.     */
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+    /* Reveal: drop the clip, restore the natural box, become an       */
+    /* obvious, calm operational chip in the top-left corner.          */
+    clip: auto;
+    clip-path: none;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    white-space: normal;
+    margin: var(--space-2);
+    box-shadow: var(--focus-ring);
+}
+
+/* Noscript banner: rendered only when scripting is disabled. Plain   */
+/* operational notice -- not a marketing pitch, not a download CTA.   */
+.noscript-notice {
+    margin: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-warn-bg);
+    color: var(--c-warn);
+    border: 1px solid var(--c-warn);
+    border-radius: var(--radius-s);
+    font-size: var(--font-13);
+}
+
+/* ------------------------------------------------------------------ */
+/* App shell                                                          */
+/* ------------------------------------------------------------------ */
+
+.app {
+    display: grid;
+    grid-template-rows: var(--topbar-h) 1fr;
+    min-height: 100vh;
+}
+
+.app-body {
+    display: grid;
+    grid-template-columns: var(--rail-w) 1fr;
+    min-height: 0;
+}
+
+/* V1.S15: When the help panel is open on desktop, shift the main
+   content area left by the panel width so the panel docks beside
+   content instead of overlaying it. The panel itself remains a
+   position:fixed element (see .help-panel below) so it does not
+   participate in the grid; this padding is what reserves space. */
+body.help-panel-open .app-body {
+    padding-right: var(--help-panel-w);
+}
+
+@media (max-width: 900px) {
+    .app-body { grid-template-columns: var(--rail-w-collapsed) 1fr; }
+    body.help-panel-open .app-body { padding-right: 0; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Topbar                                                             */
+/* ------------------------------------------------------------------ */
+
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-5);
+    padding: 0 var(--space-5);
+    background: var(--c-bg-elevated);
+    color: var(--c-fg-on-elevated);
+    border-bottom: 1px solid var(--c-border-topbar);
+    box-shadow: var(--shadow-1);
+}
+
+.topbar-brand {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    padding: var(--space-1) 0;
+    border-radius: var(--radius-s);
+    transition: background-color 120ms ease;
+}
+.topbar-brand:hover {
+    background: var(--c-overlay-soft);
+}
+
+.topbar-logo {
+    height: 24px;
+    width: auto;
+    max-width: calc(var(--rail-w) - 40px);
+    display: block;
+    image-rendering: auto;
+}
+
+.topbar-status {
+    display: inline-flex;
+    align-items: center;
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    margin-left: var(--space-5);
+    gap: var(--space-3);
+    font-size: var(--font-12);
+    color: var(--c-fg-on-elevated-muted);
+    min-width: 0;
+}
+
+/* Two-row compact status cluster. The brand image owns the far-left
+   slot of .topbar; the status cluster sits immediately to its right
+   and grows to fill the available space, while .topbar-actions stays
+   pinned to the far right. */
+.topbar-status-cluster {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    line-height: 1.2;
+}
+.status-row {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.status-item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+}
+
+.topbar-status code {
+    color: var(--c-fg-on-elevated);
+    background: var(--c-overlay-soft);
+    padding: 1px var(--space-2);
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+}
+
+/* Token status pill - styled by ID because JS replaces className. */
+#token-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 1px var(--space-2);
+    border-radius: 999px;
+    background: var(--c-overlay-soft);
+    color: var(--c-fg-on-elevated-muted);
+    font-weight: 500;
+}
+#token-status::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--c-fg-subtle);
+}
+#token-status.ok           { color: var(--c-success-soft); }
+#token-status.ok::before   { background: var(--c-success-soft); }
+#token-status.miss         { color: var(--c-error-soft); }
+#token-status.miss::before { background: var(--c-error-soft); }
+
+/* Broker status pill (Phase AE). Five truthful labels:
+   unknown / ok / degraded / unreachable / unauthorized. Styled by ID
+   because broker-status.js replaces className on every state
+   transition. Matches the token-status visual idiom (dot + label)
+   so the topbar reads as a coherent status strip. */
+#broker-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 1px var(--space-2);
+    border-radius: 999px;
+    background: var(--c-overlay-soft);
+    color: var(--c-fg-on-elevated-muted);
+    font-weight: 500;
+}
+#broker-status::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--c-fg-subtle);
+}
+#broker-status.unknown               { color: var(--c-fg-on-elevated-muted); }
+#broker-status.unknown::before       { background: var(--c-fg-subtle); }
+#broker-status.ok                    { color: var(--c-success-soft); }
+#broker-status.ok::before            { background: var(--c-success-soft); }
+#broker-status.degraded              { color: var(--c-warn); }
+#broker-status.degraded::before      { background: var(--c-warn); }
+#broker-status.unreachable           { color: var(--c-error-soft); }
+#broker-status.unreachable::before   { background: var(--c-error-soft); }
+#broker-status.unauthorized          { color: var(--c-error-soft); }
+#broker-status.unauthorized::before  { background: var(--c-error-soft); }
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                            */
+/* ------------------------------------------------------------------ */
+
+.btn-primary,
+.btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    font: inherit;
+    font-size: var(--font-13);
+    font-weight: 500;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.btn-primary {
+    background: var(--c-accent);
+    color: var(--c-accent-fg);
+    border: 1px solid var(--c-accent-active);
+}
+.btn-primary:hover:not(:disabled) { background: var(--c-accent-hover); }
+.btn-primary:disabled {
+    background: var(--c-border-strong);
+    border-color: var(--c-border-strong);
+    color: var(--c-fg-subtle);
+    cursor: not-allowed;
+}
+
+.btn-ghost {
+    background: transparent;
+    color: var(--c-link);
+    border: 1px solid transparent;
+}
+.btn-ghost:hover:not(:disabled) { background: var(--c-bg-hover); }
+.btn-ghost:disabled {
+    color: var(--c-fg-subtle);
+    cursor: not-allowed;
+}
+
+/* Topbar-context ghost button: light-on-dark variant. */
+.topbar .btn-ghost {
+    background: var(--c-overlay-soft);
+    color: var(--c-fg-on-elevated);
+}
+.topbar .btn-ghost:hover:not(:disabled) { background: var(--c-overlay-hover); }
+.topbar .btn-ghost:disabled {
+    background: transparent;
+    color: var(--c-fg-on-elevated-muted);
+    opacity: 0.5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Nav rail                                                           */
+/* ------------------------------------------------------------------ */
+
+.nav-rail {
+    background: var(--c-bg-rail);
+    border-right: 1px solid var(--c-border);
+    padding: var(--space-3) var(--space-2);
+    overflow-y: auto;
+}
+
+.nav-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    /* Scoot the icon+label group right under the rail logo so the
+       primary nav reads as deliberate, not edge-pinned. Cleared
+       on the collapsed/mobile rail below so icons stay centered. */
+    padding-left: var(--nav-indent);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-m);
+    color: var(--c-fg);
+    font-size: var(--font-13);
+    font-weight: 500;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+.nav-item:hover { background: var(--c-bg-hover); color: var(--c-fg); }
+.nav-item[aria-current="page"] {
+    background: var(--c-accent-soft-bg);
+    color: var(--c-link);
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--c-accent);
+}
+
+.nav-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--c-fg-muted);
+}
+.nav-item:hover .nav-icon              { color: var(--c-fg); }
+.nav-item[aria-current="page"] .nav-icon { color: var(--c-accent); }
+
+/* A single hairline divider groups the lower rail items (Pantry, Settings)
+   apart from the working sections above, matching the workspace layout. */
+.nav-sep {
+    height: 0;
+    margin: var(--space-2) var(--space-3);
+    border-top: 1px solid var(--c-border);
+    list-style: none;
+}
+
+
+@media (max-width: 900px) {
+    .nav-label { display: none; }
+    .nav-list  { padding-left: 0; }
+    .nav-item  { justify-content: center; padding: var(--space-2); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Main content area                                                  */
+/* ------------------------------------------------------------------ */
+
+.app-main {
+    padding: var(--space-4) var(--space-5) var(--space-6);
+    overflow: auto;
+    min-width: 0;
+}
+
+.breadcrumb {
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    margin-bottom: var(--space-3);
+    letter-spacing: 0.1px;
+}
+
+.page {
+    max-width: var(--content-max);
+}
+
+/* ------------------------------------------------------------------ */
+/* Page header (V1.S13 standardized pattern).                         */
+/*                                                                    */
+/* The page-header is a single coherent block: title on the left,    */
+/* the supporting paragraph (page-lede) immediately to the right of  */
+/* the title, and an optional .page-actions group floated to the     */
+/* right. Pages that wrap title + lede in a .page-header-text block  */
+/* get the inline layout; pages that omit the wrapper get the legacy */
+/* stacked behavior preserved by the .page-lede rule further below.  */
+/* ------------------------------------------------------------------ */
+.page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.page-header-text {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+}
+
+.page-header .page-actions {
+    margin-left: auto;
+    margin-top: 0;
+}
+
+.page-header .editor-actions {
+    margin-left: auto;
+}
+
+.page-title {
+    margin: 0;
+    font-size: var(--font-20);
+    font-weight: 600;
+    letter-spacing: -0.1px;
+    color: var(--c-fg);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+/* ------------------------------------------------------------------ */
+/* Page section -- vertical stack rhythm shared by every list page.   */
+/* The wrapper gap controls the spacing between the status banner,    */
+/* the page banner, the onboarding card, and the table beneath them.  */
+/* ------------------------------------------------------------------ */
+
+.recipe-section,
+.cooks-section,
+.authprof-section { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.recipe-status {
+    padding: var(--space-3) var(--space-4);
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+    color: var(--c-fg);
+    font-size: var(--font-13);
+}
+
+.recipe-status.empty {
+    color: var(--c-fg-muted);
+    background: var(--c-bg-surface);
+    border-style: dashed;
+}
+
+.recipe-status.error {
+    border-color: var(--c-error);
+    background: var(--c-error-bg);
+    color: var(--c-error);
+}
+
+/* ------------------------------------------------------------------ */
+/* Recipe table                                                       */
+/* ------------------------------------------------------------------ */
+
+.recipe-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+    overflow: hidden;
+}
+
+.recipe-table th,
+.recipe-table td {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--c-border);
+    vertical-align: top;
+    font-size: var(--font-13);
+}
+
+.recipe-table th {
+    background: var(--c-bg-surface-alt);
+    font-weight: 600;
+    white-space: nowrap;
+    font-size: var(--font-12);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--c-fg-muted);
+    border-bottom: 1px solid var(--c-border-strong);
+}
+
+.recipe-table tbody tr:last-child td { border-bottom: none; }
+.recipe-table tbody tr:hover td      { background: var(--c-bg-hover); }
+
+.recipe-table td.col-id      { font-family: var(--type-mono); color: var(--c-fg);       white-space: nowrap; font-size: var(--font-12); }
+.recipe-table td.col-time    { font-family: var(--type-mono); color: var(--c-fg-muted); white-space: nowrap; font-size: var(--font-12); }
+.recipe-table td.col-status  { white-space: nowrap; }
+.recipe-table td.col-actions { color: var(--c-fg-muted); font-size: var(--font-12); white-space: nowrap; }
+.recipe-table td.col-name    { font-weight: 600; color: var(--c-fg); }
+
+/* ------------------------------------------------------------------ */
+/* Inline SVG icon sprite (hidden, referenced via <use>)              */
+/* ------------------------------------------------------------------ */
+
+.icon-sprite {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Recipe editor (skeleton)                                           */
+/* ------------------------------------------------------------------ */
+
+.recipe-editor { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.editor-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.editor-grid {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: var(--space-4);
+    align-items: start;
+}
+
+.editor-cards {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+.editor-card {
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+    padding: var(--space-3) var(--space-4);
+}
+
+.editor-card-title,
+.editor-preview-title {
+    margin: 0 0 var(--space-2);
+    font-size: var(--font-12);
+    font-weight: 600;
+    color: var(--c-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.editor-card-placeholder,
+.editor-preview-placeholder {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    font-style: italic;
+}
+
+.editor-preview {
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+    padding: var(--space-3) var(--space-4);
+    position: sticky;
+    top: var(--space-4);
+}
+
+@media (max-width: 900px) {
+    .editor-grid { grid-template-columns: 1fr; }
+    .editor-preview { position: static; }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Recipe editor -- form fields                                       */
+/* ------------------------------------------------------------------ */
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-3);
+}
+
+.form-row:last-child { margin-bottom: 0; }
+
+.form-row-two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+}
+
+.form-row-check {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.form-label {
+    font-size: var(--font-12);
+    font-weight: 600;
+    color: var(--c-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.form-label-inline {
+    font-size: var(--font-13);
+    color: var(--c-fg);
+    cursor: pointer;
+}
+
+.form-input {
+    font: inherit;
+    font-size: var(--font-13);
+    color: var(--c-fg);
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border-strong);
+    border-radius: var(--radius-s);
+    padding: var(--space-1) var(--space-2);
+    width: 100%;
+    min-width: 0;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.form-input:focus-visible {
+    outline: none;
+    border-color: var(--c-accent);
+    box-shadow: var(--focus-ring);
+}
+
+.form-input-mono {
+    font-family: var(--type-mono);
+    font-size: var(--font-13);
+}
+
+textarea.form-input {
+    resize: vertical;
+    min-height: 2.2em;
+    line-height: 1.4;
+}
+
+select.form-input {
+    cursor: pointer;
+}
+
+.form-checkbox {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--c-accent);
+    margin: 0;
+}
+
+.form-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--space-2);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    font-weight: 500;
+    width: max-content;
+}
+
+.form-hint {
+    font-size: var(--font-12);
+    color: var(--c-fg-subtle);
+    font-style: italic;
+}
+
+.field-error {
+    font-size: var(--font-12);
+    color: var(--c-error);
+    min-height: 0;
+}
+
+.field-error:empty {
+    display: none;
+}
+
+.form-input[aria-invalid="true"],
+.form-row .field-error:not(:empty) ~ .form-input {
+    border-color: var(--c-error);
+}
+
+/* When the error slot is non-empty, mark the corresponding input.
+ * Implemented purely with attribute selectors via aria-describedby
+ * relationships is impractical in vanilla CSS; the editor JS does not
+ * set aria-invalid in this slice, so the visual cue is the error text
+ * below the field rather than a red input border. */
+
+/* ------------------------------------------------------------------ */
+/* Recipe editor -- top banner                                        */
+/* ------------------------------------------------------------------ */
+
+.editor-banner {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-s);
+    border: 1px solid transparent;
+    font-size: var(--font-13);
+    margin-bottom: var(--space-3);
+}
+
+.editor-banner[hidden] { display: none; }
+
+.banner-success {
+    background: var(--c-success-bg);
+    border-color: var(--c-success);
+    color: var(--c-success);
+}
+
+.banner-error {
+    background: var(--c-error-bg);
+    border-color: var(--c-error);
+    color: var(--c-error);
+}
+
+.banner-network {
+    background: var(--c-warn-bg);
+    border-color: var(--c-warn);
+    color: var(--c-warn);
+}
+
+.banner-info {
+    background: var(--c-accent-soft-bg);
+    border-color: var(--c-accent);
+    color: var(--c-accent-active);
+}
+
+.banner-retry {
+    margin-left: var(--space-2);
+    padding: 2px var(--space-2);
+    font-size: var(--font-12);
+}
+
+/* ------------------------------------------------------------------ */
+/* Recipe editor -- preview rail render states                        */
+/* ------------------------------------------------------------------ */
+
+.editor-preview-body {
+    margin: 0;
+}
+
+.editor-preview-status {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    font-style: italic;
+}
+
+.preview-success-heading,
+.preview-error-heading {
+    margin: 0 0 var(--space-2);
+    font-size: var(--font-12);
+    font-weight: 600;
+    color: var(--c-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.preview-error-heading {
+    color: var(--c-error);
+}
+
+.preview-command {
+    margin: 0 0 var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow: visible;
+}
+
+.preview-caption {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-subtle);
+}
+
+.preview-error-list {
+    margin: 0 0 var(--space-2);
+    padding-left: var(--space-4);
+    font-size: var(--font-13);
+    color: var(--c-error);
+}
+
+.preview-error-list li {
+    margin-bottom: var(--space-1);
+}
+
+.preview-error-detail {
+    margin: 0 0 var(--space-2);
+    font-size: var(--font-13);
+    color: var(--c-fg);
+}
+
+.preview-retry {
+    padding: 2px var(--space-2);
+    font-size: var(--font-12);
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase J: provenance subtitle (editor origin)                       */
+/* ------------------------------------------------------------------ */
+
+.editor-origin {
+    margin: 0 0 var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-left: 3px solid var(--c-accent);
+    background: var(--c-bg-surface-alt);
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+
+.editor-origin[hidden] { display: none; }
+
+.editor-origin-label {
+    color: var(--c-fg-muted);
+}
+
+.editor-origin-id,
+.editor-origin-version {
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+}
+
+.editor-origin-sep {
+    color: var(--c-fg-subtle);
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase J: per-card explanatory copy                                 */
+/* ------------------------------------------------------------------ */
+
+.editor-card-doc {
+    margin: 0 0 var(--space-3);
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    line-height: 1.45;
+}
+
+.editor-card-doc code,
+.form-hint code {
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    background: var(--c-bg-surface-alt);
+    padding: 0 4px;
+    border-radius: 3px;
+    color: var(--c-fg);
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase J: argv list in preview success                              */
+/* ------------------------------------------------------------------ */
+
+.preview-argv-heading {
+    margin-top: var(--space-3);
+}
+
+.preview-argv-list {
+    margin: 0 0 var(--space-2);
+    padding-left: var(--space-4);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    list-style: decimal;
+}
+
+.preview-argv-token {
+    margin-bottom: 2px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.preview-argv-empty {
+    color: var(--c-fg-subtle);
+    font-style: italic;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase J: server-managed metadata strip                             */
+/* ------------------------------------------------------------------ */
+
+.editor-meta-card[hidden] { display: none; }
+
+.editor-meta-strip {
+    margin: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-1) var(--space-3);
+    font-size: var(--font-12);
+}
+
+.editor-meta-key {
+    margin: 0;
+    color: var(--c-fg-muted);
+}
+
+.editor-meta-value {
+    margin: 0;
+    font-family: var(--type-mono);
+    color: var(--c-fg);
+    word-break: break-all;
+}
+
+/* ================================================================== */
+/* Recipe-list row actions (Open / Cook)                              */
+/* ================================================================== */
+
+.row-action {
+    font: inherit;
+    font-size: var(--font-13);
+    color: var(--c-link);
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.row-action:hover { text-decoration: underline; color: var(--c-link-hover); }
+
+.row-action:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-s);
+}
+
+.row-action[disabled] {
+    color: var(--c-fg-subtle);
+    cursor: default;
+    text-decoration: none;
+}
+
+/* Variant identifiers: Open (default action) and Cook (primary
+ * action). Visual treatment is currently identical; the modifier
+ * classes are kept as explicit hooks for future tinting and as
+ * stable selectors for click delegation. */
+.row-action-open {
+    /* default .row-action treatment */
+}
+.row-action-cook {
+    font-weight: 600;
+}
+
+/* Pin / unpin toggle (X11A). The star glyph carries the state at a
+ * glance; the gold accent only applies once a recipe is pinned. The
+ * button shares the .row-action base so its sizing and focus ring
+ * match Open / Bake Recipe. */
+.row-action-pin {
+    color: var(--c-fg-subtle);
+}
+.row-action-pin[aria-pressed="true"] {
+    color: #b8860b;
+    font-weight: 600;
+}
+
+/* Pinned rows are nudged out of the default body treatment so the
+ * pinned group (which the broker returns first) reads as distinct.
+ * Subtle: a faint accent left border and a barely-tinted background,
+ * no animation. */
+.recipe-row--pinned > td {
+    background: var(--c-bg-subtle, rgba(184, 134, 11, 0.04));
+}
+.recipe-row--pinned > td.col-name {
+    box-shadow: inset 3px 0 0 0 #b8860b;
+}
+
+/* ================================================================== */
+/* Cook status chip (shared by cook-view and recent-runs rail)        */
+/* ================================================================== */
+
+.cook-status-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    border: 1px solid transparent;
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg-muted);
+}
+
+.cook-status-chip.status-running {
+    background: var(--c-accent-soft-bg);
+    color: var(--c-accent);
+    border-color: var(--c-accent);
+}
+
+.cook-status-chip.status-completed {
+    background: var(--c-success-bg);
+    color: var(--c-success);
+    border-color: var(--c-success);
+}
+
+.cook-status-chip.status-errored {
+    background: var(--c-error-bg);
+    color: var(--c-error);
+    border-color: var(--c-error);
+}
+
+.cook-status-chip.status-interrupted {
+    background: var(--c-warn-bg);
+    color: var(--c-warn);
+    border-color: var(--c-warn);
+}
+
+.cook-status-chip.status-unknown {
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg-subtle);
+    border-color: var(--c-border-strong);
+}
+
+/* V1.S03 -- resumability marker for interrupted cooks in the Runs   */
+/* list. Sits inline next to the status chip; intentionally smaller, */
+/* lower-contrast, and lower-case so it reads as a derived modifier  */
+/* of the 'interrupted' chip rather than a competing top-level       */
+/* status. The chip itself stays 'interrupted'; this badge merely    */
+/* signals that the broker's Test-CookResumable said yes.            */
+.cooks-resumable-marker {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--space-1);
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg-muted);
+    border: 1px solid var(--c-border);
+}
+
+/* V1.S06d -- trigger chip in the runs-list Recipe cell. Surfaces */
+/* the cook's trigger column inline next to the recipe name. The  */
+/* chip is informational; the cookId and status columns remain    */
+/* authoritative. 'scheduled' rows get a yellow-bordered chip;    */
+/* 'resume' rows get a neutral chip; manual rows omit the chip.   */
+.cook-trigger-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--space-1);
+    margin-right: var(--space-1);
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg-muted);
+    border: 1px solid var(--c-border);
+    text-transform: lowercase;
+}
+.cook-trigger-chip.cook-trigger-scheduled {
+    border-color: var(--c-warn-border, var(--c-border));
+    color: var(--c-warn-fg, var(--c-fg-muted));
+}
+.cook-trigger-chip.cook-trigger-resume {
+    border-color: var(--c-border);
+    color: var(--c-fg-muted);
+}
+
+/* V1.S06d -- recipe-editor "Last imported run" cookId link styles */
+/* mirror the muted-link treatment used elsewhere in the schedule  */
+/* status card. The anchor stays inline with the surrounding text. */
+.schedule-status-last-link {
+    color: var(--c-link, var(--c-fg-strong));
+    text-decoration: underline;
+    text-decoration-style: dotted;
+}
+.schedule-status-last-link:hover,
+.schedule-status-last-link:focus {
+    text-decoration-style: solid;
+}
+
+/* ================================================================== */
+/* Cook view page (#/cooks/<cookId>)                                  */
+/* ================================================================== */
+
+.cook-view {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.cook-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.cook-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.cook-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.cook-card {
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+    padding: var(--space-3) var(--space-4);
+}
+
+.cook-card-title {
+    margin: 0 0 var(--space-3);
+    font-size: var(--font-12);
+    font-weight: 600;
+    color: var(--c-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.cook-status-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.cook-status-detail {
+    font-size: var(--font-13);
+    color: var(--c-fg-muted);
+}
+
+.cook-status-detail:empty { display: none; }
+
+.cook-meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+    font-size: var(--font-13);
+}
+
+.cook-meta-label {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+}
+
+.cook-meta-value {
+    margin: 0;
+    color: var(--c-fg);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    word-break: break-all;
+}
+
+.cook-meta-value.cook-meta-empty {
+    color: var(--c-fg-subtle);
+    font-style: italic;
+    font-family: var(--type-sans);
+}
+
+.cook-sentinels {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.cook-sentinel {
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    background: var(--c-bg-surface-alt);
+    padding: var(--space-2) var(--space-3);
+}
+
+.cook-sentinel-name {
+    cursor: pointer;
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    list-style: revert;
+}
+
+.cook-sentinel-body {
+    margin: var(--space-2) 0 0;
+    padding: var(--space-2);
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.cook-empty {
+    margin: 0;
+    color: var(--c-fg-subtle);
+    font-size: var(--font-13);
+    font-style: italic;
+}
+
+.cook-artifacts {
+    overflow-x: auto;
+}
+
+.cook-artifact-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-13);
+}
+
+.cook-artifact-table th,
+.cook-artifact-table td {
+    text-align: left;
+    padding: var(--space-1) var(--space-3);
+    border-bottom: 1px solid var(--c-border);
+    vertical-align: top;
+}
+
+.cook-artifact-table th {
+    background: var(--c-bg-surface-alt);
+    font-weight: 600;
+    font-size: var(--font-12);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--c-fg-muted);
+    white-space: nowrap;
+}
+
+.cook-artifact-table tbody tr:last-child td { border-bottom: none; }
+
+.cook-artifact-table td {
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    word-break: break-all;
+}
+
+.cook-artifact-table td.cook-artifact-empty {
+    color: var(--c-fg-subtle);
+    font-style: italic;
+    font-family: var(--type-sans);
+}
+
+/* ================================================================== */
+/* Summary & metrics card (V1.S02)                                    */
+/*                                                                    */
+/* Surfaces pax-summary.json + the metrics JSON if PAX emitted them   */
+/* into the cook folder or alongside the fact destination. Defensive  */
+/* by design: absence and parse failure each have their own visible   */
+/* empty state, and a cook NEVER fails because these files are        */
+/* missing or malformed.                                              */
+/* ================================================================== */
+
+.cook-summary-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.cook-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.cook-summary-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    font-size: var(--font-12);
+}
+
+.cook-summary-chip-label {
+    color: var(--c-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-size: var(--font-11);
+}
+
+.cook-summary-chip-value {
+    color: var(--c-fg);
+    font-family: var(--type-mono);
+    font-weight: 600;
+}
+
+.cook-summary-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.cook-summary-section-title {
+    margin: 0;
+    font-size: var(--font-12);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--c-fg-muted);
+}
+
+.cook-summary-details {
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    background: var(--c-bg-surface-alt);
+}
+
+.cook-summary-disclosure {
+    cursor: pointer;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    user-select: none;
+}
+
+.cook-summary-disclosure:focus {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 1px;
+}
+
+.cook-summary-body {
+    margin: 0;
+    padding: var(--space-2);
+    border-top: 1px solid var(--c-border);
+    background: var(--c-console-bg);
+    color: var(--c-console-fg);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+    max-height: 24rem;
+    overflow-y: auto;
+}
+
+.cook-summary-error {
+    margin: 0;
+    color: var(--c-fg-danger, var(--c-fg));
+    font-size: var(--font-12);
+}
+
+.cook-summary-path {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+
+.cook-summary-path-label {
+    color: var(--c-fg-muted);
+}
+
+.cook-summary-path-value {
+    font-family: var(--type-mono);
+    color: var(--c-fg);
+    word-break: break-all;
+}
+
+.cook-summary-persisted-path {
+    border-top: 1px dashed var(--c-border);
+    padding-top: var(--space-2);
+}
+
+.cook-empty {
+    margin: 0;
+    color: var(--c-fg-subtle);
+    font-style: italic;
+    font-size: var(--font-12);
+}
+
+.cook-discovered-title {
+    margin-top: var(--space-3);
+}
+
+.cook-discovered-table {
+    /* Inherits .cook-artifact-table visual style. No overrides needed. */
+}
+
+/* ================================================================== */
+/* Cook console card -- historical log hydration                      */
+/*                                                                    */
+/* Renders the cook.log response body opaquely. Append-only: every    */
+/* node inside .cook-console is immutable after insertion. The seam   */
+/* marker is a structural anchor; it has no textual content.          */
+/* ================================================================== */
+
+.cook-console-card {
+    /* Inherits .cook-card visual frame; no overrides needed. */
+}
+
+.cook-console {
+    margin: 0;
+    padding: 12px;
+    min-height: 8rem;
+    max-height: 32rem;
+    overflow-x: auto;
+    overflow-y: auto;
+    background: var(--c-console-bg);
+    color: var(--c-console-fg);
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+}
+
+.cook-console:focus {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 1px;
+}
+
+.cook-console-seam {
+    height: 0;
+    margin: 0.5em 0;
+    border: 0;
+    border-top: 1px dashed var(--c-console-rule);
+}
+
+.cook-console-notice {
+    margin: 0.25em 0;
+    color: var(--c-console-notice);
+    font-style: italic;
+    font-family: var(--type-sans);
+}
+
+.cook-console-notice-unavailable {
+    color: var(--c-console-notice-unavailable);
+}
+
+.cook-console-notice-error {
+    color: var(--c-console-notice-error);
+}
+
+.cook-console-notice-terminal {
+    color: var(--c-console-notice-terminal);
+}
+
+/* ================================================================== */
+/* Recent runs rail (recipe editor, edit mode only)                   */
+/* ================================================================== */
+
+.recent-runs-card .editor-card-placeholder {
+    margin: 0;
+}
+
+.recent-runs-error {
+    color: var(--c-error);
+    font-style: normal;
+}
+
+.recent-runs-body {
+    overflow-x: auto;
+}
+
+.recent-runs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-13);
+}
+
+.recent-runs-table th,
+.recent-runs-table td {
+    text-align: left;
+    padding: var(--space-1) var(--space-3);
+    border-bottom: 1px solid var(--c-border);
+    vertical-align: middle;
+}
+
+.recent-runs-table th {
+    background: var(--c-bg-surface-alt);
+    font-weight: 600;
+    font-size: var(--font-12);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--c-fg-muted);
+    white-space: nowrap;
+}
+
+.recent-runs-table tbody tr:last-child td { border-bottom: none; }
+
+.recent-runs-col-start {
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    white-space: nowrap;
+}
+
+.recent-runs-col-status { white-space: nowrap; }
+
+.recent-runs-col-duration,
+.recent-runs-col-trigger {
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    white-space: nowrap;
+}
+
+.recent-runs-col-open { white-space: nowrap; }
+
+.recent-runs-open {
+    font-size: var(--font-13);
+    color: var(--c-link);
+    text-decoration: none;
+}
+
+.recent-runs-open:hover { text-decoration: underline; color: var(--c-link-hover); }
+
+.recent-runs-open:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-s);
+}
+
+/* --------------------------------------------------------------------
+ * Schedule card (V1.S06c)
+ *
+ * Same flat editor-card surface as Recent runs; no extra chrome. The
+ * disabled-banner shows the reason a recipe can't be scheduled (new
+ * recipe / non-local-manual / non-AppRegistration auth). The status
+ * lines are plain text; the stale line is colored with the standard
+ * warning token so chefs notice without an animated badge.
+ * -------------------------------------------------------------------- */
+
+.schedule-disabled-banner {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    background: var(--c-surface-2);
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+}
+
+.schedule-status {
+    margin-top: var(--space-2);
+}
+
+.schedule-status-line {
+    margin: 0 0 var(--space-1) 0;
+    font-size: var(--font-13);
+}
+
+.schedule-status-line:last-child { margin-bottom: 0; }
+
+.schedule-status-stale {
+    color: var(--c-warn, #b15c00);
+    font-weight: 600;
+}
+
+.schedule-status-last {
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+}
+
+/* V1.S07 -- Scheduled-task health pill. Renders as the first line  */
+/* in the Schedule card and gives the operator an at-a-glance       */
+/* signal for the eight possible health states. Modelled on         */
+/* .cook-trigger-chip; uses theme variables so dark mode is         */
+/* automatic.                                                       */
+.schedule-status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--space-2);
+    margin: 0 0 var(--space-2) 0;
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg-muted);
+    border: 1px solid var(--c-border);
+    text-transform: none;
+}
+.schedule-status-pill-current {
+    border-color: var(--c-ok-border, var(--c-border));
+    color:        var(--c-ok-fg,     var(--c-fg-strong));
+}
+.schedule-status-pill-stale {
+    border-color: var(--c-warn-border, var(--c-border));
+    color:        var(--c-warn,        var(--c-fg-muted));
+}
+.schedule-status-pill-last_run_failed {
+    border-color: var(--c-err-border, var(--c-border));
+    color:        var(--c-err,        var(--c-fg-muted));
+}
+.schedule-status-pill-last_run_refused {
+    border-color: var(--c-warn-border, var(--c-border));
+    color:        var(--c-warn,        var(--c-fg-muted));
+}
+.schedule-status-pill-last_run_interrupted {
+    border-color: var(--c-warn-border, var(--c-border));
+    color:        var(--c-warn,        var(--c-fg-muted));
+}
+.schedule-status-pill-last_run_running {
+    border-color: var(--c-border);
+    color:        var(--c-fg-strong);
+}
+.schedule-status-pill-not_registered {
+    border-color: var(--c-border);
+    color:        var(--c-fg-muted);
+}
+.schedule-status-pill-unknown {
+    border-color: var(--c-border);
+    color:        var(--c-fg-muted);
+}
+
+/* V1.S07 -- supporting lines inside the Schedule card.            */
+.schedule-status-checked {
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+}
+.schedule-status-terminal {
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+}
+.schedule-status-terminal-link {
+    color: var(--c-link, var(--c-fg-strong));
+    text-decoration: underline;
+    text-decoration-style: dotted;
+}
+.schedule-status-terminal-link:hover,
+.schedule-status-terminal-link:focus {
+    text-decoration-style: solid;
+}
+.schedule-status-message {
+    color: var(--c-fg-strong);
+    font-size: var(--font-13);
+}
+
+/* V1.S3 -- OS-task drift indicator. Read-only signal comparing the */
+/* live Windows Task Scheduler state against the registered         */
+/* schedule. Rendered below the V1.S07 health pill and status       */
+/* lines; modelled on .schedule-status-pill so the two read as one  */
+/* family. Three severity buckets: in-sync (subtle), warning        */
+/* (caution, also used for the non-alarming 'unknown' state), and   */
+/* error. Uses theme variables so dark mode is automatic.           */
+.schedule-osdrift {
+    margin-top: var(--space-1);
+}
+.schedule-osdrift-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--space-2);
+    margin: 0 0 var(--space-1) 0;
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg-muted);
+    border: 1px solid var(--c-border);
+    text-transform: none;
+}
+.schedule-osdrift-pill-in-sync {
+    border-color: var(--c-ok-border, var(--c-border));
+    color:        var(--c-ok-fg,     var(--c-fg-strong));
+}
+.schedule-osdrift-pill-warning {
+    border-color: var(--c-warn-border, var(--c-border));
+    color:        var(--c-warn,        var(--c-fg-muted));
+}
+.schedule-osdrift-pill-error {
+    border-color: var(--c-err-border, var(--c-border));
+    color:        var(--c-err,        var(--c-fg-muted));
+}
+.schedule-osdrift-message {
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+}
+
+.schedule-form {
+    margin-top: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.schedule-time-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.schedule-time-input {
+    width: 5.5em;
+    text-align: right;
+}
+
+.schedule-time-sep {
+    font-weight: 600;
+    color: var(--c-fg-muted);
+}
+
+.schedule-dow-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+}
+
+.schedule-dow-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: var(--font-13);
+    white-space: nowrap;
+}
+
+.schedule-form-error {
+    /* Reuses .field-error visuals; empty stays hidden via :empty rule. */
+}
+
+.schedule-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+/* --------------------------------------------------------------------
+ * Pantry (bundled-template browser)
+ *
+ * Visual contract is minimal and bounded: cards in a single column for
+ * the list, sectioned detail view for one template, and a stacked form
+ * for materialization. No animation, no shadows-on-hover gimmicks, no
+ * dropdowns, no overlays. Operator scans, picks, fills, submits.
+ * -------------------------------------------------------------------- */
+
+.pantry-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.pantry-card {
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+    padding: var(--space-3);
+    background: var(--c-bg-surface);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.pantry-card-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.pantry-card-title {
+    font-size: var(--font-16);
+    font-weight: 600;
+    color: var(--c-link);
+    text-decoration: none;
+}
+
+.pantry-card-title:hover { text-decoration: underline; color: var(--c-link-hover); }
+
+.pantry-card-badge {
+    font-size: var(--font-12);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    padding: 0 var(--space-1);
+    color: var(--c-fg-muted);
+}
+
+.pantry-card-desc { margin: 0; color: var(--c-fg-muted); }
+
+.pantry-card-meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+}
+.pantry-card-meta dt { font-size: var(--font-13); color: var(--c-fg-muted); }
+.pantry-card-meta dd { margin: 0; font-size: var(--font-13); color: var(--c-fg); }
+
+.pantry-section {
+    border-top: 1px solid var(--c-border);
+    padding-top: var(--space-3);
+    margin-top: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.pantry-section h2 {
+    margin: 0;
+    font-size: var(--font-12);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--c-fg-muted);
+}
+
+.pantry-section-desc { margin: 0; color: var(--c-fg); }
+
+.pantry-artifact-list,
+.pantry-input-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+
+.pantry-artifact-item,
+.pantry-input-item {
+    display: grid;
+    grid-template-columns: max-content max-content 1fr;
+    gap: var(--space-1) var(--space-2);
+    align-items: baseline;
+}
+
+.pantry-artifact-kind {
+    font-size: var(--font-12);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    padding: 0 var(--space-1);
+    color: var(--c-fg-muted);
+}
+
+.pantry-input-field { font-family: var(--type-mono); font-size: var(--font-13); color: var(--c-fg); }
+
+.pantry-defaults {
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    padding: var(--space-2);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    white-space: pre;
+    overflow-x: auto;
+    margin: 0;
+}
+
+.pantry-guidance-card {
+    border: 1px solid var(--c-border);
+    border-left: 3px solid var(--c-accent);
+    border-radius: var(--radius-s);
+    padding: var(--space-2);
+    background: var(--c-bg-surface);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.pantry-guidance-header { display: flex; gap: var(--space-2); align-items: baseline; }
+.pantry-guidance-heading { font-size: var(--font-14); font-weight: 600; color: var(--c-fg); }
+.pantry-guidance-audience {
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.pantry-guidance-line { margin: 0; color: var(--c-fg); }
+
+.pantry-form { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.pantry-form-row { display: flex; flex-direction: column; gap: var(--space-1); }
+.pantry-form-row label { font-size: var(--font-12); font-weight: 600; color: var(--c-fg-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.pantry-form-row input {
+    font: inherit;
+    font-size: var(--font-13);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--c-border-strong);
+    border-radius: var(--radius-s);
+    background: var(--c-bg-surface);
+    color: var(--c-fg);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.pantry-form-row input:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.pantry-form-actions {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    margin-top: var(--space-2);
+}
+
+/* ---------------------------------------------------------------------
+ * V1.S05 -- Pantry detail polish: Prerequisites, Limitations, labeled
+ * defaults table, form hints, field-error highlight, client-side
+ * preview panel. All additive; existing pantry rules above untouched.
+ * ------------------------------------------------------------------- */
+
+.pantry-prereqs,
+.pantry-limitations {
+    list-style: disc;
+    margin: 0;
+    padding-left: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+.pantry-prereqs li,
+.pantry-limitations li {
+    color: var(--c-fg);
+    font-size: var(--font-13);
+    line-height: 1.5;
+}
+.pantry-prereqs li strong,
+.pantry-limitations li strong {
+    color: var(--c-fg);
+    font-weight: 600;
+}
+
+.pantry-defaults-table {
+    display: grid;
+    grid-template-columns: minmax(12rem, max-content) 1fr;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+    padding: var(--space-2);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+}
+.pantry-defaults-table dt.pantry-defaults-key {
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    margin: 0;
+    word-break: break-all;
+}
+.pantry-defaults-table dd.pantry-defaults-value {
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    margin: 0;
+    word-break: break-all;
+}
+
+.pantry-form-hint {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    line-height: 1.4;
+}
+
+.pantry-form-row.has-error input {
+    border-color: var(--c-error);
+    box-shadow: 0 0 0 1px var(--c-error-bg);
+}
+.pantry-form-row.has-error label {
+    color: var(--c-error);
+}
+
+.pantry-preview {
+    margin-top: var(--space-3);
+    padding: var(--space-2);
+    border: 1px solid var(--c-border);
+    border-left: 3px solid var(--c-warn);
+    border-radius: var(--radius-s);
+    background: var(--c-bg-surface-alt);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.pantry-preview .pantry-preview-header {
+    color: var(--c-fg);
+    font-size: var(--font-13);
+    line-height: 1.5;
+}
+.pantry-preview .pantry-preview-header strong {
+    color: var(--c-warn);
+    margin-right: var(--space-1);
+}
+.pantry-preview-pre {
+    margin: 0;
+    padding: var(--space-2);
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    white-space: pre;
+    overflow-x: auto;
+}
+.pantry-preview-actions {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+}
+
+/* =====================================================================
+ * Phase K -- Runs (cooks) list + cook-details provenance / command /
+ * folder / snapshot cards. Mirrors the existing .recipe-table and
+ * .cook-* idioms; introduces no new framework. All values come from
+ * persisted server fields -- the styles never imply derived/computed
+ * data.
+ * =================================================================== */
+
+.cooks-status {
+    padding: var(--space-3) var(--space-4);
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+    color: var(--c-fg);
+    font-size: var(--font-13);
+}
+.cooks-status.empty {
+    color: var(--c-fg-muted);
+    background: var(--c-bg-surface);
+    border-style: dashed;
+}
+.cooks-status.error {
+    border-color: var(--c-error);
+    background: var(--c-error-bg);
+    color: var(--c-error);
+}
+.cooks-status.not-ready {
+    border-style: dashed;
+    border-color: var(--c-border);
+    background: var(--c-bg-surface);
+    color: var(--c-fg);
+}
+.cooks-not-ready-title {
+    font-weight: 600;
+    color: var(--c-fg);
+    margin-bottom: var(--space-1);
+}
+.cooks-not-ready-body {
+    color: var(--c-fg-muted);
+    margin-bottom: var(--space-2);
+}
+.cooks-not-ready-cta {
+    color: var(--c-fg);
+    margin-bottom: var(--space-2);
+}
+.cooks-not-ready-link {
+    color: var(--c-link);
+    font-weight: 600;
+    text-decoration: none;
+}
+.cooks-not-ready-link:hover {
+    color: var(--c-link-hover);
+    text-decoration: underline;
+}
+.cooks-not-ready-detail {
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+    opacity: 0.8;
+}
+
+.cooks-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-13);
+}
+.cooks-table th,
+.cooks-table td {
+    text-align: left;
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--c-border);
+    white-space: nowrap;
+    vertical-align: top;
+}
+.cooks-table thead th {
+    font-weight: 600;
+    color: var(--c-fg-muted);
+    background: var(--c-bg-surface-alt);
+    position: sticky;
+    top: 0;
+}
+.cooks-table tbody tr:hover {
+    background: var(--c-bg-surface-alt);
+}
+.cooks-col-recipe   { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
+.cooks-col-status   { font-size: var(--font-12); }
+.cooks-col-time     { font-family: var(--type-mono); font-size: var(--font-12); }
+.cooks-col-duration { font-family: var(--type-mono); font-size: var(--font-12); text-align: right; }
+.cooks-col-outcome  { font-family: var(--type-mono); font-size: var(--font-12); }
+.cooks-col-rows,
+.cooks-col-artifacts { font-family: var(--type-mono); font-size: var(--font-12); text-align: right; }
+.cooks-col-pax,
+.cooks-col-cookbook { font-family: var(--type-mono); font-size: var(--font-12); }
+.cooks-col-cookid   { font-family: var(--type-mono); font-size: var(--font-12); }
+.cooks-col-cookid a.cooks-row-open {
+    color: var(--c-link);
+    text-decoration: none;
+}
+.cooks-col-cookid a.cooks-row-open:hover {
+    text-decoration: underline;
+    color: var(--c-link-hover);
+}
+
+/* Provenance card -- dl grid mirroring .cook-meta. */
+.cook-provenance-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+}
+.cook-provenance-grid dt {
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+}
+.cook-provenance-grid dd {
+    margin: 0;
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    word-break: break-all;
+}
+
+/* Command card -- frozen argv evidence. */
+.cook-command {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.cook-command-source {
+    margin: 0;
+    color: var(--c-fg-subtle);
+    font-size: var(--font-12);
+    font-style: italic;
+}
+.cook-command-label {
+    margin: var(--space-1) 0 0 0;
+    font-size: var(--font-13);
+    font-weight: 600;
+    color: var(--c-fg-muted);
+}
+.cook-command-text {
+    margin: 0;
+    padding: var(--space-2);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.cook-command-argv-list {
+    margin: 0;
+    padding-left: var(--space-3);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    padding-top: var(--space-1);
+    padding-bottom: var(--space-1);
+}
+.cook-command-token {
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    word-break: break-all;
+    padding: 1px 0;
+}
+.cook-command-meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+}
+.cook-command-meta dt {
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+}
+.cook-command-meta dd {
+    margin: 0;
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    word-break: break-all;
+}
+
+/* Cook folder card -- references to per-cook metadata files. */
+.cook-folder-files {
+    overflow-x: auto;
+}
+.cook-folder-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-12);
+}
+.cook-folder-table th,
+.cook-folder-table td {
+    text-align: left;
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--c-border);
+    vertical-align: top;
+}
+.cook-folder-table thead th {
+    font-weight: 600;
+    color: var(--c-fg-muted);
+    background: var(--c-bg-surface-alt);
+}
+.cook-folder-table td {
+    font-family: var(--type-mono);
+    word-break: break-all;
+}
+.cook-artifact-row-missing td {
+    color: var(--c-fg-subtle);
+    text-decoration: line-through;
+}
+
+/* Recipe snapshot card -- frozen recipe contents, collapsible. */
+.cook-recipe-snapshot {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+.cook-snapshot-path {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+.cook-snapshot-path-label {
+    color: var(--c-fg-muted);
+    margin-right: var(--space-1);
+}
+.cook-snapshot-path-value {
+    font-family: var(--type-mono);
+    color: var(--c-fg);
+    word-break: break-all;
+}
+.cook-snapshot-error {
+    margin: 0;
+    color: var(--c-error);
+    font-size: var(--font-12);
+}
+.cook-snapshot-details {
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    padding: var(--space-1) var(--space-2);
+    background: var(--c-bg-surface-alt);
+}
+.cook-snapshot-summary {
+    cursor: pointer;
+    font-size: var(--font-13);
+    color: var(--c-fg-muted);
+}
+.cook-snapshot-body {
+    margin: var(--space-1) 0 0 0;
+    padding: var(--space-2);
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 30rem;
+    overflow: auto;
+}
+
+/* ---------------------------------------------------------------- */
+/* Settings page card stack                                          */
+/* ---------------------------------------------------------------- */
+.settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+/* Settings cards use a dashed frame to match the empty-state         */
+/* onboarding panels on the list pages. Same border width, same       */
+/* radius, just a softer line style.                                  */
+.settings-body .cook-card { border-style: dashed; }
+
+/* Environment paths grid: monospace, wider value column, breakable. */
+.settings-paths-grid .cook-meta-value {
+    font-family: var(--type-mono);
+    word-break: break-all;
+}
+
+/* Update-readiness action row */
+.settings-update-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+    flex-wrap: wrap;
+}
+.settings-update-check[disabled],
+.settings-update-check[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+.settings-update-apply[disabled],
+.settings-update-apply[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+.settings-update-note {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+}
+
+/* Local diagnostics checklist */
+.settings-diagnostics {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+.settings-diag-item {
+    display: grid;
+    grid-template-columns: 1.2rem max-content 1fr;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-size: var(--font-13);
+}
+.settings-diag-mark {
+    text-align: center;
+    font-weight: 600;
+}
+.settings-diag-item.ok    .settings-diag-mark { color: var(--c-success); }
+.settings-diag-item.warn  .settings-diag-mark { color: var(--c-warn); }
+.settings-diag-text {
+    color: var(--c-fg);
+}
+.settings-diag-detail {
+    color: var(--c-fg-muted);
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    word-break: break-all;
+}
+
+/* ---------------------------------------------------------------- */
+/* Settings - Update check result + staged-update trust readiness.  */
+/* Calm, inspectable, no animation, no shield iconography, no       */
+/* security-marketing colour theatre. Trust severity is conveyed    */
+/* with the same chip idiom used by .cook-status-chip so the four   */
+/* severities (ok/warn/bad/neutral) read identically across pages.  */
+/* ---------------------------------------------------------------- */
+.settings-update-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+}
+.settings-update-result[hidden] { display: none; }
+.settings-update-result-line {
+    margin: 0;
+    font-size: var(--font-13);
+    color: var(--c-fg);
+}
+.settings-update-result-detail {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    font-family: var(--type-mono);
+    word-break: break-all;
+}
+
+/* Apply-result pane. Same visual register as .settings-update-result so
+   the page reads as one calm panel. The ordered-list step block is the
+   only addition: bounded numbered steps the broker emits when the apply
+   path truthfully refuses (HTTP 501) and surfaces the manual operator
+   install path. */
+.settings-update-apply-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+}
+.settings-update-apply-result[hidden] { display: none; }
+.settings-update-apply-result-line {
+    margin: 0;
+    font-size: var(--font-13);
+    color: var(--c-fg);
+}
+.settings-update-apply-result-detail {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    font-family: var(--type-mono);
+    word-break: break-all;
+}
+.settings-update-apply-result-steps {
+    margin: 0;
+    padding-left: 1.4em;
+    font-size: var(--font-12);
+    color: var(--c-fg);
+    line-height: 1.5;
+}
+
+/* Notification preferences card. Four native checkbox controls, a save
+   button, and an accessible status region. Layout only — the controls are
+   standard form elements so keyboard and screen-reader behavior is native. */
+.settings-notify-lede {
+    margin: 0 0 var(--space-3);
+    font-size: var(--font-13);
+    color: var(--c-fg-muted);
+    line-height: 1.5;
+}
+
+.settings-notify-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+}
+
+.settings-notify-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    font-size: var(--font-13);
+    color: var(--c-fg);
+    line-height: 1.4;
+}
+
+.settings-notify-row .settings-notify-check {
+    margin-top: 0.15em;
+    flex: 0 0 auto;
+}
+
+.settings-notify-actions {
+    margin-top: var(--space-2);
+}
+
+.settings-notify-webhook {
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--c-border, rgba(127, 127, 127, 0.25));
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.settings-notify-webhook-title {
+    margin: 0;
+    font-size: var(--font-13);
+    font-weight: 600;
+    color: var(--c-fg);
+}
+
+.settings-notify-webhook-lede {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    line-height: 1.5;
+}
+
+.settings-notify-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--font-13);
+    color: var(--c-fg);
+}
+
+.settings-notify-field label {
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+
+.settings-notify-input,
+.settings-notify-select {
+    font: inherit;
+    font-size: var(--font-13);
+    padding: var(--space-1) var(--space-2);
+    color: var(--c-fg);
+    background: var(--c-bg-input, var(--c-bg, transparent));
+    border: 1px solid var(--c-border, rgba(127, 127, 127, 0.4));
+    border-radius: var(--radius-2, 4px);
+    max-width: 100%;
+}
+
+.settings-notify-input:disabled,
+.settings-notify-select:disabled {
+    opacity: 0.6;
+}
+
+.settings-notify-status {
+    margin-top: var(--space-2);
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+
+.settings-notify-status[hidden] { display: none; }
+
+.settings-notify-status.ok { color: var(--c-success, var(--c-fg)); }
+
+.settings-notify-status.error { color: var(--c-danger, var(--c-fg)); }
+
+/* Release-notes pane. A single hyperlink to the manifest-supplied
+   releaseNotesUrl plus a short heading. No iframe, no fetch, no preview;
+   the operator decides whether to click out. */
+.settings-update-release-notes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+}
+.settings-update-release-notes[hidden] { display: none; }
+.settings-update-release-notes-title {
+    margin: 0;
+    font-size: var(--font-12);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--c-fg-muted);
+}
+.settings-update-release-notes-link {
+    margin: 0;
+    font-size: var(--font-12);
+    word-break: break-all;
+}
+.settings-update-release-notes-link a {
+    color: var(--c-fg);
+    text-decoration: underline;
+}
+
+.settings-update-staged {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+}
+.settings-update-staged:empty { display: none; }
+.settings-update-staged-title {
+    margin: 0;
+    font-size: var(--font-12);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--c-fg-muted);
+}
+.settings-update-staged-trust-note {
+    margin: 0;
+    font-size: var(--font-12);
+    line-height: 1.5;
+    color: var(--c-fg-muted);
+}
+.settings-update-staged-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.settings-update-staged-item {
+    display: grid;
+    grid-template-columns: 1fr max-content;
+    grid-template-areas:
+        "name  badge"
+        "path  path";
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+    align-items: baseline;
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+}
+.settings-update-staged-name {
+    grid-area: name;
+    font-family: var(--type-mono);
+    font-size: var(--font-13);
+    color: var(--c-fg);
+    word-break: break-all;
+}
+.settings-update-staged-path {
+    grid-area: path;
+    font-family: var(--type-mono);
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    word-break: break-all;
+}
+.settings-update-staged-trust {
+    grid-area: badge;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+}
+.settings-update-staged-trust-ok {
+    background: var(--c-success-bg);
+    color: var(--c-success);
+    border-color: var(--c-success);
+}
+.settings-update-staged-trust-warn {
+    background: var(--c-warn-bg);
+    color: var(--c-warn);
+    border-color: var(--c-warn);
+}
+.settings-update-staged-trust-bad {
+    background: var(--c-error-bg);
+    color: var(--c-error);
+    border-color: var(--c-error);
+}
+.settings-update-staged-trust-neutral {
+    background: var(--c-bg-surface);
+    color: var(--c-fg-subtle);
+    border-color: var(--c-border-strong);
+}
+
+/* ---------------------------------------------------------------- */
+/* Phase M  -  First-run / empty-state / operator onboarding        */
+/* hardening. Pure presentation. Built on existing design tokens.   */
+/* No new typography scale, no new color tokens, no JS dependency.  */
+/* ---------------------------------------------------------------- */
+
+/* Page-lede: one-paragraph operational orientation under page-title.
+ * Sits inside .page-header. Subdued color, capped width for
+ * readability, no marketing emphasis. */
+.page-lede {
+    margin: var(--space-1) 0 0 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    max-width: 72ch;
+    line-height: 1.5;
+}
+
+/* Empty-state onboarding panel. Sibling of the page's table/list.
+ * Visible only when the underlying data set is empty; .hidden via
+ * the [hidden] attribute toggled by the page module. Plain prose +
+ * ordered steps; never an interactive walkthrough.
+ *
+ * V1.S15: no max-width cap. The card aligns to the full page width
+ * so it matches the width of the error banner above it. Long-form
+ * prose inside the card is still capped per-paragraph (see
+ * .empty-onboarding-desc / .empty-onboarding-note below). */
+.empty-onboarding {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-5);
+    background: var(--c-bg-surface);
+    border: 1px dashed var(--c-border);
+    border-radius: var(--radius-m);
+}
+
+.empty-onboarding-title {
+    margin: 0;
+    font-size: var(--font-14);
+    font-weight: 600;
+    color: var(--c-fg);
+    line-height: 1.4;
+}
+
+.empty-onboarding-desc {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    line-height: 1.5;
+}
+
+.empty-onboarding-steps {
+    margin: 0;
+    padding-left: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    color: var(--c-fg);
+    font-size: var(--font-13);
+    line-height: 1.5;
+}
+
+.empty-onboarding-step {
+    padding-left: var(--space-1);
+}
+
+.empty-onboarding-step strong {
+    font-weight: 600;
+    color: var(--c-fg);
+}
+
+.empty-onboarding-step em {
+    font-style: normal;
+    color: var(--c-fg-muted);
+}
+
+.empty-onboarding-note {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+    line-height: 1.5;
+}
+
+.empty-onboarding-link {
+    color: var(--c-link);
+    text-decoration: none;
+}
+
+.empty-onboarding-link:hover {
+    color: var(--c-link-hover);
+    text-decoration: underline;
+}
+
+.empty-onboarding-link:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-s);
+}
+
+/* ================================================================== */
+/* Phase AF: Broker-status 'locked' label                             */
+/* ================================================================== */
+
+#broker-status.locked          { color: var(--c-warn); }
+#broker-status.locked::before  { background: var(--c-warn); }
+
+/* ================================================================== */
+/* Phase AF: Lock + re-auth overlay                                   */
+/*                                                                    */
+/* One full-viewport modal owned by lock-overlay.js. The overlay is   */
+/* attached to <body> outside the router-managed #page-root so it     */
+/* layers above any page content unconditionally. The .visible class  */
+/* is the only thing that switches it on; CSS does not animate the    */
+/* transition (deterministic UX, no perceived "loading" lag).         */
+/* ================================================================== */
+
+#cookbook-lock-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    /* V1.S18: privacy scrim. The lock surface must hide every
+     * recipe / cook / pantry / settings detail behind it so a
+     * locked appliance left unattended cannot be read. The backdrop
+     * is near-opaque on top of a strong page blur (see body
+     * .cookbook-lock-active rules) so neither layer alone is the
+     * single point of failure. */
+    background: rgba(15, 22, 33, 0.92);
+    padding: var(--space-4);
+}
+
+#cookbook-lock-overlay.visible {
+    display: flex;
+}
+
+.lock-overlay-panel {
+    /* Mini-Kitchen card: white page-card surface with near-black text
+     * (light) / dark-grey card with light text (dark), a soft elevated
+     * shadow, and a generous corner radius so this startup surface
+     * reads as the same card language as the Mini-Kitchen builder and
+     * the close-app dialog. The surface tokens give proper contrast
+     * against the dark privacy scrim above; --c-bg-elevated (the dark
+     * topbar background) is intentionally not used here because it
+     * pairs with light text everywhere else and would read as
+     * dark-on-dark with page text in light mode. */
+    background: var(--c-bg-surface);
+    color: var(--c-fg);
+    border: 1px solid var(--c-border);
+    border-radius: 14px;
+    padding: var(--space-5);
+    max-width: 460px;
+    width: 100%;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.lock-overlay-title {
+    font-size: var(--font-20);
+    font-weight: 650;
+    margin: 0;
+    color: var(--c-fg);
+}
+
+.lock-overlay-body p {
+    margin: 0 0 var(--space-2) 0;
+    line-height: 1.5;
+}
+
+.lock-overlay-body p:last-child {
+    margin-bottom: 0;
+}
+
+.lock-overlay-fine {
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+
+.lock-overlay-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+    width: 100%;
+    max-width: 340px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.lock-overlay-actions > button {
+    /* Mini-Kitchen button box: full-width stacked buttons with the
+       same radius, padding, and weight as the close-app dialog so the
+       startup unlock surface and the close surface read as one button
+       language. text-align:center keeps every label centered within
+       the shared width regardless of variant. */
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+    padding: 11px 14px;
+    font-size: var(--font-14);
+    font-weight: 600;
+    border-radius: 9px;
+}
+
+/* Secondary ("Close") -- subtle filled box matching the non-danger
+   Mini-Kitchen dialog buttons, rather than a bare ghost link. */
+.lock-overlay-secondary {
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg);
+    border: 1px solid var(--c-border-strong);
+}
+.lock-overlay-secondary:hover:not(:disabled) {
+    background: var(--c-bg-hover);
+    border-color: var(--c-accent);
+}
+
+/* Tertiary ("Close app and stop server") -- the destructive action,
+   styled as the dark filled button used for the same choice in the
+   Mini-Kitchen close-app dialog so the two surfaces match. */
+.lock-overlay-tertiary {
+    background: var(--c-bg-elevated);
+    color: var(--c-fg-on-elevated);
+    border: 1px solid var(--c-bg-elevated);
+    font-weight: 600;
+}
+.lock-overlay-tertiary:hover:not(:disabled) {
+    background: #11161d;
+    border-color: #11161d;
+    color: var(--c-fg-on-elevated);
+}
+
+.lock-overlay-status {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    min-height: 1.2em;
+}
+
+/* Dim + blur the underlying page while the overlay is up. The
+ * overlay's near-opaque backdrop is the primary privacy barrier;
+ * this rule is the secondary barrier in case the backdrop renders
+ * with reduced opacity (forced-colors mode, OS contrast settings).
+ * The blur is intentionally strong (16px) so no recipe / cook /
+ * pantry / settings text can be read through gaps. Pointer events
+ * on the page are blocked by the overlay's full-viewport backdrop;
+ * pointer-events:none here is belt-and-braces against AT focus
+ * leakage. */
+body.cookbook-lock-active #page-root,
+body.cookbook-lock-active .topbar,
+body.cookbook-lock-active .nav-rail {
+    filter: blur(16px);
+    pointer-events: none;
+    user-select: none;
+}
+
+.lock-overlay-details {
+    margin-top: var(--space-2);
+}
+.lock-overlay-details > summary {
+    cursor: pointer;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    list-style: revert;
+}
+.lock-overlay-details > summary:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-s);
+}
+.lock-overlay-details[open] > summary {
+    margin-bottom: var(--space-1);
+}
+
+/* Diagnostic endpoint line inside Support details. Monospace so
+ * the raw method+path is unambiguous when read aloud or pasted
+ * into a support thread. Visual weight stays muted; no color or
+ * size change vs the sibling .lock-overlay-fine paragraphs. */
+.lock-overlay-endpoint {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    word-break: break-all;
+}
+
+/* ================================================================== */
+/* Phase 13 Stage 4: PAX engine acquisition overlay                   */
+/*                                                                    */
+/* Mounts to <body> via pax-engine-overlay.js when the broker reports */
+/* policy=external AND state!=acquired (either via the 409            */
+/* acquisitionRequired gate event or the boot-time /state probe).    */
+/* Reuses .lock-overlay-panel / .lock-overlay-title / .lock-overlay-  */
+/* body / .lock-overlay-actions so the look-and-feel matches the      */
+/* lock + re-auth overlay without forking the panel styles. The      */
+/* overlay has no .visible toggle -- the script mounts and unmounts   */
+/* the DOM directly, so display defaults to flex.                     */
+/* ================================================================== */
+
+#cookbook-pax-engine-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 22, 33, 0.92);
+    padding: var(--space-4);
+}
+
+.pax-engine-overlay-panel {
+    /* Slightly wider than the lock panel so the install-state JSON
+     * in the Support details expander does not need horizontal
+     * scroll on the most common keys. */
+    max-width: 640px;
+}
+
+.pax-engine-overlay-banner-slot {
+    /* Reserved row for the optional last-attempt banner. Empty when
+     * there is no prior attempt. */
+}
+
+.pax-engine-overlay-banner {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-s);
+    font-size: var(--font-13);
+    line-height: 1.4;
+}
+
+.pax-engine-overlay-banner-info {
+    background: rgba(0, 120, 215, 0.08);
+    border: 1px solid rgba(0, 120, 215, 0.35);
+    color: var(--c-fg);
+}
+
+.pax-engine-overlay-banner-error {
+    background: rgba(192, 57, 43, 0.08);
+    border: 1px solid rgba(192, 57, 43, 0.45);
+    color: var(--c-fg);
+}
+
+.pax-engine-overlay-banner-nonproduction {
+    background: rgba(202, 138, 4, 0.10);
+    border: 1px solid rgba(202, 138, 4, 0.45);
+    color: var(--c-fg);
+}
+
+.pax-engine-overlay-banner-nonproduction-title {
+    margin: 0 0 var(--space-1) 0;
+    font-weight: 600;
+}
+
+.pax-engine-overlay-banner-nonproduction-body {
+    margin: 0;
+}
+
+.pax-engine-overlay-disabled-note {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    text-align: center;
+}
+
+.pax-engine-overlay-support {
+    margin-top: var(--space-2);
+}
+
+.pax-engine-overlay-support > summary {
+    cursor: pointer;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    list-style: revert;
+}
+
+.pax-engine-overlay-support > summary:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-s);
+}
+
+.pax-engine-overlay-support-pre {
+    margin: var(--space-1) 0 0 0;
+    padding: var(--space-2);
+    background: var(--c-bg-surface-alt, rgba(0, 0, 0, 0.04));
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: var(--font-12);
+    line-height: 1.4;
+    max-height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+body.cookbook-pax-engine-active #page-root,
+body.cookbook-pax-engine-active .topbar,
+body.cookbook-pax-engine-active .nav-rail {
+    filter: blur(16px);
+    pointer-events: none;
+    user-select: none;
+}
+
+/* ================================================================== */
+/* Phase AF: generic modal (auth-profiles create/edit, secret bind)   */
+/* ================================================================== */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 8000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    padding: var(--space-4);
+}
+
+.modal-panel {
+    background: var(--c-bg-elevated);
+    color: var(--c-fg);
+    border: 1px solid var(--c-border-strong);
+    border-radius: var(--radius-m);
+    padding: var(--space-4);
+    max-width: 560px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.modal-title {
+    font-size: var(--font-18);
+    font-weight: 600;
+    margin: 0;
+}
+
+.modal-lede {
+    margin: 0;
+    font-size: var(--font-13);
+    color: var(--c-fg-muted);
+    line-height: 1.5;
+}
+
+.modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.modal-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: var(--font-13);
+}
+
+.modal-field-label {
+    font-weight: 500;
+    color: var(--c-fg-muted);
+}
+
+.modal-field input,
+.modal-field select {
+    font: inherit;
+    font-size: var(--font-13);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--c-border-strong);
+    border-radius: var(--radius-s);
+    background: var(--c-bg-surface);
+    color: var(--c-fg);
+}
+
+.modal-field input:focus,
+.modal-field select:focus {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.modal-readonly-value {
+    font-family: var(--font-mono, monospace);
+    color: var(--c-fg-muted);
+    padding: var(--space-1) var(--space-2);
+    background: var(--c-bg-surface-alt);
+    border-radius: var(--radius-s);
+    border: 1px solid var(--c-border);
+}
+
+.modal-cert-fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 1px dashed var(--c-border);
+    border-radius: var(--radius-s);
+    background: var(--c-bg-surface-alt);
+}
+
+.modal-actions {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    margin-top: var(--space-2);
+}
+
+.modal-status {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    min-height: 1.2em;
+}
+
+.modal-status-error {
+    color: var(--c-error);
+}
+
+.modal-status-ok {
+    color: var(--c-success);
+}
+
+/* ================================================================== */
+/* Phase AF: per-row danger action (Delete profile)                   */
+/* ================================================================== */
+
+.row-action-danger {
+    color: var(--c-error);
+}
+.row-action-danger:hover {
+    text-decoration: underline;
+}
+
+/* ================================================================== */
+/* Phase AF: Auth-profiles page-actions strip                         */
+/* ================================================================== */
+
+.page-actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+
+/* ================================================================== */
+/* F2E: Recipe Takeout import wizard                                  */
+/*                                                                    */
+/* The wizard reuses the generic .modal-* classes for overlay/panel/  */
+/* title/lede/form/field/label/actions/status. These rules add only   */
+/* what the generic classes do not cover: a subdued "Selected file"   */
+/* line distinct from the recipe name, and a compact warnings list.  */
+/* ================================================================== */
+
+.recipe-takeout-import-selected {
+    margin: 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+
+.recipe-takeout-import-warnings {
+    margin: 0;
+    padding-left: var(--space-4);
+    list-style: disc;
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+}
+
+.recipe-takeout-import-warnings li {
+    margin: 2px 0;
+}
+
+/* ================================================================== */
+/* V1.S04: Readiness rail (recipe editor + cook view)                 */
+/*                                                                    */
+/* The .editor-readiness panel reuses the same outer chrome as        */
+/* .editor-preview (sticky in the editor, card-shaped in the cook     */
+/* view) so the two rails feel like siblings.                         */
+/* ================================================================== */
+
+.editor-readiness {
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+    padding: var(--space-3) var(--space-4);
+}
+
+.editor-readiness-title {
+    margin: 0 0 var(--space-2);
+    font-size: var(--font-12);
+    font-weight: 600;
+    color: var(--c-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.editor-readiness-body {
+    margin: 0;
+}
+
+.editor-readiness-placeholder {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    font-style: italic;
+}
+
+.editor-readiness-status {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    font-style: italic;
+}
+
+.readiness-error-heading {
+    margin: 0 0 var(--space-2);
+    font-size: var(--font-12);
+    font-weight: 600;
+    color: var(--c-error);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.readiness-error-detail {
+    margin: 0;
+    color: var(--c-fg);
+    font-size: var(--font-13);
+}
+
+.readiness-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.readiness-tally {
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+
+.readiness-disclaimer {
+    margin: 0 0 var(--space-3);
+    font-size: var(--font-12);
+    color: var(--c-fg-subtle);
+    font-style: italic;
+}
+
+.readiness-check-list {
+    list-style: none;
+    margin: 0 0 var(--space-2);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.readiness-check {
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+}
+
+.readiness-check-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.readiness-check-label {
+    font-size: var(--font-13);
+    font-weight: 600;
+    color: var(--c-fg);
+}
+
+.readiness-check-scope {
+    font-size: var(--font-12);
+    color: var(--c-fg-subtle);
+    margin-left: auto;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.readiness-check-detail {
+    margin: var(--space-1) 0 0;
+    font-size: var(--font-12);
+    color: var(--c-fg);
+}
+
+.readiness-check-remediation {
+    margin: var(--space-1) 0 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    font-style: italic;
+}
+
+.readiness-timestamp {
+    margin: var(--space-2) 0 0;
+    font-size: var(--font-12);
+    color: var(--c-fg-subtle);
+    font-style: italic;
+}
+
+/* Status chips -- color-coded; structure-only, no animation. */
+.readiness-status-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-s);
+    border: 1px solid transparent;
+    font-size: var(--font-12);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.readiness-status-ok {
+    background: var(--c-success-bg);
+    border-color: var(--c-success);
+    color: var(--c-success);
+}
+
+.readiness-status-warning {
+    background: var(--c-warn-bg);
+    border-color: var(--c-warn);
+    color: var(--c-warn);
+}
+
+.readiness-status-blocked {
+    background: var(--c-error-bg);
+    border-color: var(--c-error);
+    color: var(--c-error);
+}
+
+.readiness-status-not_checked,
+.readiness-status-unknown {
+    background: var(--c-bg-surface-alt);
+    border-color: var(--c-border);
+    color: var(--c-fg-muted);
+}
+
+/* Card-flavor outline so each row reads as the right severity even
+ * when chips wrap.  Applied to the <li>. */
+.readiness-check-ok        { border-left: 3px solid var(--c-success); }
+.readiness-check-warning   { border-left: 3px solid var(--c-warn); }
+.readiness-check-blocked   { border-left: 3px solid var(--c-error); }
+.readiness-check-not_checked { border-left: 3px solid var(--c-border-strong); }
+
+/* ================================================================== */
+/* V1.S13 -- UI polish + help panel framework                          */
+/* ================================================================== */
+
+/* ------------------------------------------------------------------ */
+/* Topbar action buttons + nav-rail brand                              */
+/* ------------------------------------------------------------------ */
+
+.topbar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: var(--space-3);
+}
+
+.btn-topbar {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    font: inherit;
+    font-size: var(--font-13);
+    font-weight: 500;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+    background: var(--c-topbar-btn-bg);
+    color: var(--c-fg-on-elevated);
+    border: 1px solid var(--c-topbar-btn-border);
+    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.btn-topbar:hover:not(:disabled) {
+    background: var(--c-topbar-btn-bg-hover);
+    border-color: var(--c-topbar-btn-border-hover);
+}
+.btn-topbar:disabled {
+    background: transparent;
+    color: var(--c-fg-on-elevated-muted);
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+.btn-topbar[aria-expanded="true"] {
+    background: var(--c-topbar-btn-bg-hover);
+    border-color: var(--c-topbar-btn-border-hover);
+}
+
+.topbar-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.topbar-btn-label {
+    white-space: nowrap;
+}
+
+/* At narrow widths we hide the topbar button labels but keep the
+   icons so the controls remain reachable without crowding the
+   status pills. */
+@media (max-width: 1100px) {
+    .btn-topbar .topbar-btn-label { display: none; }
+}
+
+/* Nav-rail brand block: anchors the rail with a calm, centered logo
+   above the menu items. */
+.nav-rail-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-3) var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--c-border);
+    margin-bottom: var(--space-3);
+}
+
+.nav-rail-logo {
+    /* V1.S15: rail-anchored brand mark sized to ~80% of nav-rail */
+    /* width (220px rail -> 176px logo) so it reads as the page's */
+    /* anchor without overpowering the menu beneath it.           */
+    display: block;
+    width: 176px;
+    max-width: 100%;
+    height: auto;
+}
+
+@media (max-width: 900px) {
+    .nav-rail-brand {
+        padding: var(--space-2) var(--space-1) var(--space-3);
+    }
+    .nav-rail-logo {
+        width: 40px;
+        height: auto;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Help hook -- per-control "?" affordance                              */
+/* ------------------------------------------------------------------ */
+
+.help-hook {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: var(--space-1);
+    padding: 0;
+    border: 1px solid var(--c-border);
+    background: var(--c-bg-surface);
+    color: var(--c-fg-muted);
+    border-radius: 999px;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.help-hook:hover {
+    background: var(--c-accent-soft-bg);
+    color: var(--c-accent);
+    border-color: var(--c-accent);
+}
+.help-hook:focus-visible {
+    box-shadow: var(--focus-ring);
+    outline: none;
+}
+
+.help-hook-icon {
+    width: 12px;
+    height: 12px;
+}
+
+/* When a help-hook sits inside a heading, baseline-align it so the
+   "?" reads as a footnote glyph next to the title. */
+.page-title .help-hook,
+.editor-card-title .help-hook,
+.cook-card-title .help-hook,
+.form-label .help-hook,
+.form-label-inline .help-hook {
+    vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------ */
+/* Help panel -- right-side slide-out                                   */
+/* ------------------------------------------------------------------ */
+
+.help-panel-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.18);
+    z-index: 1500;
+}
+.help-panel-scrim[hidden] { display: none; }
+
+/* V1.S15: on desktop the panel docks beside the content area, so
+   the dim scrim is unnecessary and would just gray out the main
+   surface. Suppress it; the panel itself provides the visual cue. */
+@media (min-width: 901px) {
+    body.help-panel-open .help-panel-scrim { display: none; }
+}
+
+.help-panel {
+    /* V1.S15: light Microsoft-portal style; docked below topbar;
+       width matches --help-panel-w so the .app-body right padding
+       reserves exactly the right amount of space. */
+    position: fixed;
+    top: var(--topbar-h);
+    right: 0;
+    width: min(var(--help-panel-w), 92vw);
+    height: calc(100vh - var(--topbar-h));
+    background: var(--c-bg-surface);
+    color: var(--c-fg);
+    border-left: 1px solid var(--c-border-strong);
+    box-shadow: var(--shadow-2);
+    z-index: 1600;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.help-panel[hidden] { display: none; }
+
+/* On narrow viewports collapse back to the original overlay
+   behavior (full-height, above content, scrim visible). */
+@media (max-width: 900px) {
+    .help-panel {
+        top: 0;
+        height: 100vh;
+        width: min(var(--help-panel-w), 92vw);
+        box-shadow: -6px 0 22px rgba(0, 0, 0, 0.16);
+    }
+}
+
+.help-panel-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--c-border);
+    background: var(--c-bg-surface-alt);
+}
+
+.help-panel-title {
+    margin: 0;
+    flex: 1 1 auto;
+    font-size: var(--font-16);
+    font-weight: 600;
+    color: var(--c-fg);
+    min-width: 0;
+}
+
+.help-panel-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--c-fg-muted);
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.help-panel-icon-btn:hover {
+    background: var(--c-bg-hover);
+    color: var(--c-fg);
+    border-color: var(--c-border);
+}
+.help-panel-icon-btn:focus-visible {
+    box-shadow: var(--focus-ring);
+    outline: none;
+}
+
+.help-panel-search-row {
+    padding: var(--space-3) var(--space-4) var(--space-2);
+    background: var(--c-bg-surface);
+    border-bottom: 1px solid var(--c-border);
+}
+.help-panel-search-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-1) var(--space-3);
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+}
+.help-panel-search-label:focus-within {
+    border-color: var(--c-accent);
+    box-shadow: var(--focus-ring);
+}
+.help-panel-search-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--c-fg-muted);
+}
+.help-panel-search-input {
+    flex: 1 1 auto;
+    border: none;
+    background: transparent;
+    color: var(--c-fg);
+    font: inherit;
+    font-size: var(--font-13);
+    padding: var(--space-1) 0;
+    min-width: 0;
+}
+.help-panel-search-input:focus { outline: none; }
+
+.help-panel-body {
+    padding: var(--space-3) var(--space-4) var(--space-5);
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    color: var(--c-fg);
+    font-size: var(--font-13);
+    line-height: 1.55;
+}
+.help-panel-body:focus-visible { outline: none; }
+
+.help-panel-intro {
+    margin: 0 0 var(--space-3);
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+}
+
+.help-panel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+}
+@media (max-width: 640px) {
+    .help-panel-grid { grid-template-columns: 1fr; }
+}
+
+.help-panel-card {
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-3);
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-s);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease;
+}
+.help-panel-card:hover {
+    background: var(--c-bg-hover);
+    border-color: var(--c-border-strong);
+}
+.help-panel-card:focus-visible {
+    box-shadow: var(--focus-ring);
+    outline: none;
+}
+.help-panel-card-title {
+    font-size: var(--font-13);
+    font-weight: 600;
+    color: var(--c-fg);
+}
+.help-panel-card-summary {
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+    line-height: 1.45;
+}
+
+.help-panel-topic-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.help-panel-topic-list li {
+    margin: 0;
+}
+.help-panel-topic-link,
+.help-panel-crumb-link {
+    display: inline-block;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: var(--space-1) var(--space-2);
+    color: var(--c-link);
+    font: inherit;
+    font-size: var(--font-13);
+    cursor: pointer;
+    border-radius: var(--radius-s);
+}
+.help-panel-topic-link:hover,
+.help-panel-crumb-link:hover {
+    background: var(--c-bg-hover);
+    color: var(--c-link-hover);
+}
+.help-panel-topic-empty {
+    color: var(--c-fg-muted);
+    font-style: italic;
+    padding: var(--space-1) var(--space-2);
+}
+
+.help-panel-crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin-bottom: var(--space-2);
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+.help-panel-crumb-sep {
+    color: var(--c-fg-subtle);
+}
+
+.help-panel-topic {
+    margin: 0;
+    color: var(--c-fg);
+}
+.help-panel-topic p {
+    margin: 0 0 var(--space-3);
+}
+.help-panel-topic p:last-child { margin-bottom: 0; }
+.help-panel-topic ul,
+.help-panel-topic ol {
+    margin: 0 0 var(--space-3);
+    padding-left: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+.help-panel-topic code {
+    font-family: var(--type-mono);
+    font-size: 0.95em;
+    background: var(--c-bg-surface);
+    padding: 1px 4px;
+    border-radius: var(--radius-s);
+}
+
+/* Plain inline anchors inside a help-panel topic body. Help topics  */
+/* are author-written HTML, so the <a> tags they emit have no class  */
+/* of their own; this rule pulls them onto the same link color the   */
+/* topic-list buttons use so the panel reads as a single component.  */
+.help-panel-topic a,
+.help-panel-topic a:visited {
+    color: var(--c-link);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+}
+.help-panel-topic a:hover {
+    color: var(--c-link-hover);
+}
+.help-panel-topic a:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-s);
+}
+
+/* When help is open, prevent background scroll for a calm context. */
+body.help-panel-open {
+    overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings -- Update Readiness action row + button promotion          */
+/* ------------------------------------------------------------------ */
+
+.settings-update-section-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+/* Promote the three update buttons from .btn-ghost to a proper
+   primary-action row. The buttons keep their existing IDs and the
+   disabled/aria-disabled rules above; this rule just upgrades the
+   visual weight so each looks like a real button. */
+.settings-update-check,
+.settings-update-download,
+.settings-update-apply {
+    background: var(--c-bg-surface);
+    color: var(--c-fg);
+    border: 1px solid var(--c-border-strong);
+    padding: var(--space-2) var(--space-4);
+    font-weight: 600;
+}
+.settings-update-check:hover:not([disabled]):not([aria-disabled="true"]),
+.settings-update-download:hover:not([disabled]):not([aria-disabled="true"]),
+.settings-update-apply:hover:not([disabled]):not([aria-disabled="true"]) {
+    background: var(--c-bg-hover);
+    border-color: var(--c-accent);
+    color: var(--c-accent);
+}
+
+/* The explanatory paragraph for the update row now sits BELOW the
+   buttons rather than beside them. The .settings-update-actions
+   container above keeps flex-wrap on; we force the note onto its
+   own row so it never tries to sit beside the buttons. */
+.settings-update-actions .settings-update-note {
+    flex-basis: 100%;
+    margin-top: var(--space-2);
+}
+
+/* When the note is a sibling of .settings-update-actions (the
+   V1.S13 layout), keep the same readable width and spacing. */
+.cook-card > .settings-update-note {
+    margin: var(--space-2) 0 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    line-height: 1.5;
+}
+
+/* Settings Local Diagnostics support link paragraph */
+.settings-diagnostics-help {
+    margin: var(--space-3) 0 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    line-height: 1.5;
+}
+.settings-diagnostics-help .help-panel-topic-link {
+    padding: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Auth-profiles page polish                                          */
+/* ------------------------------------------------------------------ */
+
+.authprof-section .page-header .page-actions {
+    align-self: flex-start;
+}
+
+/* ------------------------------------------------------------------ */
+/* V1.S19  Required Permissions transparency rail                     */
+/* (recipe editor card + shared viewer output)                        */
+/* ------------------------------------------------------------------ */
+
+/* Title row used by the Required Permissions editor card so the
+   help-hook button sits beside the h2 without pushing the doc text
+   down. Other editor cards keep the legacy title-only layout. */
+.editor-card-title-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+}
+.editor-card-title-row .editor-card-title {
+    margin: 0;
+}
+.editor-card-help {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--c-border-strong);
+    border-radius: 50%;
+    background: var(--c-bg-surface);
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    line-height: 1;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms, background 120ms;
+}
+.editor-card-help:hover {
+    color: var(--c-accent);
+    border-color: var(--c-accent);
+    background: var(--c-accent-soft-bg);
+}
+.editor-card-help:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+}
+
+/* The Required Permissions card itself. Same visual frame as other
+   editor cards; only the body needs custom layout. */
+.permissions-section .editor-card-doc {
+    margin-top: var(--space-1);
+}
+.permissions-section-body {
+    margin-top: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+.permissions-section-empty {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    line-height: 1.5;
+}
+
+/* Header block emitted by the viewer in non-compact mode. The editor
+   card uses compact mode, so these only fire when the viewer is used
+   standalone (recipe-list/detail). */
+.permissions-section-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+.permissions-section-title {
+    margin: 0;
+    font-size: var(--font-16);
+    font-weight: 600;
+    color: var(--c-fg);
+}
+.permissions-section-help {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--c-border-strong);
+    border-radius: 50%;
+    background: var(--c-bg-surface);
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    line-height: 1;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms, background 120ms;
+}
+.permissions-section-help:hover {
+    color: var(--c-accent);
+    border-color: var(--c-accent);
+    background: var(--c-accent-soft-bg);
+}
+.permissions-section-help:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+}
+.permissions-section-blurb {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-13);
+    line-height: 1.5;
+}
+
+/* Group = "Graph permission", "Runtime prerequisite", "Environment",
+   "Output access", "No additional permission" (info callout). Each
+   group has a small label above a responsive grid of cards. */
+.permission-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.permission-group-label {
+    font-size: var(--font-12);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--c-fg-muted);
+    margin: 0;
+}
+.permission-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--space-2);
+}
+
+/* Cards. Color-coded left border keys back to the group type. The
+   colors are pulled from the existing token palette so the rail blends
+   with the rest of the editor visually. */
+.permission-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface);
+    border: 1px solid var(--c-border);
+    border-left: 3px solid var(--c-border-strong);
+    border-radius: var(--radius-m);
+}
+.permission-card--graph-permission   { border-left-color: var(--c-accent); }
+.permission-card--runtime-prerequisite { border-left-color: var(--c-warn); }
+.permission-card--environment        { border-left-color: var(--c-fg-subtle); }
+.permission-card--output-access      { border-left-color: var(--c-success); }
+.permission-card--info-callout       { border-left-color: var(--c-fg-muted); background: var(--c-bg-surface-alt); }
+
+.permission-card-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+.permission-card-name {
+    font-family: var(--type-mono);
+    font-size: var(--font-13);
+    font-weight: 600;
+    color: var(--c-fg);
+    word-break: break-word;
+}
+.permission-card--runtime-prerequisite .permission-card-name,
+.permission-card--environment .permission-card-name,
+.permission-card--output-access .permission-card-name,
+.permission-card--info-callout .permission-card-name {
+    font-family: inherit;
+}
+.permission-card-badge {
+    flex: 0 0 auto;
+    display: inline-block;
+    padding: 1px var(--space-2);
+    border-radius: var(--radius-s);
+    font-size: var(--font-12);
+    font-weight: 600;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.permission-card-badge--graph-permission {
+    background: var(--c-accent-soft-bg);
+    color: var(--c-accent-active);
+}
+.permission-card-badge--runtime-prerequisite {
+    background: var(--c-warn-bg);
+    color: var(--c-warn);
+}
+.permission-card-badge--environment {
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg-muted);
+}
+.permission-card-badge--output-access {
+    background: var(--c-success-bg);
+    color: var(--c-success);
+}
+.permission-card-badge--info-callout {
+    background: var(--c-bg-surface-alt);
+    color: var(--c-fg-muted);
+}
+.permission-card-reason {
+    margin: 0;
+    color: var(--c-fg-muted);
+    font-size: var(--font-12);
+    line-height: 1.5;
+}
+.permission-card-triggered {
+    color: var(--c-fg-subtle);
+    font-size: var(--font-12);
+    line-height: 1.4;
+}
+.permission-card-triggered-label {
+    font-weight: 600;
+}
+.permission-card-triggered-item {
+    font-family: var(--type-mono);
+}
+
+/* ------------------------------------------------------------------ */
+/* V1.S19  Help-panel  permissions.required topic                     */
+/* ------------------------------------------------------------------ */
+
+.help-perm-h {
+    margin: var(--space-4) 0 var(--space-2);
+    padding-bottom: var(--space-1);
+    border-bottom: 1px solid var(--c-border);
+    font-size: var(--font-14);
+    font-weight: 600;
+    color: var(--c-fg);
+}
+.help-perm-h:first-of-type {
+    margin-top: var(--space-3);
+}
+.help-perm-sub {
+    margin: var(--space-2) 0;
+    padding: var(--space-2) var(--space-3);
+    background: var(--c-bg-surface-alt);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-m);
+}
+.help-perm-sub > summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--c-fg);
+    line-height: 1.4;
+    outline: none;
+}
+.help-perm-sub > summary:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-s);
+}
+.help-perm-sub[open] > summary {
+    margin-bottom: var(--space-2);
+}
+.help-perm-sub p,
+.help-perm-sub ul {
+    margin: var(--space-1) 0;
+    font-size: var(--font-13);
+    line-height: 1.5;
+    color: var(--c-fg);
+}
+.help-perm-sub ul {
+    padding-left: var(--space-4);
+}
+.help-perm-h4 {
+    margin: var(--space-2) 0 var(--space-1);
+    font-size: var(--font-12);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--c-fg-muted);
+}
+.help-perm-shape {
+    color: var(--c-fg-muted);
+}
+.help-perm-note {
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    background: var(--c-bg-surface);
+    border-left: 3px solid var(--c-fg-subtle);
+    font-size: var(--font-12);
+    color: var(--c-fg-muted);
+}
+.help-perm-callout {
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    background: var(--c-accent-soft-bg);
+    border-left: 3px solid var(--c-accent);
+    font-size: var(--font-13);
+    color: var(--c-fg);
+}
+
+
+
+/* ================================================================== */
+/* UX-1 redesign -- shell + Home page                                   */
+/*                                                                      */
+/* All selectors below are SCOPED to body.ux-redesign so they cannot   */
+/* leak into legacy surfaces. They override pre-existing topbar and    */
+/* nav-rail rules above by virtue of higher cascade order + explicit  */
+/* body-class scoping. Every value here flows through the --ux-*       */
+/* tokens added in tokens.css; no hard-coded hex values appear in     */
+/* this section.                                                       */
+/*                                                                      */
+/* Scope discipline:                                                   */
+/*   - .topbar / .nav-rail / .app / .app-body : redesigned chrome     */
+/*   - .home-* : Home page module (home.js)                            */
+/*   - .taste-tests-* : Taste Tests placeholder (taste-tests.js)       */
+/*   - .nav-rail-* : rail brand block, trust chips, bottom identity   */
+/*   - .pill-* : status pills shared across surfaces                   */
+/*   - .btn-primary / .btn-secondary : redesigned buttons              */
+/* ================================================================== */
+
+/* Base canvas + app shell rows */
+body.ux-redesign {
+    background: var(--ux-surface-page);
+    color: var(--ux-text-primary);
+    height: 100vh;
+    overflow: hidden;
+}
+body.ux-redesign .app {
+    grid-template-rows: var(--ux-topbar-h) 1fr auto;
+    height: 100vh;
+    min-height: 0;
+}
+body.ux-redesign .app-body {
+    grid-template-columns: var(--ux-rail-w) 1fr;
+    background: var(--ux-surface-page);
+    min-height: 0;
+    overflow: hidden;
+}
+body.ux-redesign .app-main {
+    padding: 24px 28px;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+/* --------------------------------------------------------------- */
+/* Footer status strip                                            */
+/* Full-width band beneath the rail + content, summarizing overall */
+/* health on the left and the active workspace on the right.       */
+/* --------------------------------------------------------------- */
+body.ux-redesign .app-footer {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 7px 20px;
+    background: var(--ux-surface-card);
+    border-top: 1px solid var(--ux-border-soft);
+    font-size: 12px;
+    color: var(--ux-text-muted);
+}
+body.ux-redesign .app-footer-left,
+body.ux-redesign .app-footer-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+body.ux-redesign .app-footer-left { flex: 1 1 0; }
+body.ux-redesign .app-footer-right { flex: 1 1 0; justify-content: flex-end; }
+body.ux-redesign .app-footer-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 0 1 auto;
+    min-width: 0;
+    color: var(--ux-text-muted);
+    white-space: nowrap;
+}
+body.ux-redesign .app-footer-shield {
+    width: 13px;
+    height: 13px;
+    color: var(--ux-status-success);
+    flex-shrink: 0;
+}
+@media (max-width: 820px) {
+    body.ux-redesign .app-footer-center { display: none; }
+}
+body.ux-redesign .app-footer-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ux-status-success);
+    flex-shrink: 0;
+}
+body.ux-redesign .app-footer-dot.is-warning { background: var(--ux-status-warning); }
+body.ux-redesign .app-footer-dot.is-danger  { background: var(--ux-status-danger); }
+body.ux-redesign .app-footer-state {
+    color: var(--ux-text-primary);
+    font-weight: 500;
+}
+body.ux-redesign .app-footer-sep { color: var(--ux-border-strong); }
+body.ux-redesign .app-footer-meta { color: var(--ux-text-muted); }
+body.ux-redesign .app-footer-workspace {
+    color: var(--ux-text-primary);
+    font-weight: 500;
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+body.ux-redesign .app-footer-cloud {
+    width: 14px;
+    height: 14px;
+    color: var(--ux-status-success);
+    flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------- */
+/* Topbar                                                          */
+/* White appliance topbar, dark text, identity cluster on right.   */
+/* --------------------------------------------------------------- */
+body.ux-redesign .topbar {
+    background: var(--ux-surface-card);
+    color: var(--ux-text-primary);
+    border-bottom: 1px solid var(--ux-border-soft);
+    box-shadow: none;
+    padding: 0 24px 0 0;
+    justify-content: space-between;
+}
+body.ux-redesign .topbar-brand,
+body.ux-redesign .topbar-brand:hover {
+    color: var(--ux-text-primary);
+    background: transparent;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}
+body.ux-redesign .topbar-brand {
+    justify-content: flex-start;
+    padding: 0 0 0 16px;
+}
+
+/* Status pills (#broker-status / #token-status) live in the light nav
+   rail in the redesigned shell; override the on-white pill skin so the
+   chip blends into the rail surface and only the colored dot and label
+   carry the status tone. */
+body.ux-redesign #token-status,
+body.ux-redesign #broker-status {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    color: var(--ux-nav-text);
+}
+body.ux-redesign #token-status::before,
+body.ux-redesign #broker-status::before {
+    background: var(--ux-nav-muted);
+}
+body.ux-redesign #token-status.ok           { color: var(--ux-status-success); }
+body.ux-redesign #token-status.ok::before   { background: var(--ux-status-success); }
+body.ux-redesign #token-status.miss         { color: var(--ux-status-danger);  }
+body.ux-redesign #token-status.miss::before { background: var(--ux-status-danger);  }
+body.ux-redesign #broker-status.ok           { color: var(--ux-status-success); }
+body.ux-redesign #broker-status.ok::before   { background: var(--ux-status-success); }
+body.ux-redesign #broker-status.degraded     { color: var(--ux-status-warning); }
+body.ux-redesign #broker-status.degraded::before { background: var(--ux-status-warning); }
+body.ux-redesign #broker-status.unreachable     { color: var(--ux-status-danger); }
+body.ux-redesign #broker-status.unreachable::before { background: var(--ux-status-danger); }
+body.ux-redesign #broker-status.unauthorized    { color: var(--ux-status-warning); }
+body.ux-redesign #broker-status.unauthorized::before { background: var(--ux-status-warning); }
+body.ux-redesign #broker-status.locked          { color: var(--ux-status-warning); }
+body.ux-redesign #broker-status.locked::before  { background: var(--ux-status-warning); }
+
+/* Topbar action buttons: re-style for the white topbar. */
+body.ux-redesign .btn-topbar {
+    background: var(--ux-surface-card);
+    color: var(--ux-text-primary);
+    border: 1px solid var(--ux-border-strong);
+    font-weight: 500;
+}
+body.ux-redesign .btn-topbar:hover:not(:disabled) {
+    background: var(--ux-surface-cool);
+    border-color: var(--ux-button-secondary-border);
+    color: var(--ux-text-primary);
+}
+body.ux-redesign .btn-topbar:disabled {
+    color: var(--ux-text-muted);
+}
+body.ux-redesign .btn-topbar[aria-expanded="true"] {
+    background: var(--ux-surface-cool);
+    border-color: var(--ux-button-secondary-border);
+}
+
+/* --------------------------------------------------------------- */
+/* Nav rail                                                        */
+/* Dark navy rail with light logo, trust chips, navigation list,   */
+/* and bottom identity block.                                      */
+/* --------------------------------------------------------------- */
+body.ux-redesign .nav-rail {
+    background: var(--ux-nav-bg);
+    color: var(--ux-nav-text);
+    border-right: 1px solid var(--ux-nav-rail-border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+}
+
+/* Brand block in the topbar. The logo link sits at the far left, centered
+   over the nav-rail width so the wordmark anchors the top-left of the
+   workspace. */
+body.ux-redesign .nav-rail-brand,
+.topbar .nav-rail-brand {
+    flex: 0 0 var(--rail-w);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-bottom: none;
+    margin: 0;
+    text-decoration: none;
+}
+body.ux-redesign .nav-rail-brand:hover,
+body.ux-redesign .nav-rail-brand:focus-visible {
+    background: transparent;
+    outline: none;
+}
+body.ux-redesign .nav-rail-brand .topbar-logo {
+    height: auto;
+    width: auto;
+    max-height: 34px;
+    max-width: calc(var(--rail-w) - 32px);
+    display: block;
+}
+body.ux-redesign .nav-rail-brand:focus-visible .topbar-logo {
+    outline: 2px solid var(--ux-nav-accent);
+    outline-offset: 3px;
+    border-radius: 4px;
+}
+
+/* Trust chips at the top of the rail. */
+body.ux-redesign .nav-rail-trust {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 16px 14px;
+}
+body.ux-redesign .nav-rail-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--ux-nav-bg-deep);
+    border: 1px solid var(--ux-nav-border);
+    border-radius: 8px;
+    color: var(--ux-nav-text);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+}
+body.ux-redesign .nav-rail-chip-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+body.ux-redesign .nav-rail-chip-info .nav-rail-chip-icon { color: var(--ux-chef-sky); }
+body.ux-redesign .nav-rail-chip-success { color: var(--ux-nav-text); }
+body.ux-redesign .nav-rail-chip-success .nav-rail-chip-icon { color: var(--ux-status-success); }
+
+/* Nav list -- redesigned items */
+body.ux-redesign .nav-list {
+    list-style: none;
+    margin: 16px 0 0;
+    padding: 0 12px;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+body.ux-redesign .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: var(--ux-nav-text);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+body.ux-redesign .nav-item:hover {
+    background: var(--ux-nav-hover);
+    color: var(--ux-nav-active-text);
+}
+body.ux-redesign .nav-item[aria-current="page"] {
+    background: var(--ux-nav-active-bg);
+    color: var(--ux-nav-active-text);
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--ux-nav-accent);
+}
+body.ux-redesign .nav-item[aria-current="page"] .nav-icon {
+    color: var(--ux-nav-active-text);
+}
+body.ux-redesign .nav-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    color: var(--ux-nav-muted);
+}
+body.ux-redesign .nav-item:hover .nav-icon { color: var(--ux-nav-active-text); }
+body.ux-redesign .nav-label { white-space: nowrap; }
+
+/* Rail foot block. Holds only the decorative kitchen art that anchors the
+   foot of the rail; there is no separator line and no version or history
+   markers. It sits directly below the update link as one cohesive footer. */
+body.ux-redesign .nav-rail-bottom {
+    padding: 0 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--ux-nav-bg);
+}
+/* Decorative kitchen art that anchors the foot of the rail, echoing the
+   cookbook metaphor. Uses the supplied PAX Cookbook recipe-book illustration
+   (an open recipe book with kitchen utensils) on a transparent background,
+   sized to fit the rail foot without distortion. */
+body.ux-redesign .nav-rail-bottom::after {
+    content: "";
+    display: block;
+    height: 168px;
+    margin: 8px 0 0;
+    opacity: 0.95;
+    background-repeat: no-repeat;
+    background-position: center bottom;
+    background-size: contain;
+    background-image: url("../images/pax-cookbook-recipe-book.png");
+}
+body.ux-redesign .nav-rail-bottom-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+body.ux-redesign .nav-rail-bottom-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--ux-nav-muted);
+    margin-top: 2px;
+}
+body.ux-redesign .nav-rail-bottom-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+body.ux-redesign .nav-rail-bottom-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ux-nav-muted);
+    margin-bottom: 2px;
+}
+body.ux-redesign .nav-rail-bottom-value {
+    font-size: 12px;
+    color: var(--ux-nav-text);
+    word-break: break-word;
+    line-height: 1.35;
+}
+body.ux-redesign .nav-rail-bottom-trust {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ux-nav-muted);
+    font-size: 9.5px;
+    line-height: 1.3;
+    padding-top: 6px;
+    border-top: 1px solid var(--ux-nav-border);
+    min-width: 0;
+}
+body.ux-redesign .nav-rail-bottom-trust .nav-rail-bottom-icon { margin-top: 0; width: 12px; height: 12px; }
+body.ux-redesign .nav-rail-bottom-trust > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 9.5px;
+    letter-spacing: 0;
+}
+
+/* Quiet link that routes the main content pane to the in-app Updates view.
+   It sits at the foot of the nav list, just above the decorative bottom art,
+   so it reads as part of the navigation group rather than the footer. Centered
+   and set in a small type size so it reads as a secondary affordance; kept
+   single-line so it sits cleanly in the narrow rail. Its color matches the
+   muted rail text so it stays calm rather than a bright call to action.
+   Underline and brighter text on hover/focus give a clear affordance without
+   icon or button chrome. */
+body.ux-redesign .nav-rail-update-link {
+    display: block;
+    width: 100%;
+    text-align: center;
+    color: var(--ux-nav-muted);
+    font-size: 10px;
+    line-height: 1.3;
+    text-decoration: none;
+    white-space: nowrap;
+    padding: 10px 16px 2px;
+    border-radius: 3px;
+    opacity: 1;
+}
+body.ux-redesign .nav-rail-update-link:hover {
+    color: var(--ux-nav-text);
+    text-decoration: underline;
+}
+body.ux-redesign .nav-rail-update-link:focus-visible {
+    outline: 2px solid #7cc4ff;
+    outline-offset: 2px;
+    color: var(--ux-nav-text);
+}
+body.ux-redesign .nav-rail-update-link[aria-current="page"] {
+    color: var(--ux-nav-text);
+    text-decoration: underline;
+}
+
+/* Appliance status block at the top of the rail bottom: a small,
+   muted "what's going on right now" panel (Server / Data refreshed /
+   Connection / Sign-in). Two-column rows -- label on the left,
+   value on the right -- so non-techy chefs can read it as a glance. */
+body.ux-redesign .nav-rail-status {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--ux-nav-border);
+    margin-bottom: 2px;
+    font-size: 11px;
+    color: var(--ux-nav-text);
+    line-height: 1.35;
+}
+body.ux-redesign .nav-rail-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+body.ux-redesign .nav-rail-status-label {
+    color: var(--ux-nav-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+body.ux-redesign .nav-rail-status-value {
+    color: var(--ux-nav-text);
+    font-size: 11px;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+body.ux-redesign code.nav-rail-status-value {
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    background: transparent;
+    padding: 0;
+}
+
+/* Inline copy-to-clipboard button next to the Workspace value.
+   The nav rail truncates long paths with an ellipsis so the
+   operator could not previously read or share the actual path.
+   This button sits flush against the value, reveals only when the
+   path is known (home.js sets `hidden = false`), and copies the
+   full string via navigator.clipboard. A transient `.is-copied`
+   class provides feedback without an emoji or animation library. */
+body.ux-redesign .nav-rail-status-copy {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    margin-left: 4px;
+    padding: 1px 3px;
+    flex-shrink: 0;
+    line-height: 0;
+    color: var(--ux-nav-muted);
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+body.ux-redesign .nav-rail-status-copy:hover,
+body.ux-redesign .nav-rail-status-copy:focus-visible {
+    color: var(--ux-nav-text);
+    background: var(--ux-nav-hover);
+    border-color: var(--ux-nav-border);
+    outline: none;
+}
+body.ux-redesign .nav-rail-status-copy.is-copied {
+    color: #6bd86b;
+    border-color: rgba(107, 216, 107, 0.45);
+    background: rgba(107, 216, 107, 0.12);
+}
+body.ux-redesign .nav-rail-status-copy-icon {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
+    display: block;
+}
+
+/* Installed-version footer at the very bottom of the rail: tiny,
+   muted lines for the PAX Cookbook version and the bundled PAX
+   script version. */
+body.ux-redesign .nav-rail-versions {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 8px;
+    border-top: 1px solid var(--ux-nav-border);
+    font-size: 10px;
+    color: var(--ux-nav-muted);
+    line-height: 1.35;
+}
+body.ux-redesign .nav-rail-version-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+body.ux-redesign .nav-rail-version-label {
+    color: var(--ux-nav-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+body.ux-redesign .nav-rail-version-value {
+    color: var(--ux-nav-text);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+/* Collapsed rail (narrow viewport). Hide labels but keep icons. */
+@media (max-width: 900px) {
+    body.ux-redesign .app-body { grid-template-columns: var(--rail-w-collapsed) 1fr; }
+    body.ux-redesign .nav-rail-bottom,
+    body.ux-redesign .nav-rail-update-link,
+    body.ux-redesign .nav-label {
+        display: none;
+    }
+    body.ux-redesign .nav-item { justify-content: center; padding: 10px 6px; }
+}
+
+/* --------------------------------------------------------------- */
+/* Buttons (UX-1)                                                  */
+/* --------------------------------------------------------------- */
+body.ux-redesign .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    background: var(--ux-button-primary-bg);
+    color: var(--ux-button-primary-text);
+    border: 1px solid var(--ux-button-primary-bg);
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease;
+}
+body.ux-redesign .btn-primary:hover {
+    background: var(--ux-button-primary-hover);
+    border-color: var(--ux-button-primary-hover);
+    color: var(--ux-button-primary-text);
+}
+body.ux-redesign .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    background: var(--ux-button-secondary-bg);
+    color: var(--ux-button-secondary-text);
+    border: 1px solid var(--ux-button-secondary-border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease;
+}
+body.ux-redesign .btn-secondary:hover {
+    background: var(--ux-surface-cool);
+    border-color: var(--ux-text-secondary);
+    color: var(--ux-text-primary);
+}
+body.ux-redesign .btn-trailing-icon { width: 14px; height: 14px; }
+
+/* --------------------------------------------------------------- */
+/* Status pills (shared)                                            */
+/* --------------------------------------------------------------- */
+body.ux-redesign .pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.4;
+}
+body.ux-redesign .pill-success { background: var(--ux-status-success-bg); color: var(--ux-status-success); }
+body.ux-redesign .pill-danger  { background: var(--ux-status-danger-bg);  color: var(--ux-status-danger);  }
+body.ux-redesign .pill-warning { background: var(--ux-status-warning-bg); color: var(--ux-status-warning); }
+body.ux-redesign .pill-info    { background: var(--ux-status-info-bg);    color: var(--ux-status-info);    }
+
+/* =============================================================== */
+/* Home page                                                       */
+/* =============================================================== */
+
+/* Home content wrapper.                                            */
+/* The page lives inside .app-main (24px 28px padding) which sits   */
+/* in the .app-body grid alongside the 220px nav rail. The Home    */
+/* canvas itself caps at 1480px so wide-desktop viewports (>=1920) */
+/* use the available area instead of leaving a 300+ pixel gray    */
+/* gutter on the right. At narrower widths the cap is non-binding */
+/* and the page expands to fill the available content column.     */
+body.ux-redesign .home-page {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    width: 100%;
+    max-width: 1480px;
+    margin-inline: 0;
+}
+
+body.ux-redesign .home-loading,
+body.ux-redesign .home-error {
+    padding: 32px;
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius);
+    color: var(--ux-text-secondary);
+    font-size: 14px;
+}
+body.ux-redesign .home-error { color: var(--ux-status-warning); }
+
+/* Top band: hero (left) + Kitchen Trust (right). The two columns  */
+/* deliberately share a stretch baseline so the band reads as one  */
+/* composed unit rather than two adjacent cards. The right column  */
+/* width matches .home-mid-row so the page has a consistent right */
+/* gutter all the way down.                                        */
+body.ux-redesign .home-top-row {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(340px, 0.9fr);
+    gap: 24px;
+    align-items: stretch;
+}
+body.ux-redesign .home-main { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+body.ux-redesign .home-side { display: flex; flex-direction: column; gap: 20px; }
+
+body.ux-redesign .home-hero {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius-lg);
+    box-shadow: var(--ux-card-shadow);
+    padding: 32px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    align-items: center;
+    gap: 24px;
+    height: 100%;
+}
+body.ux-redesign .home-eyebrow {
+    font-size: var(--ux-font-eyebrow);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--ux-text-eyebrow);
+    margin-bottom: 10px;
+}
+body.ux-redesign .home-hero-title {
+    margin: 0 0 14px;
+    font-size: var(--ux-font-h1);
+    font-weight: 700;
+    color: var(--ux-text-primary);
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+}
+body.ux-redesign .home-hero-value {
+    margin: 0 0 22px;
+    font-size: 17px;
+    color: var(--ux-brand-700);
+    line-height: 1.45;
+    max-width: 560px;
+}
+body.ux-redesign .home-hero-ctas {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+body.ux-redesign .home-hero-art {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+body.ux-redesign .home-hero-art-img {
+    width: 100%;
+    max-width: 200px;
+    height: auto;
+    opacity: 0.95;
+}
+
+@media (max-width: 1100px) {
+    body.ux-redesign .home-top-row { grid-template-columns: 1fr; }
+    body.ux-redesign .home-hero { grid-template-columns: 1fr; }
+    body.ux-redesign .home-hero-art { order: -1; max-width: 160px; }
+    body.ux-redesign .home-hero { height: auto; }
+}
+
+/* Trust card */
+body.ux-redesign .home-trust-card {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius);
+    box-shadow: var(--ux-card-shadow);
+    padding: 22px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+body.ux-redesign .home-trust-title {
+    margin: 0;
+    font-size: var(--ux-font-h3);
+    font-weight: 600;
+    color: var(--ux-text-primary);
+}
+body.ux-redesign .home-trust-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+body.ux-redesign .home-trust-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+body.ux-redesign .home-trust-icon {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--ux-surface-cool);
+    color: var(--ux-brand-700);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+body.ux-redesign .home-trust-svg { width: 16px; height: 16px; }
+body.ux-redesign .home-trust-text { min-width: 0; }
+body.ux-redesign .home-trust-row-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    margin-bottom: 2px;
+}
+body.ux-redesign .home-trust-row-body {
+    font-size: 12px;
+    color: var(--ux-text-muted);
+    line-height: 1.45;
+}
+
+/* Status grid (Kitchen Status row) */
+body.ux-redesign .home-status {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+body.ux-redesign .home-section-title {
+    margin: 0;
+    font-size: var(--ux-font-h3);
+    font-weight: 600;
+    color: var(--ux-text-primary);
+}
+body.ux-redesign .home-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+body.ux-redesign .home-section-link {
+    font-size: 13px;
+    color: var(--ux-link);
+    text-decoration: none;
+    font-weight: 500;
+}
+body.ux-redesign .home-section-link:hover {
+    color: var(--ux-link-hover);
+    text-decoration: underline;
+}
+/* Kitchen Status grid.                                             */
+/* Default shape is a deliberate 4-column row at the typical laptop */
+/* size (4 + 3 wrap so the second row stays visually intentional). */
+/* At wide desktop the grid promotes to 7 columns so all status    */
+/* cards land on a single row. Below 720px viewport the grid       */
+/* collapses to 2 columns so labels stay legible.                  */
+body.ux-redesign .home-status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+@media (min-width: 1280px) {
+    body.ux-redesign .home-status-grid {
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+}
+@media (max-width: 720px) {
+    body.ux-redesign .home-status-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+body.ux-redesign .home-status-card {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius);
+    box-shadow: var(--ux-card-shadow);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 178px;
+}
+body.ux-redesign .home-status-card-head {
+    margin-bottom: 4px;
+}
+body.ux-redesign .home-status-card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--ux-surface-cool);
+    color: var(--ux-brand-700);
+}
+body.ux-redesign .home-status-card-icon-success { background: var(--ux-status-success-bg); color: var(--ux-status-success); }
+body.ux-redesign .home-status-card-icon-danger  { background: var(--ux-status-danger-bg);  color: var(--ux-status-danger);  }
+body.ux-redesign .home-status-card-icon-warning { background: var(--ux-status-warning-bg); color: var(--ux-status-warning); }
+body.ux-redesign .home-status-card-icon-info    { background: var(--ux-status-info-bg);    color: var(--ux-status-info);    }
+body.ux-redesign .home-status-card-svg { width: 18px; height: 18px; }
+body.ux-redesign .home-status-card-label {
+    font-size: 13px;
+    color: var(--ux-text-primary);
+    font-weight: 600;
+}
+body.ux-redesign .home-status-card-primary {
+    font-size: 13px;
+    color: var(--ux-text-secondary);
+    line-height: 1.35;
+    word-break: break-word;
+}
+body.ux-redesign .home-status-card-secondary {
+    font-size: 12px;
+    color: var(--ux-text-muted);
+    white-space: pre-line;
+    line-height: 1.4;
+}
+body.ux-redesign .home-status-card-secondary-success { color: var(--ux-status-success); }
+body.ux-redesign .home-status-card-secondary-warning { color: var(--ux-status-warning); }
+body.ux-redesign .home-status-card-foot {
+    margin-top: auto;
+    padding-top: 8px;
+}
+body.ux-redesign .home-status-card-link {
+    font-size: 13px;
+    color: var(--ux-link);
+    text-decoration: none;
+    font-weight: 500;
+}
+body.ux-redesign .home-status-card-link:hover {
+    color: var(--ux-link-hover);
+    text-decoration: underline;
+}
+
+/* Mid row: Pantry start (main) + Recommended + Activity (side).   */
+/* Right column width matches the .home-top-row right column so   */
+/* the visual gutter is consistent down the entire page. Stacked  */
+/* gap inside the side column is tightened so Recommended and     */
+/* Recent Activity feel like one coherent right rail rather than  */
+/* two unrelated cards.                                            */
+body.ux-redesign .home-mid-row {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(340px, 0.9fr);
+    gap: 24px;
+    align-items: start;
+}
+body.ux-redesign .home-mid-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+body.ux-redesign .home-mid-side { display: flex; flex-direction: column; gap: 16px; }
+
+@media (max-width: 1100px) {
+    body.ux-redesign .home-mid-row { grid-template-columns: 1fr; }
+}
+
+body.ux-redesign .home-pantry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+}
+body.ux-redesign .home-pantry-card {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius);
+    box-shadow: var(--ux-card-shadow);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+body.ux-redesign .home-pantry-card-top {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+body.ux-redesign .home-pantry-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--ux-surface-cool);
+    color: var(--ux-brand-700);
+    flex-shrink: 0;
+}
+body.ux-redesign .home-pantry-card-icon-info    { background: var(--ux-status-info-bg);    color: var(--ux-status-info);    }
+body.ux-redesign .home-pantry-card-icon-success { background: var(--ux-status-success-bg); color: var(--ux-status-success); }
+body.ux-redesign .home-pantry-card-icon-warning { background: var(--ux-status-warning-bg); color: var(--ux-status-warning); }
+body.ux-redesign .home-pantry-card-svg { width: 18px; height: 18px; }
+body.ux-redesign .home-pantry-card-toptext { min-width: 0; }
+body.ux-redesign .home-pantry-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    margin-bottom: 4px;
+    line-height: 1.3;
+    word-break: break-word;
+}
+body.ux-redesign .home-pantry-card-desc {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ux-text-muted);
+    line-height: 1.45;
+}
+body.ux-redesign .home-pantry-meta {
+    margin: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    font-size: 12px;
+}
+body.ux-redesign .home-pantry-meta dt {
+    color: var(--ux-text-muted);
+    font-weight: 500;
+}
+body.ux-redesign .home-pantry-meta dd {
+    margin: 0;
+    color: var(--ux-text-primary);
+    word-break: break-word;
+}
+body.ux-redesign .home-pantry-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 4px;
+}
+body.ux-redesign .home-pantry-card-use {
+    padding: 8px 14px;
+    font-size: 13px;
+}
+body.ux-redesign .home-pantry-card-details {
+    color: var(--ux-link);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+body.ux-redesign .home-pantry-card-details:hover {
+    color: var(--ux-link-hover);
+    text-decoration: underline;
+}
+body.ux-redesign .home-pantry-card-details-icon { width: 12px; height: 12px; }
+
+body.ux-redesign .home-empty-card {
+    background: var(--ux-surface-card);
+    border: 1px dashed var(--ux-border-strong);
+    border-radius: var(--ux-card-radius);
+    padding: 22px;
+    color: var(--ux-text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* Recommended next step */
+body.ux-redesign .home-recommended {
+    background: var(--ux-surface-warm);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius);
+    box-shadow: var(--ux-card-shadow);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+body.ux-redesign .home-recommended-title {
+    margin: 0;
+    font-size: var(--ux-font-h3);
+    font-weight: 600;
+    color: var(--ux-text-primary);
+}
+body.ux-redesign .home-recommended-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+body.ux-redesign .home-recommended-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--ux-status-warning-bg);
+    color: var(--ux-status-warning);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+body.ux-redesign .home-recommended-svg { width: 18px; height: 18px; }
+body.ux-redesign .home-recommended-text { min-width: 0; }
+body.ux-redesign .home-recommended-headline {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    margin-bottom: 4px;
+}
+body.ux-redesign .home-recommended-sub {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ux-text-secondary);
+    line-height: 1.45;
+}
+body.ux-redesign .home-recommended-cta { padding: 9px 16px; font-size: 13px; }
+
+/* Recent Activity */
+body.ux-redesign .home-activity {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius);
+    box-shadow: var(--ux-card-shadow);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+body.ux-redesign .home-activity-title {
+    margin: 0;
+    font-size: var(--ux-font-h3);
+    font-weight: 600;
+    color: var(--ux-text-primary);
+}
+body.ux-redesign .home-activity-tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-bottom: 1px solid var(--ux-border-soft);
+    padding-bottom: 0;
+}
+body.ux-redesign .home-activity-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 4px;
+    margin-right: 18px;
+    color: var(--ux-text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+body.ux-redesign .home-activity-tab:hover { color: var(--ux-text-primary); }
+body.ux-redesign .home-activity-tab.is-active {
+    color: var(--ux-link);
+    border-bottom-color: var(--ux-link);
+}
+body.ux-redesign .home-activity-panes { padding-top: 6px; }
+body.ux-redesign .home-activity-pane { display: none; }
+body.ux-redesign .home-activity-pane.is-active { display: block; }
+body.ux-redesign .home-activity-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+body.ux-redesign .home-activity-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+body.ux-redesign .home-activity-row-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    background: var(--ux-surface-cool);
+    color: var(--ux-brand-700);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+body.ux-redesign .home-activity-row-icon-success { background: var(--ux-status-success-bg); color: var(--ux-status-success); }
+body.ux-redesign .home-activity-row-icon-danger  { background: var(--ux-status-danger-bg);  color: var(--ux-status-danger);  }
+body.ux-redesign .home-activity-row-icon-warning { background: var(--ux-status-warning-bg); color: var(--ux-status-warning); }
+body.ux-redesign .home-activity-row-icon-info    { background: var(--ux-status-info-bg);    color: var(--ux-status-info);    }
+body.ux-redesign .home-activity-row-svg { width: 16px; height: 16px; }
+body.ux-redesign .home-activity-row-text { flex: 1 1 auto; min-width: 0; }
+body.ux-redesign .home-activity-row-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    word-break: break-word;
+}
+body.ux-redesign .home-activity-row-time {
+    font-size: 12px;
+    color: var(--ux-text-muted);
+}
+body.ux-redesign .home-activity-empty {
+    padding: 12px 4px;
+}
+body.ux-redesign .home-activity-empty-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    margin-bottom: 4px;
+}
+body.ux-redesign .home-activity-empty-body {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ux-text-muted);
+}
+body.ux-redesign .home-activity-foot {
+    border-top: 1px solid var(--ux-border-soft);
+    padding-top: 12px;
+    margin-top: 4px;
+}
+body.ux-redesign .home-activity-more {
+    color: var(--ux-link);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+body.ux-redesign .home-activity-more:hover {
+    color: var(--ux-link-hover);
+    text-decoration: underline;
+}
+body.ux-redesign .home-activity-more-icon { width: 12px; height: 12px; }
+
+/* =============================================================== */
+/* Taste Tests placeholder                                          */
+/* =============================================================== */
+body.ux-redesign .taste-tests-page {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius);
+    box-shadow: var(--ux-card-shadow);
+    padding: 28px;
+    max-width: 720px;
+}
+body.ux-redesign .taste-tests-empty {
+    margin-top: 18px;
+    padding: 22px;
+    background: var(--ux-surface-cool);
+    border: 1px dashed var(--ux-border-strong);
+    border-radius: var(--ux-card-radius);
+}
+body.ux-redesign .taste-tests-empty-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    margin-bottom: 8px;
+}
+body.ux-redesign .taste-tests-empty-body {
+    margin: 0 0 16px;
+    color: var(--ux-text-secondary);
+    line-height: 1.55;
+    font-size: 13px;
+}
+body.ux-redesign .taste-tests-empty-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* ================================================================== */
+/* UXR-E.2: Recipes Prep Station layout normalization.                */
+/*                                                                    */
+/* Scoped to body.ux-redesign .recipe-editor so the existing global   */
+/* .editor-* selectors keep working for legacy/non-redesign render    */
+/* paths and archive snapshots. No JS / DOM / API / event wiring is   */
+/* changed. All ids referenced by recipe-editor.js (#cook-button,     */
+/* #preview-button, #readiness-button, #save-button, #cancel-link,    */
+/* #recent-runs-card, #schedule-card, every #fld-*) are preserved.    */
+/*                                                                    */
+/* Layout intent:                                                     */
+/*   - Raise max-width to 1480px to match Home (UXR-C.1) so the       */
+/*     editor breathes on wide desktops instead of capping at         */
+/*     --content-max (1280).                                          */
+/*   - 2-column grid: minmax(0, 2fr) for the left cards stack and     */
+/*     minmax(340px, 0.9fr) for the right Prep Station rail. 24px     */
+/*     column gap matches Home's mid-row rhythm.                      */
+/*   - Pin .editor-preview to (col 2, row 1) and .editor-readiness    */
+/*     to (col 2, row 2) so the readiness panel stacks UNDER the      */
+/*     preview in the right rail instead of orphaning into col 1      */
+/*     row 2 the way default grid auto-flow places a third child.    */
+/*   - Each card (.editor-card, .editor-preview, .editor-readiness)   */
+/*     adopts the redesign card chrome: --ux-surface-card,            */
+/*     --ux-border-soft, --ux-card-radius-lg (14px), soft shadow,     */
+/*     20px 24px padding.                                             */
+/*   - Card titles drop the legacy 12px uppercase eyebrow look and    */
+/*     adopt h3-weight (18px, weight 600, normal case, primary text   */
+/*     color). The Required Permissions title-row keeps its inline    */
+/*     help-hook beside the title with zero bottom margin.            */
+/*   - "PREP STATION" eyebrow is stamped via ::before on the page     */
+/*     title using flex-basis: 100% to wrap onto its own line above   */
+/*     the recipe name. No JS or DOM change required.                 */
+/*   - At <= 1100px the grid collapses to a single column and both    */
+/*     asides become static so the right rail rejoins the flow.       */
+/* ================================================================== */
+
+body.ux-redesign .recipe-editor {
+    max-width: 1480px;
+    width: 100%;
+    margin-inline: 0;
+}
+
+body.ux-redesign .recipe-editor .page-header {
+    align-items: baseline;
+    gap: 24px;
+    margin-bottom: 24px;
+}
+
+body.ux-redesign .recipe-editor .page-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: var(--ux-text-primary);
+}
+
+body.ux-redesign .recipe-editor .page-title::before {
+    content: "PREP STATION";
+    flex-basis: 100%;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--ux-text-eyebrow);
+    line-height: 1.2;
+    margin-bottom: -2px;
+}
+
+body.ux-redesign .recipe-editor .editor-actions {
+    gap: 12px;
+}
+
+body.ux-redesign .recipe-editor .editor-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(340px, 0.9fr);
+    gap: 24px;
+    align-items: start;
+}
+
+body.ux-redesign .recipe-editor .editor-cards {
+    gap: 20px;
+}
+
+body.ux-redesign .recipe-editor .editor-card {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius-lg);
+    padding: 20px 24px;
+    box-shadow: var(--ux-card-shadow);
+}
+
+body.ux-redesign .recipe-editor .editor-card-title,
+body.ux-redesign .recipe-editor .editor-preview-title,
+body.ux-redesign .recipe-editor .editor-readiness-title {
+    font-size: 18px;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    text-transform: none;
+    letter-spacing: normal;
+    margin: 0 0 12px;
+}
+
+body.ux-redesign .recipe-editor .editor-card-title-row .editor-card-title {
+    margin: 0;
+}
+
+body.ux-redesign .recipe-editor .editor-card-doc {
+    font-size: 14px;
+    color: var(--ux-text-secondary);
+    line-height: 1.5;
+    margin: 0 0 16px;
+}
+
+body.ux-redesign .recipe-editor .editor-preview {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius-lg);
+    padding: 20px 24px;
+    box-shadow: var(--ux-card-shadow);
+    position: sticky;
+    top: 24px;
+    grid-column: 2;
+    grid-row: 1;
+}
+
+body.ux-redesign .recipe-editor .editor-readiness {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius-lg);
+    padding: 20px 24px;
+    box-shadow: var(--ux-card-shadow);
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+}
+
+@media (max-width: 1100px) {
+    body.ux-redesign .recipe-editor .editor-grid {
+        grid-template-columns: 1fr;
+    }
+    body.ux-redesign .recipe-editor .editor-preview,
+    body.ux-redesign .recipe-editor .editor-readiness {
+        position: static;
+        grid-column: auto;
+        grid-row: auto;
+    }
+}
+
+/* =====================================================================
+ * UXR-D.3 -- Pantry page polish.
+ *
+ * Scope: only body.ux-redesign and only the standalone Pantry page
+ * (#/pantry and #/pantry/<templateId>). Marked by the pantry-page
+ * class on the outer <section> emitted by pantry.js. Legacy unscoped
+ * .pantry-* rules above are intentionally left intact so archive
+ * snapshots and any fallback path still render.
+ *
+ * Tokens used:
+ *   --ux-surface-card, --ux-border-soft, --ux-border-strong,
+ *   --ux-card-radius-lg, --ux-card-shadow,
+ *   --ux-text-primary, --ux-text-secondary, --ux-text-muted,
+ *   --ux-text-eyebrow.
+ * No new tokens introduced. No behavior changed -- styling only.
+ * ===================================================================== */
+
+body.ux-redesign .pantry-page {
+    max-width: 1480px;
+    width: 100%;
+    margin-inline: 0;
+}
+
+body.ux-redesign .pantry-page .page-header {
+    align-items: baseline;
+    gap: 24px;
+    margin-bottom: 24px;
+}
+body.ux-redesign .pantry-page .page-title {
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: var(--ux-text-primary);
+}
+body.ux-redesign .pantry-page .page-lede {
+    font-size: 14px;
+    color: var(--ux-text-secondary);
+    line-height: 1.5;
+    margin: 8px 0 0;
+}
+
+/* Card grid. Premium minmax so cards do not look tiny on wide screens
+   and do not stretch to unreadable line lengths on narrow ones.        */
+body.ux-redesign .pantry-page .pantry-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+}
+
+body.ux-redesign .pantry-page .pantry-card {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius-lg);
+    padding: 20px 24px;
+    box-shadow: var(--ux-card-shadow);
+    gap: 12px;
+}
+body.ux-redesign .pantry-page .pantry-card-header {
+    gap: 12px;
+}
+body.ux-redesign .pantry-page .pantry-card-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    text-decoration: none;
+    letter-spacing: -0.1px;
+}
+body.ux-redesign .pantry-page .pantry-card-title:hover {
+    color: var(--ux-text-primary);
+    text-decoration: underline;
+}
+body.ux-redesign .pantry-page .pantry-card-badge {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    background: transparent;
+    border: 1px solid var(--ux-border-strong);
+    border-radius: 999px;
+    padding: 2px 10px;
+    color: var(--ux-text-eyebrow);
+    flex-shrink: 0;
+}
+body.ux-redesign .pantry-page .pantry-card-desc {
+    color: var(--ux-text-secondary);
+    font-size: 14px;
+    line-height: 1.5;
+}
+body.ux-redesign .pantry-page .pantry-card-meta dt {
+    font-size: 12px;
+    color: var(--ux-text-secondary);
+    font-weight: 500;
+}
+body.ux-redesign .pantry-page .pantry-card-meta dd {
+    font-size: 13px;
+    color: var(--ux-text-primary);
+}
+
+/* Detail page: each .pantry-section becomes a card, no top divider.    */
+body.ux-redesign .pantry-page-detail #pantry-detail .page-header {
+    margin-bottom: 16px;
+}
+body.ux-redesign .pantry-page-detail #pantry-detail .page-title {
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    letter-spacing: -0.2px;
+}
+body.ux-redesign .pantry-page-detail #pantry-detail .page-lede {
+    font-size: 14px;
+    color: var(--ux-text-secondary);
+    line-height: 1.5;
+    margin: 8px 0 0;
+}
+
+/* Summary meta strip right under the detail header.                    */
+body.ux-redesign .pantry-page-detail #pantry-detail > .pantry-card-meta {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius-lg);
+    box-shadow: var(--ux-card-shadow);
+    padding: 16px 20px;
+    margin-top: 0;
+}
+
+body.ux-redesign .pantry-page-detail .pantry-section {
+    background: var(--ux-surface-card);
+    border: 1px solid var(--ux-border-soft);
+    border-top: 1px solid var(--ux-border-soft);
+    border-radius: var(--ux-card-radius-lg);
+    box-shadow: var(--ux-card-shadow);
+    padding: 20px 24px;
+    margin-top: 16px;
+}
+body.ux-redesign .pantry-page-detail .pantry-section h2 {
+    font-size: 17px;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    text-transform: none;
+    letter-spacing: -0.1px;
+    margin: 0 0 12px;
+}
+body.ux-redesign .pantry-page-detail .pantry-section-desc {
+    color: var(--ux-text-secondary);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Materialize form -- sentence-case labels instead of legacy uppercase
+   eyebrow. Inputs inherit redesign focus ring via base styles.         */
+body.ux-redesign .pantry-page-detail .pantry-form-row label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ux-text-primary);
+    text-transform: none;
+    letter-spacing: normal;
+}
+body.ux-redesign .pantry-page-detail .pantry-form-hint {
+    color: var(--ux-text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+body.ux-redesign .pantry-page-detail .pantry-form-row input {
+    border-color: var(--ux-border-strong);
+}
+
+/* Defaults table + provenance keep monospace identity but inherit
+   redesign surface chrome via the section card above.                  */
+body.ux-redesign .pantry-page-detail .pantry-defaults-table {
+    background: transparent;
+    border: 1px solid var(--ux-border-soft);
+}
+
+/* Page-banner readability inside the detail section card.              */
+body.ux-redesign .pantry-page-detail #pantry-banner {
+    margin-bottom: 16px;
+}
+
+@media (max-width: 720px) {
+    body.ux-redesign .pantry-page .pantry-list {
+        grid-template-columns: 1fr;
+    }
+    body.ux-redesign .pantry-page-detail .pantry-section,
+    body.ux-redesign .pantry-page-detail #pantry-detail > .pantry-card-meta {
+        padding: 16px;
+    }
+}
+
+/* --------------------------------------------------------------- */
+/* Close App topbar button + confirmation modal                    */
+/* --------------------------------------------------------------- */
+body.ux-redesign .btn-topbar-danger {
+    color: var(--ux-status-danger, #c0392b);
+}
+body.ux-redesign .btn-topbar-danger:hover,
+body.ux-redesign .btn-topbar-danger:focus-visible {
+    background: rgba(192, 57, 43, 0.08);
+    color: var(--ux-status-danger, #c0392b);
+}
+
+#close-app-modal-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 22, 36, 0.55);
+    /* Must sit above #cookbook-lock-overlay (z-index 9000) so the
+       close confirmation can be triggered from inside the lock
+       screen. */
+    z-index: 9100;
+}
+/* The HTML `hidden` attribute MUST win over the id-level display
+   rules below, otherwise the modal flashes for a frame at boot
+   before close-app.js / the lock overlay run. ID specificity beats
+   the user-agent `[hidden] { display: none }` rule, so spell the
+   override out here. */
+#close-app-modal[hidden],
+#close-app-modal-scrim[hidden] {
+    display: none !important;
+}
+#close-app-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(520px, calc(100vw - 48px));
+    max-height: calc(100vh - 96px);
+    background: var(--ux-surface-card, #ffffff);
+    color: var(--ux-text-primary, #1a2233);
+    border-radius: 12px;
+    box-shadow: 0 24px 60px rgba(8, 14, 28, 0.35);
+    display: flex;
+    flex-direction: column;
+    z-index: 9101;
+    overflow: hidden;
+}
+.close-app-modal-header {
+    padding: 20px 24px 0 24px;
+}
+.close-app-modal-title {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--ux-text-primary, #1a2233);
+}
+.close-app-modal-body {
+    padding: 12px 24px 8px 24px;
+    overflow: auto;
+    font-size: 0.95rem;
+    line-height: 1.45;
+}
+.close-app-modal-body p { margin: 0 0 8px 0; }
+.close-app-modal-options {
+    list-style: disc;
+    padding-left: 20px;
+    margin: 4px 0 0 0;
+}
+.close-app-modal-options li { margin: 4px 0; }
+.close-app-modal-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 16px 24px 20px 24px;
+    border-top: 1px solid var(--ux-border-soft, #e5e8ee);
+    background: var(--ux-surface-subtle, #f7f8fb);
+}
+.close-app-btn {
+    appearance: none;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    line-height: 1.2;
+    min-width: 96px;
+}
+.close-app-btn:focus-visible {
+    outline: 2px solid var(--ux-accent, #2f6fed);
+    outline-offset: 2px;
+}
+.close-app-btn-neutral {
+    background: #ffffff;
+    color: var(--ux-text-primary, #1a2233);
+    border-color: var(--ux-border-soft, #d6dae3);
+}
+.close-app-btn-neutral:hover { background: #f1f3f7; }
+.close-app-btn-secondary {
+    background: #ffffff;
+    color: var(--ux-text-primary, #1a2233);
+    border-color: var(--ux-border-soft, #d6dae3);
+}
+.close-app-btn-secondary:hover { background: #eef2fb; border-color: #c8d2ea; }
+.close-app-btn-primary {
+    background: #ffffff;
+    color: var(--ux-status-danger, #c0392b);
+    border-color: var(--ux-border-soft, #d6dae3);
+    font-weight: 600;
+}
+.close-app-btn-primary:hover { background: #fdecea; border-color: #f1b5ad; color: #a83224; }
+.close-app-btn-danger {
+    background: var(--ux-status-danger, #c0392b);
+    color: #ffffff;
+    border-color: var(--ux-status-danger, #c0392b);
+    font-weight: 600;
+}
+.close-app-btn-danger:hover { background: #a83224; border-color: #a83224; }
+/* --------------------------------------------------------------- */
+
+/* In-app notification toasts / banners (V1 Notifications N4).
+   Fixed, top-right stack. Newest on top via column-reverse. The region is
+   a passive positioning container; each card owns its own ARIA role. */
+.notifications-region {
+    position: fixed;
+    top: var(--space-4, 16px);
+    right: var(--space-4, 16px);
+    z-index: 1100;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: var(--space-2, 8px);
+    width: min(360px, calc(100vw - 2 * var(--space-4, 16px)));
+    max-height: calc(100vh - 2 * var(--space-4, 16px));
+    overflow-y: auto;
+    pointer-events: none;            /* clicks pass through empty gaps */
+}
+
+.notification {
+    pointer-events: auto;            /* but the cards themselves are interactive */
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2, 8px);
+    padding: var(--space-3, 12px) var(--space-4, 16px);
+    padding-right: calc(var(--space-4, 16px) + 20px);
+    border: 1px solid transparent;
+    border-radius: var(--radius-m, 8px);
+    box-shadow: var(--shadow-2, 0 4px 12px rgba(0, 0, 0, 0.15));
+    background: #ffffff;
+    color: var(--ux-text, #1f2329);
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+.notification-info {
+    background: #e6f4ea;
+    border-color: #b7dfc4;
+    color: #14532d;
+}
+.notification-warning {
+    background: #fcf5d8;
+    border-color: #ecd98c;
+    color: #6b4a04;
+}
+.notification-error {
+    background: #fdecec;
+    border-color: #f3bcbc;
+    color: #7f1d1d;
+}
+
+.notification-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.notification-label {
+    font-weight: 600;
+    font-size: 0.8125rem;
+    letter-spacing: 0.01em;
+}
+.notification-recipe {
+    font-weight: 600;
+    word-break: break-word;
+}
+.notification-message {
+    margin: 0;
+    opacity: 0.95;
+    word-break: break-word;
+}
+
+.notification-dismiss {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 1rem;
+    line-height: 1;
+    color: inherit;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-s, 4px);
+    cursor: pointer;
+    opacity: 0.7;
+}
+.notification-dismiss:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.06);
+}
+.notification-dismiss:focus-visible {
+    outline: var(--focus-ring, 2px solid #2563eb);
+    outline-offset: 1px;
+    opacity: 1;
+}
+/* --------------------------------------------------------------- */

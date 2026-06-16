@@ -1,0 +1,96 @@
+{
+  "templateId":            "ai-business-value",
+  "templateSchemaVersion": 1,
+  "templateVersion":       "1.0.0",
+  "displayName":           "AI Business Value Dashboard",
+  "shortDescription":      "Aggregate Copilot interaction audit signals into the AI Business Value 50-column superset rollup fact CSV for the chosen period, enriched with Entra user metadata. Does not pull the broader M365 audit usage bundle.",
+  "category":              "Analytics",
+  "minPaxScriptVersion":   "1.11.5",
+  "minCookbookVersion":    "1.0.0",
+
+  "produces": {
+    "summary": "A single rollup fact CSV in the AI Business Value 50-column superset schema that aggregates Copilot interaction audit signals for the chosen date range, joined to the Entra user directory snapshot for the same tenant. The PAX runtime is invoked in Rollup mode with the Entra user info ingredient enabled and the AI Business Value dashboard column target selected; the M365 usage bundle is intentionally not enabled for this template. The output is a deterministic file written to destinations.fact.path.",
+    "artifacts": [
+      {
+        "kind":        "fact",
+        "name":        "rollup fact CSV",
+        "description": "Per-user, per-period rollup of Copilot interaction audit signals in the AI Business Value 50-column superset schema, enriched with Entra user attributes, written to the operator-supplied destinations.fact.path."
+      }
+    ]
+  },
+
+  "requires": {
+    "authModes": ["WebLogin", "DeviceCode"],
+    "inputs": [
+      {
+        "field":       "identity.name",
+        "kind":        "recipe-name",
+        "required":    true,
+        "description": "Operator-chosen display name for the recipe materialized from this template."
+      },
+      {
+        "field":       "auth.tenantId",
+        "kind":        "tenant-id",
+        "required":    true,
+        "description": "GUID of the Microsoft 365 tenant whose audit log will be queried."
+      },
+      {
+        "field":       "query.startDate",
+        "kind":        "date",
+        "required":    true,
+        "description": "Inclusive UTC start date for the audit query, as YYYY-MM-DD."
+      },
+      {
+        "field":       "query.endDate",
+        "kind":        "date",
+        "required":    true,
+        "description": "Inclusive UTC end date for the audit query, as YYYY-MM-DD."
+      },
+      {
+        "field":       "destinations.fact.path",
+        "kind":        "output-directory",
+        "required":    true,
+        "description": "Local directory or UNC path where the rollup fact CSV will be written. OneLake / Fabric destinations are not supported."
+      }
+    ]
+  },
+
+  "recipeDefaults": {
+    "ingredients": {
+      "m365Usage":     { "includeM365Usage": false },
+      "entraUserData": { "includeUserInfo":  true }
+    },
+    "processing": { "rollup": "Rollup", "dashboard": "aibv" },
+    "auth":       { "mode":   "WebLogin" }
+  },
+
+  "manualGuidance": [
+    {
+      "heading":  "PAX rollup runtime (Python is PAX-owned)",
+      "audience": "operator",
+      "body": [
+        "This recipe runs PAX in Rollup mode. PAX's rollup post-processor is implemented in Python (3.10 or newer).",
+        "Python detection and per-user installation are handled by the underlying PAX script (Resolve-PythonExe inside PAX_Purview_Audit_Log_Processor.ps1), not by PAX Cookbook. If no compatible interpreter is on PATH, PAX itself attempts a per-user install via winget (Python.Python.3.13) and falls back to the python.org installer.",
+        "PAX Cookbook does not detect, install, configure, validate, or vendor Python. Cookbook orchestrates the PAX invocation and surfaces PAX's stdout / stderr verbatim in the embedded cook terminal.",
+        "If a rollup cook fails because Python is unavailable, see docs/TROUBLESHOOTING.md §11a. The corrective action is environment-side (provide a Python interpreter or unblock the PAX-owned installer paths), not Cookbook-side."
+      ]
+    },
+    {
+      "heading":  "Microsoft Agent 365 export (optional, manual)",
+      "audience": "operator",
+      "body": [
+        "Microsoft Agent 365 registry data is exported manually from the Microsoft 365 admin center. PAX Cookbook does NOT call the Agent 365 endpoint and does NOT ingest Agent 365 data into the recipe output.",
+        "1. Sign in to the Microsoft 365 admin center with a Global Reader role or higher.",
+        "2. Navigate to the Microsoft Agent 365 area (under Settings or the current equivalent path; the portal layout changes over time).",
+        "3. Use the in-portal export action to download the Agent 365 registry CSV for the same tenant id that this recipe targets.",
+        "4. Store the exported file alongside this recipe's destinations.fact.path output for manual cross-reference.",
+        "5. This guidance is informational. The recipe will execute correctly with or without the manual Agent 365 export, and the rollup fact CSV is unaffected by whether the export was performed."
+      ]
+    }
+  ],
+
+  "provenance": {
+    "source":       "bundled",
+    "lastReviewed": "2026-06-13"
+  }
+}

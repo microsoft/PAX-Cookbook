@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "releaseTimestamp": null,
+  "latestCookbook": {
+    "version": "1.0.0",
+    "packageUrl": "<TODO_RELEASE_URL_PACKAGE_ZIP>",
+    "sha256": "<TODO_RELEASE_ZIP_SHA256>",
+    "releaseNotesUrl": "<TODO_RELEASE_NOTES_URL>"
+  },
+  "includedPaxScript": {
+    "name": "PAX Purview Audit Log Processor",
+    "version": "1.11.6",
+    "relativePath": "resources/pax/PAX_Purview_Audit_Log_Processor.ps1",
+    "sha256": "0DD230734715ABD15CF4C0A76013672BF9AD6713C3F82520A6333B0DCDAAD361",
+    "acquisitionPolicy": "external",
+    "exportEnabled": false,
+    "engineManifestUrl": "http://127.0.0.1:60443/internal-test/approved-engine-manifest.json",
+    "engineManifestTrustAnchorThumbprint": null,
+    "manifestSignaturePolicy": "internal-test-bypass"
+  },
+  "compatibility": {
+    "minCookbookVersionForPaxScript": "1.0.0",
+    "minimumCompatibleInstallerVersion": "1.0.0"
+  }
+}

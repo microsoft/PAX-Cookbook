@@ -1,0 +1,66 @@
+# =====================================================================
+# PAX Cookbook .gitignore
+#
+# Safe-by-default for the PUBLIC repository. Everything that is build
+# output, developer/internal state, machine-specific, or large binary
+# is excluded. Only source, configuration, public docs, and the
+# resolved-include runtime assets are tracked.
+# =====================================================================
+
+# ---- Internal development / dev-trio state (never public) ----
+_temp/
+_backup/
+_archive/
+memory/
+AGENTS.md
+.claude/
+Agency-Cowork/
+.agency-tools/
+notify_brian.ps1
+.github/agents/
+.github/instructions/
+.github/prompts/
+.github/copilot-instructions.md
+
+# ---- .NET build output (contains machine-specific absolute paths) ----
+**/bin/
+**/obj/
+[Bb]in/
+[Oo]bj/
+
+# ---- Release / packaging artifacts (built, large, machine-stamped) ----
+artifacts/
+dist/
+temp/
+/PAX_Cookbook_Setup.exe
+*.log
+$shim
+
+# ---- React / Node build output + dependencies ----
+node_modules/
+**/node_modules/
+app/web-react/dist/
+
+# ---- Staged runtime (.NET binaries — shipped via the installer, not git) ----
+app/bin/
+
+# ---- Install-time runtime directories ----
+Backups/
+stage/
+PreviousVersions/
+
+# ---- IDE / user-specific ----
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# ---- Secrets / environment / signing material (must never be committed) ----
+.env
+.env.*
+*.pfx
+*.snk
+*.p12
+secrets.json
+appsettings.*.local.json

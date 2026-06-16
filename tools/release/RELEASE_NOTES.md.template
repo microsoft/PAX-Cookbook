@@ -1,0 +1,72 @@
+# PAX Cookbook {{COOKBOOK_VERSION}} ({{CHANNEL}})
+
+Built: {{BUILT_AT_UTC}}
+Package file: `{{PACKAGE_FILE}}`
+Package SHA-256: `{{PACKAGE_SHA256}}`
+Bundled PAX script version: {{PAX_SCRIPT_VERSION}}
+
+---
+
+## Integrity attestation
+
+This release is distributed with a SHA-256 sidecar file
+(`{{PACKAGE_FILE}}.sha256`). Verify the package before extracting:
+
+```powershell
+# Recompute the SHA-256 of the downloaded ZIP and compare with the sidecar.
+(Get-FileHash -Algorithm SHA256 -LiteralPath '{{PACKAGE_FILE}}').Hash
+Get-Content -LiteralPath '{{PACKAGE_FILE}}.sha256'
+```
+
+This release was produced by a local deterministic build pipeline. It
+carries SHA-256 attestation only; it carries **no** cryptographic
+signature unless the distributor has separately signed it. The accompanying
+release metadata JSON file reflects this honestly by declaring
+`signing.state = "unsigned"` and `signing.verified = false`. Any
+signing claim above and beyond the SHA-256 sidecar is strictly a
+distributor responsibility and must be reflected in a separate release
+announcement.
+
+---
+
+## Highlights
+
+<!--
+  Distributor: fill in the user-visible highlights for this release.
+  Keep this section brief. One line per highlight.
+-->
+
+- _TODO: highlight 1_
+- _TODO: highlight 2_
+
+## Breaking changes
+
+<!--
+  Distributor: list every breaking change in this release. If there are
+  no breaking changes, leave the bullet "_None._" in place.
+-->
+
+- _None._
+
+## Distributor notes
+
+<!--
+  Distributor-only notes that do not belong in the user-visible highlights
+  (for example, deployment caveats, manifest URL changes, expected
+  rollback steps). Safe to omit; do not invent items.
+-->
+
+- _TODO: any distributor-only notes for this release._
+
+## Hashes
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `{{PACKAGE_FILE}}` | `{{PACKAGE_SHA256}}` |
+
+## Provenance
+
+- Cookbook version: `{{COOKBOOK_VERSION}}`
+- Channel: `{{CHANNEL}}`
+- Built (UTC): `{{BUILT_AT_UTC}}`
+- Bundled PAX script: `{{PAX_SCRIPT_VERSION}}`

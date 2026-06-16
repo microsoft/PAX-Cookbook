@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paxcookbook.local/schemas/recipe-takeout.schema.json",
+  "title": "Recipe Takeout (v1)",
+  "description": "Portable, sanitized recipe package format for moving a recipe between Cookbook workspaces. additionalProperties:false at every object level except 'extensions'. Does not carry secrets, Chef's Key bindings, tenant audit output, bakes, logs, sqlite rows, runtime lock state, update trust files, or Credential Manager target names. The embedded 'recipe' subtree must validate against the current recipe.schema.json after takeout-side sanitization rebinding (the export path strips auth.authProfileId; the import path re-injects authProfileId only after the chef binds a local Chef's Key).",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["takeoutSchemaVersion", "kind", "exportedAtUtc", "recipe", "excluded"],
+
+  "properties": {
+    "takeoutSchemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version of the takeout envelope. v1 only."
+    },
+
+    "kind": {
+      "type": "string",
+      "const": "pax-cookbook.recipe-takeout",
+      "description": "Constant marker so quick file inspection identifies the file type even if extension is changed."
+    },
+
+    "exportedAtUtc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 / ISO 8601 UTC timestamp when the takeout was produced."
+    },
+
+    "exportedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Non-binding provenance about the workspace that produced this file. workspaceFingerprint is NOT a stable cross-machine identity; it is a short opaque label that helps a chef recognize they are importing a file they themselves exported (K-9).",
+      "required": ["cookbookVersion", "bundledPaxVersion", "releaseChannel"],
+      "properties": {
+        "cookbookVersion":       { "type": "string", "minLength": 1, "maxLength": 200 },
+        "bundledPaxVersion":     { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "releaseChannel":        { "type": "string", "minLength": 1, "maxLength": 50 },
+        "workspaceFingerprint":  {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$",
+          "description": "Optional. SHA-256 of the workspace install path, truncated to the first 8 lowercase hex characters. Helps a chef notice they are about to import a file they themselves produced."
+        }
+      }
+    },
+
+    "recipe": {
+      "$ref": "https://paxcookbook.local/schemas/recipe.schema.json",
+      "description": "The sanitized recipe payload. Must validate against the current recipe schema after the import flow assigns a fresh recipeId, restamps createdBy.{cookbookVersion,bundledPaxVersion,releaseChannel}, and restamps createdAt/updatedAt. The export pipeline strips auth.authProfileId; the import flow re-injects authProfileId only after the chef binds a local Chef's Key. See chefKey block for the requirement metadata that survives the export."
+    },
+
+    "chefKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Chef's Key requirement metadata. Carries WHAT the recipe needs, never the binding itself. The import flow uses this to decide whether to drop the imported recipe into Needs Prep state.",
+      "required": ["requirement"],
+      "properties": {
+        "requirement": {
+          "type": "string",
+          "enum": ["required", "none"],
+          "description": "'required' when source auth.mode is one of {AppRegistrationSecret, AppRegistrationCertificate} (the modes that require authProfileId). 'none' when source auth.mode is one of {WebLogin, DeviceCode, ManagedIdentity}."
+        },
+        "mode": {
+          "type": ["string", "null"],
+          "enum": ["AppRegistrationSecret", "AppRegistrationCertificate", null],
+          "description": "Optional. Mode the imported recipe needs a Chef's Key for. Helps the destination UI filter local Chef's Keys by mode."
+        },
+        "sourceDisplayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Optional. Sanitized human-readable name the source chef gave the source Chef's Key (K-2). Cosmetic; helps the importing chef pick the right local key."
+        }
+      }
+    },
+
+    "sourceRecipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Non-binding provenance about the source recipe on the source workspace. Strictly informational. The destination broker assigns a fresh recipeId on import; this block is the only place the source ID survives.",
+      "properties": {
+        "id":   { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+                  "description": "Source recipeId (ULID, Crockford base32). Metadata only; never adopted as the destination recipeId." },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200,
+                  "description": "Source recipe identity.name at export time." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "sourceTemplate": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Mirror of source recipe.createdBy.fromTemplate. Preserved verbatim (K-8); informational, not a runtime dependency.",
+          "required": ["templateId", "templateVersion"],
+          "properties": {
+            "templateId":      { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$" },
+            "templateVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+          }
+        }
+      }
+    },
+
+    "warnings": {
+      "type": "array",
+      "description": "Pre-baked warnings the export pipeline produced. The import preview surfaces these but does NOT treat them as errors. Codes are stable enums; messages are advisory.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "path_local_absolute_needs_review",
+              "path_unc_review_recommended",
+              "path_user_specific_review_recommended",
+              "tenant_id_present_review_recommended",
+              "user_filter_values_present_review_recommended",
+              "group_filter_values_present_review_recommended",
+              "agent_filter_values_present_review_recommended",
+              "extra_arguments_present_review_recommended",
+              "date_range_may_be_stale",
+              "template_not_present_in_destination",
+              "template_destination_older_than_source",
+              "chef_key_required_select_local_binding"
+            ]
+          },
+          "path":    { "type": "string", "minLength": 1, "maxLength": 200,
+                       "description": "JSON pointer (RFC 6901) into the recipe subtree this warning relates to. Optional." },
+          "detail":  { "type": "string", "minLength": 1, "maxLength": 500,
+                       "description": "Free-text additional context. Sanitized at export." }
+        }
+      }
+    },
+
+    "excluded": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Self-documenting list of categories the export pipeline deliberately stripped. Required so the file is honest about what it does not contain. The set is closed (enum).",
+      "items": {
+        "type": "string",
+        "enum": [
+          "chef_key_secrets",
+          "chef_key_binding_authProfileId",
+          "credential_manager_target_names",
+          "access_tokens",
+          "tenant_audit_output",
+          "bake_records",
+          "cooks_folder_contents",
+          "cookbook_sqlite",
+          "logs",
+          "runtime_lock_state",
+          "update_trust_files",
+          "source_recipeId_as_active_id"
+        ]
+      }
+    },
+
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Reserved for future minor extensions. v1 broker MUST refuse to import a file containing this object unless takeoutSchemaVersion advances. additionalProperties is true inside this object only so future versions do not have to redefine the envelope."
+    }
+  }
+}

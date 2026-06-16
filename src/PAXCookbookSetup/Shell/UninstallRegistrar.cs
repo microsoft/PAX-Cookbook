@@ -1,0 +1,80 @@
+using System.IO;
+
+namespace PAXCookbookSetup.Shell;
+
+// Writes the per-user Add/Remove Programs entry under
+// HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\PAXCookbook.
+//
+// Fields written (per Phase 8 contract + Phase 12 Mode B failure repair):
+//   DisplayName          = "PAX Cookbook"
+//   DisplayVersion       = <appVersion>
+//   Publisher            = "Microsoft"
+//   InstallLocation      = <installRoot>                (absolute, expanded)
+//   DisplayIcon          = <installRoot>\App\bin\PAXCookbook.exe,0
+//   UninstallString      = "<installRoot>\Setup\PAXCookbookSetup.exe" uninstall
+//   QuietUninstallString = "<installRoot>\Setup\PAXCookbookSetup.exe" uninstall --force
+//   NoModify             = 1
+//   NoRepair             = 0   (Repair Setup verb supports it)
+//
+// All path values are normalized through Path.GetFullPath so the
+// resulting strings are absolute, fully expanded, and contain no
+// relative components. This is a defensive fix for the Phase 12 Mode B
+// "Settings cannot find PAXCookbookSetup.exe" report: if the registry
+// value is ever stored with a non-expanded or relative path,
+// Settings.exe rejects it.
+public sealed class UninstallRegistrar
+{
+    public const string RootSubKey =
+        @"Software\Microsoft\Windows\CurrentVersion\Uninstall\PAXCookbook";
+
+    public const string DisplayName = "PAX Cookbook";
+    public const string Publisher = "Microsoft";
+
+    private readonly IRegistryWriter _registry;
+
+    public UninstallRegistrar(IRegistryWriter registry) { _registry = registry; }
+
+    public UninstallRegistrationResult Register(string installRoot, string appVersion)
+    {
+        // Normalize installRoot to an absolute path; downstream values
+        // are derived from it so the normalization flows through.
+        var installRootFull = Path.GetFullPath(installRoot);
+        var appExe = Path.GetFullPath(ShortcutCatalog.AppExePath(installRootFull));
+        var setupExe = Path.GetFullPath(ShortcutCatalog.SetupExePath(installRootFull));
+
+        var uninstallString = $"\"{setupExe}\" uninstall";
+        var quietUninstallString = $"\"{setupExe}\" uninstall --force";
+        var displayIcon = appExe + ",0";
+
+        _registry.SetString(RootSubKey, "DisplayName", DisplayName);
+        _registry.SetString(RootSubKey, "DisplayVersion", appVersion);
+        _registry.SetString(RootSubKey, "Publisher", Publisher);
+        _registry.SetString(RootSubKey, "InstallLocation", installRootFull);
+        _registry.SetString(RootSubKey, "DisplayIcon", displayIcon);
+        _registry.SetString(RootSubKey, "UninstallString", uninstallString);
+        _registry.SetString(RootSubKey, "QuietUninstallString", quietUninstallString);
+        _registry.SetDword (RootSubKey, "NoModify", 1);
+        _registry.SetDword (RootSubKey, "NoRepair", 0);
+
+        return new UninstallRegistrationResult(
+            SubKey: RootSubKey,
+            UninstallString: uninstallString,
+            QuietUninstallString: quietUninstallString,
+            DisplayIcon: displayIcon,
+            DisplayName: DisplayName,
+            DisplayVersion: appVersion,
+            InstallLocation: installRootFull);
+    }
+
+    public bool IsRegistered()
+        => _registry.SubKeyExists(RootSubKey);
+}
+
+public sealed record UninstallRegistrationResult(
+    string SubKey,
+    string UninstallString,
+    string QuietUninstallString,
+    string DisplayIcon,
+    string DisplayName,
+    string DisplayVersion,
+    string InstallLocation);

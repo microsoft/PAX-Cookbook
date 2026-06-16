@@ -1,0 +1,296 @@
+/* =========================================================
+   Design tokens — single source of truth for color, spacing,
+   radius, typography, and shadow.
+
+   The reference brand experience is light-themed with cool
+   blue gradients and amber accents (see _backup/Sample site
+   mockup.png). The light palette is the default; a dark
+   palette is provided via prefers-color-scheme: dark.
+   ========================================================= */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Surface scale ---- */
+  --c-page:             #f6f8fb;
+  --c-card:             #ffffff;
+  --c-elev-1:           #ffffff;
+  --c-elev-2:           #f1f5fb;
+  --c-elev-3:           #e8eef8;
+  --c-surface-glass:    rgba(255, 255, 255, 0.78);
+
+  /* ---- Ink ---- */
+  --c-ink:              #0b1220;
+  /* Modal and body copy color, paired with --c-ink for headings. Backs the
+     var(--c-text, …) fallbacks in the mini-kitchen modals so they track theme. */
+  --c-text:             #0f172a;
+  --c-ink-strong:       #050a14;
+  --c-muted:            #4b5563;
+  --c-subtle:           #6b7280;
+  --c-inverse:          #ffffff;
+
+  /* ---- Borders ---- */
+  --c-border:           rgba(15, 23, 42, 0.10);
+  --c-border-strong:    rgba(15, 23, 42, 0.18);
+
+  /* ---- Semantic product colors ---- */
+  --c-blue:             #2563eb;   /* Recipes / workflow / primary */
+  --c-blue-strong:      #1d4ed8;
+  --c-blue-soft:        rgba(37, 99, 235, 0.10);
+  --c-blue-edge:        rgba(37, 99, 235, 0.22);
+
+  --c-ms-blue:          #0078d4;   /* Microsoft brand */
+  --c-ms-blue-soft:     rgba(0, 120, 212, 0.10);
+
+  --c-amber:            #f59e0b;   /* Bakes / execution / kitchen accent */
+  --c-amber-strong:     #b45309;
+  --c-amber-soft:       rgba(245, 158, 11, 0.12);
+  --c-amber-edge:       rgba(245, 158, 11, 0.30);
+
+  --c-green:            #16a34a;   /* Taste tests / validation / success */
+  --c-green-strong:     #15803d;
+  --c-green-soft:       rgba(22, 163, 74, 0.10);
+  --c-green-edge:       rgba(22, 163, 74, 0.22);
+
+  /* ---- Button system ----
+     The primary action across the shell and modals (Bake / Resume / New Recipe
+     / Save) is a muted sage pill: a desaturated gray-green fill, a 1px
+     dark-green border, and dark-green text. The sage stays calm against the
+     app's light gray/blue surfaces rather than reading as a bright mint. White
+     text fails contrast on the light fill, so the label is dark green;
+     --c-btn-primary-text on --c-btn-primary is AA. The fill deepens on hover
+     and again on press while the dark-green border holds the edge crisp through
+     every state. --c-green stays reserved for status, badges, and Taste Tests.
+     Secondary buttons carry a clearly visible resting border so they never read
+     as plain text, and danger is one unified red (white text stays AA). */
+  --c-btn-primary:                #dce8dc;   /* resting fill — muted sage gray-green */
+  --c-btn-primary-hover:          #c8dcc8;   /* hover fill — slightly deeper sage */
+  --c-btn-primary-active:         #b0c8b0;   /* pressed fill — deeper sage */
+  --c-btn-primary-border:         #15803d;   /* 1px edge — dark forest green */
+  --c-btn-primary-text:           #166534;   /* label — dark green, AA on fill */
+  --c-btn-secondary-border:       rgba(15, 23, 42, 0.28);
+  --c-btn-secondary-border-hover: rgba(15, 23, 42, 0.42);
+  --c-btn-secondary-bg-hover:     var(--c-elev-2);
+  --c-btn-danger:                 #b91c1c;
+  --c-btn-danger-hover:           #991b1b;
+  --c-btn-danger-quiet:           #b91c1c;
+
+  --c-teal:             #0891b2;   /* Kitchen Trust / local-first */
+  --c-teal-strong:      #0e7490;
+  --c-teal-soft:        rgba(8, 145, 178, 0.10);
+  --c-teal-edge:        rgba(8, 145, 178, 0.22);
+
+  --c-purple:           #7c3aed;   /* Chef's Keys / config */
+  --c-purple-strong:    #6d28d9;
+  --c-purple-soft:      rgba(124, 58, 237, 0.10);
+  --c-purple-edge:      rgba(124, 58, 237, 0.22);
+
+  --c-indigo:           #4f46e5;   /* PAX engine / recommended */
+  --c-indigo-strong:    #4338ca;
+  --c-indigo-soft:      rgba(79, 70, 229, 0.10);
+  --c-indigo-edge:      rgba(79, 70, 229, 0.22);
+
+  --c-slate:            #475569;   /* Raw / script-native / neutral */
+  --c-slate-soft:       rgba(71, 85, 105, 0.08);
+  --c-slate-edge:       rgba(71, 85, 105, 0.20);
+
+  --c-cream:            #fff8ec;   /* Mini-Kitchen warm panel bg */
+  --c-cream-strong:     #fff1d6;
+
+  --c-navy:             #071527;   /* Trust band & footer */
+  --c-navy-soft:        #0f213a;
+  --c-navy-strong:      #050d1a;
+
+  /* ---- Status (default = blue / amber / green / red) ---- */
+  --c-success:          var(--c-green);
+  --c-warning:          var(--c-amber);
+  --c-danger:           #dc2626;
+
+  /* ---- Gradients ---- */
+  --grad-hero-bg:
+    /* Blue glow: upper-right, behind app screenshot, cropped by top/right hero edge */
+    radial-gradient(ellipse 320px 320px at 88% 8%, rgba(37, 99, 235, 0.28), rgba(37, 99, 235, 0.14) 42%, transparent 72%),
+    /* Amber glow: center, slightly lower-middle, behind gap between text and screenshot */
+    radial-gradient(ellipse 360px 260px at 50% 62%, rgba(245, 158, 11, 0.30), rgba(245, 158, 11, 0.14) 45%, transparent 75%),
+    linear-gradient(180deg, #f3f7fd 0%, #f8fafe 100%);
+
+  --grad-trust-band:
+    radial-gradient(900px 480px at 0% 0%, rgba(8, 145, 178, 0.20), transparent 55%),
+    radial-gradient(800px 460px at 100% 100%, rgba(37, 99, 235, 0.20), transparent 55%),
+    linear-gradient(180deg, var(--c-navy) 0%, var(--c-navy-strong) 100%);
+
+  --grad-cream:
+    radial-gradient(600px 360px at 0% 0%, rgba(245, 158, 11, 0.10), transparent 60%),
+    linear-gradient(180deg, #fffdf6 0%, var(--c-cream) 100%);
+
+  --grad-title-accent:
+    linear-gradient(95deg, #2563eb 0%, #7c3aed 45%, #f59e0b 100%);
+
+  --grad-blue-button:
+    linear-gradient(180deg, #2f6cf6 0%, #1e51d4 100%);
+
+  --grad-mockup-shell:
+    linear-gradient(180deg, #ffffff 0%, #f1f5fb 100%);
+
+  --grad-card-edge:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0));
+
+  /* ---- Spacing scale (4px base) ---- */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-7:  28px;
+  --sp-8:  32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+  --sp-24: 96px;
+
+  /* ---- Radius ---- */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-2xl: 28px;
+  --r-pill: 999px;
+
+  /* ---- Type ---- */
+  --font-sans:
+    "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    "Inter", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --font-display:
+    "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    "Inter", system-ui, sans-serif;
+  --font-mono:
+    "Cascadia Code", "JetBrains Mono", "Consolas", "SFMono-Regular", ui-monospace,
+    Menlo, Monaco, monospace;
+
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-16: 16px;
+  --fs-17: 17px;
+  --fs-18: 18px;
+  --fs-20: 20px;
+  --fs-22: 22px;
+  --fs-26: 26px;
+  --fs-30: 30px;
+  --fs-36: 36px;
+  --fs-44: 44px;
+  --fs-56: 56px;
+  --fs-64: 64px;
+
+  --lh-tight: 1.10;
+  --lh-snug:  1.30;
+  --lh-base:  1.55;
+  --lh-loose: 1.7;
+
+  /* ---- Shadow ---- */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 12px 28px rgba(15, 23, 42, 0.10);
+  --shadow-lg:
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 24px 60px rgba(15, 23, 42, 0.16);
+  --shadow-mockup:
+    0 4px 12px rgba(15, 23, 42, 0.06),
+    0 30px 80px rgba(37, 99, 235, 0.18);
+  --shadow-blue-cta:
+    0 4px 12px rgba(37, 99, 235, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+
+  /* ---- Layout ---- */
+  --container-max: 1240px;
+  --container-inset: clamp(20px, 4vw, 40px);
+  --header-h: 60px;
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-base: 220ms;
+  --dur-slow: 380ms;
+}
+
+/* Optional dark theme. Keeps brand colors recognizable but swaps surfaces. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --c-page:             #07090f;
+    --c-card:             #0c1018;
+    --c-elev-1:           #0c1018;
+    --c-elev-2:           #11161f;
+    --c-elev-3:           #161c27;
+    --c-surface-glass:    rgba(18, 24, 34, 0.72);
+
+    --c-ink:              #e7ecf3;
+    /* Modal and body copy color for dark mode — light enough to read on the
+       dark --c-card surface (fixes dark-on-dark modal text). */
+    --c-text:             #f1f5f9;
+    --c-ink-strong:       #ffffff;
+    --c-muted:            #9aa4b2;
+    --c-subtle:           #6e7785;
+    --c-inverse:          #0b0f17;
+
+    --c-border:           rgba(255, 255, 255, 0.08);
+    --c-border-strong:    rgba(255, 255, 255, 0.14);
+
+    --c-blue:             #5b8dff;
+    --c-blue-strong:      #3b6fe6;
+    --c-blue-soft:        rgba(91, 141, 255, 0.14);
+    --c-blue-edge:        rgba(91, 141, 255, 0.32);
+
+    /* Foreground retints: these *-strong / neutral tokens are read as text,
+       icon, border, and chip-label colors. The light-palette values are too
+       dark to meet contrast on the dark card surface, so lighten them here.
+       The solid-fill sites with white text that consume --c-amber-strong /
+       --c-danger are pinned to literals at their source so this lightening
+       cannot weaken white-on-fill contrast. */
+    --c-slate:            #94a3b8;
+    --c-amber-strong:     #fbbf24;
+    --c-green-strong:     #4ade80;
+    --c-teal-strong:      #22d3ee;
+    --c-purple-strong:    #a78bfa;
+    --c-indigo-strong:    #818cf8;
+    --c-danger:           #f87171;
+
+    /* Button system: the muted sage primary is a self-contained gray-green
+       pill with dark-green text, so its contrast holds on dark surfaces and the
+       light-block --c-btn-primary* values carry over unchanged. Only the
+       neutral secondary border and the quiet danger text are retinted here. */
+    --c-btn-secondary-border:       rgba(255, 255, 255, 0.26);
+    --c-btn-secondary-border-hover: rgba(255, 255, 255, 0.40);
+    --c-btn-danger-quiet:           #f87171;
+
+    --grad-hero-bg:
+      /* Blue glow: upper-right, behind app screenshot, cropped by top/right hero edge */
+      radial-gradient(ellipse 320px 320px at 88% 8%, rgba(91, 141, 255, 0.30), rgba(91, 141, 255, 0.14) 42%, transparent 72%),
+      /* Amber glow: center, slightly lower-middle, behind gap between text and screenshot */
+      radial-gradient(ellipse 360px 260px at 50% 62%, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.08) 45%, transparent 75%),
+      linear-gradient(180deg, #07090f 0%, #0a0e16 100%);
+
+    --grad-mockup-shell:
+      linear-gradient(180deg, #11151d 0%, #0a0d13 100%);
+
+    --grad-card-edge:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-md:
+      0 1px 2px rgba(0, 0, 0, 0.25),
+      0 12px 28px rgba(0, 0, 0, 0.35);
+    --shadow-lg:
+      0 1px 2px rgba(0, 0, 0, 0.3),
+      0 24px 60px rgba(0, 0, 0, 0.45);
+    --shadow-mockup:
+      0 4px 12px rgba(0, 0, 0, 0.5),
+      0 30px 80px rgba(91, 141, 255, 0.25);
+  }
+}

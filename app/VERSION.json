@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "minimumCompatibleManifestSchema": 1,
+  "cookbook": {
+    "version": "1.0.0",
+    "releaseTimestamp": "2026-05-22T00:00:00Z",
+    "installedAt": null,
+    "signedHash": null
+  },
+  "paxScript": {
+    "name": "PAX Purview Audit Log Processor",
+    "version": "1.11.6",
+    "relativePath": "resources/pax/PAX_Purview_Audit_Log_Processor.ps1",
+    "sha256": "0DD230734715ABD15CF4C0A76013672BF9AD6713C3F82520A6333B0DCDAAD361",
+    "acquisitionPolicy": "external",
+    "exportEnabled": false,
+    "engineManifestUrl": "http://127.0.0.1:60443/internal-test/approved-engine-manifest.json",
+    "engineManifestTrustAnchorThumbprint": null,
+    "manifestSignaturePolicy": "internal-test-bypass"
+  },
+  "updateManifestUrl": null
+}

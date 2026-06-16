@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>PAXCookbookSetup</RootNamespace>
+    <AssemblyName>PAXCookbookSetup</AssemblyName>
+    <UseWindowsForms>false</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PAXCookbook.Shared\PAXCookbook.Shared.csproj" />
+  </ItemGroup>
+  <!--
+    Phase 11 single-EXE payload bundle.
+    When the EmbeddedPayloadZip MSBuild property is supplied at publish
+    time, the referenced zip is embedded as a managed resource named
+    PAXCookbook.Payload.zip. At runtime EmbeddedPayloadSourceResolver
+    detects the resource and extracts it to a temp folder. Debug builds
+    without the property still produce a working Setup EXE for tests.
+  -->
+  <ItemGroup Condition="'$(EmbeddedPayloadZip)' != ''">
+    <EmbeddedResource Include="$(EmbeddedPayloadZip)" LogicalName="PAXCookbook.Payload.zip" />
+  </ItemGroup>
+</Project>

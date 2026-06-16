@@ -1,0 +1,23 @@
+{
+  "name": "PAX Cookbook",
+  "short_name": "PAX Cookbook",
+  "description": "PAX Cookbook - local appliance for Purview Audit Log Processor.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0A2540",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "images/pax-cookbook-app-icon.ico?v=uxr11",
+      "sizes": "16x16 20x20 24x24 32x32 40x40 48x48 64x64 96x96 128x128 256x256",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "images/pax-cookbook-app-icon-256.png?v=uxr11",
+      "sizes": "256x256",
+      "type": "image/png"
+    }
+  ]
+}

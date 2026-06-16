@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>PAXCookbook.Tests</RootNamespace>
+    <!-- See PAXCookbook.csproj rationale: WebView2's transitive WPF
+         assembly drags WindowsBase 5.0 into reference resolution while
+         we only consume the WinForms surface. -->
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PAXCookbook\PAXCookbook.csproj" />
+    <ProjectReference Include="..\..\src\PAXCookbook.Shared\PAXCookbook.Shared.csproj" />
+  </ItemGroup>
+</Project>

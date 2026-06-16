@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "description": "Lockfile for the vendored frontend UMD libraries under app/web/vendor/. Each library lives in its own subfolder (xterm/, chartjs/, ajv/). Every file in those subfolders MUST have a corresponding entry in `files` below, keyed by relative path from app/web/vendor/. At broker startup, each file's SHA-256 is recomputed and compared against `sha256`; mismatch aborts startup with exit code 5. UMD libraries are not Authenticode-signed; SHA-256 + canonical first-party download URL are the integrity attestations. No runtime download / fetch / CDN reference is ever used.",
+  "procurement": {
+    "status": "VENDORED",
+    "procuredOn": "2026-05-16",
+    "method": "Direct HTTP GET of canonical npm registry .tgz files from registry.npmjs.org. No package manager used. Each tarball was extracted via in-box tar.exe; only the listed UMD asset was copied; the remainder of each tarball was discarded.",
+    "notes": "Deterministic one-time vendoring. To re-vendor: download each .tgz from sourceUrl, extract with tar.exe, copy the file at extractedFrom, then regenerate this lockfile."
+  },
+  "files": {
+    "xterm/xterm.js": {
+      "sha256": "1F991AC3B4B283EBF96E60AE23A00A52765DD3A2E46FA6FDDA9F1AAB032F7495",
+      "npmPackage": "@xterm/xterm",
+      "version": "5.5.0",
+      "extractedFrom": "package/lib/xterm.js",
+      "sourceUrl": "https://registry.npmjs.org/@xterm/xterm/-/xterm-5.5.0.tgz"
+    },
+    "xterm/xterm.css": {
+      "sha256": "BA8E6985669488981CCF40C0CEFE3ABA80722CB6C92DE7AD628B0BD717FAF2B6",
+      "npmPackage": "@xterm/xterm",
+      "version": "5.5.0",
+      "extractedFrom": "package/css/xterm.css",
+      "sourceUrl": "https://registry.npmjs.org/@xterm/xterm/-/xterm-5.5.0.tgz"
+    },
+    "chartjs/chart.umd.js": {
+      "sha256": "FED6A739F8D0F0687174DE6CD14745FC0FC7809144AB113D22908A26BF0D7FEA",
+      "npmPackage": "chart.js",
+      "version": "4.4.4",
+      "extractedFrom": "package/dist/chart.umd.js",
+      "sourceUrl": "https://registry.npmjs.org/chart.js/-/chart.js-4.4.4.tgz",
+      "note": "GitHub releases for chart.js v4.4.4 do not ship a pre-built UMD asset tarball at the expected /releases/download/v4.4.4/ path; the canonical npm tarball was used instead. registry.npmjs.org is the official npm distribution and chart.js's GitHub release page links to it."
+    },
+    "ajv/ajv.bundle.js": {
+      "sha256": "B399E181C8D546BBB1658F711220FEE6995FFA627AACC24654D10E8C635BDF32",
+      "npmPackage": "ajv",
+      "version": "6.12.6",
+      "extractedFrom": "package/dist/ajv.bundle.js",
+      "sourceUrl": "https://registry.npmjs.org/ajv/-/ajv-6.12.6.tgz",
+      "note": "Ajv 8.x dropped pre-built UMD bundles from its npm tarball (CommonJS only). Ajv 6.12.6 is the last version with a self-contained UMD bundle (dist/ajv.bundle.js, all deps inlined). Ajv 6 supports JSON Schema draft-07 which is sufficient for the recipe schema."
+    }
+  }
+}

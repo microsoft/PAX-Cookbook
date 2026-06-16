@@ -1,0 +1,127 @@
+/* =============================================================================
+   PAX Cookbook Contextual Help ("?") styles
+   -----------------------------------------------------------------------------
+   Transplanted from the Mini-Kitchen contextual-help kit so the full product
+   shell reproduces the identical look and behavior of the "?" help button.
+
+   SCOPING
+   - The trigger selectors are GLOBAL here (the kit's `.mini-kitchen-page`
+     sandbox prefix is intentionally dropped) so the help button works on every
+     React shell screen and inside the guided builder.
+   - The popover element (`.mk-cth__pop`) is rendered through a React portal to
+     <body>, OUTSIDE any card, and positioned with `position: fixed` via inline
+     top/left. Its selectors are GLOBAL so it is never clipped by a card's
+     `overflow: hidden`.
+
+   TOKENS
+   - Every var() carries a literal fallback, so this stylesheet works whether or
+     not the host app defines matching design tokens.
+   ============================================================================ */
+
+/* ---- The inline trigger wrapper + round "?" button ---------------------- */
+.mk-cth {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  line-height: 0;
+}
+
+.mk-cth__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--c-blue-edge, rgba(37, 99, 235, 0.22));
+  background: var(--c-blue-soft, rgba(37, 99, 235, 0.10));
+  color: var(--c-blue-strong, #1d4ed8);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.mk-cth--sm .mk-cth__btn {
+  width: 16px;
+  height: 16px;
+}
+.mk-cth__btn:hover {
+  background: var(--c-blue, #2563eb);
+  border-color: var(--c-blue, #2563eb);
+  color: #ffffff;
+}
+.mk-cth__btn:focus-visible {
+  outline: 2px solid var(--c-blue, #2563eb);
+  outline-offset: 2px;
+}
+.mk-cth__btn[aria-expanded='true'] {
+  background: var(--c-blue, #2563eb);
+  border-color: var(--c-blue, #2563eb);
+  color: #ffffff;
+}
+.mk-cth__glyph {
+  font-family: var(--font-display, inherit);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-0.5px);
+}
+.mk-cth--sm .mk-cth__glyph {
+  font-size: 11px;
+}
+
+/* ---- Popover card (portaled to <body>; selectors GLOBAL) ---------------- */
+.mk-cth__pop {
+  position: fixed;
+  z-index: 1000;
+  display: block;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md, 10px);
+  border: 1px solid var(--c-border-strong, rgba(15, 23, 42, 0.18));
+  background: var(--c-surface, #ffffff);
+  color: var(--c-ink, #0b1220);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(15, 23, 42, 0.18));
+  text-align: left;
+  white-space: normal;
+}
+.mk-cth__pop-title {
+  display: block;
+  font-family: var(--font-display, inherit);
+  font-size: var(--fs-13, 13px);
+  font-weight: 700;
+  color: var(--c-ink-strong, #050a14);
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+}
+.mk-cth__pop-body {
+  display: block;
+  font-size: var(--fs-13, 13px);
+  line-height: 1.5;
+  color: var(--c-ink, #0b1220);
+}
+
+/* On small screens keep the popover inside the viewport with no h-scroll */
+@media (max-width: 520px) {
+  .mk-cth__pop {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+/* =============================================================================
+   Placement helpers — give the "?" breathing room beside a heading.
+   ============================================================================ */
+
+/* Shell section h2 titles (ViewHead) and guided builder section / review /
+   save-export-import headings: the "?" is embedded inline in the heading text. */
+.view-head__title .mk-cth,
+.dvw-head__title .mk-cth,
+.mk-builder-section__title .mk-cth,
+.mk-review__title .mk-cth,
+.mk-preview-boundary__title .mk-cth,
+.mk-footer-actions__title .mk-cth {
+  margin-left: 10px;
+}

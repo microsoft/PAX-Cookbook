@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "description": "Lockfile for the vendored SQLite native + managed stack under app/lib/sqlite/. Every file in that folder except this lockfile MUST have a corresponding entry in `files` below. At broker startup, each file's SHA-256 is recomputed and compared against `sha256`; this check is mandatory and non-bypassable. Additionally, for any file whose `expectedAuthenticodeSubject` is non-null, `Get-AuthenticodeSignature` is called and the result Status MUST be `Valid` and the SignerCertificate.Subject MUST match `expectedAuthenticodeSubject` exactly. Files with `expectedAuthenticodeSubject` null are unsigned by their upstream publisher (this is the documented integrity posture of the SQLitePCLRaw project) and rely on SHA-256 verification only. Any mismatch aborts broker startup with exit code 5. No runtime download / fetch / installer is ever attempted; updates require manual re-vendoring and regeneration of this lockfile.",
+  "procurement": {
+    "status": "VENDORED",
+    "procuredOn": "2026-05-16",
+    "method": "Direct HTTP GET of canonical .nupkg files from api.nuget.org v3-flatcontainer. No package manager used.",
+    "notes": "Deterministic one-time vendoring. To re-vendor: download each .nupkg from the URL recorded in each file's sourceUrl, extract, copy the listed lib/ or runtimes/ path, then regenerate this lockfile from Get-FileHash and Get-AuthenticodeSignature output."
+  },
+  "files": {
+    "Microsoft.Data.Sqlite.dll": {
+      "sha256": "FB967FAE5437A1A1932D4076760D4DFE893518C9A03E2059C5470AF26755C775",
+      "nugetPackage": "Microsoft.Data.Sqlite.Core",
+      "nugetVersion": "8.0.10",
+      "extractedFrom": "lib/net8.0/Microsoft.Data.Sqlite.dll",
+      "sourceUrl": "https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite.core/8.0.10/microsoft.data.sqlite.core.8.0.10.nupkg",
+      "expectedAuthenticodeSubject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+    },
+    "SQLitePCLRaw.core.dll": {
+      "sha256": "DBCFD04E95AEFA9EF0DCAD4CD20009B018DD3D2943C8CCF3F40597B9ED9161B8",
+      "nugetPackage": "SQLitePCLRaw.core",
+      "nugetVersion": "2.1.10",
+      "extractedFrom": "lib/netstandard2.0/SQLitePCLRaw.core.dll",
+      "sourceUrl": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.core/2.1.10/sqlitepclraw.core.2.1.10.nupkg",
+      "expectedAuthenticodeSubject": null
+    },
+    "SQLitePCLRaw.provider.e_sqlite3.dll": {
+      "sha256": "30DD6AE7899281F9B715AB9F8CEB1D67B6D4C8D76A21DAAAFC215955FCF37F0C",
+      "nugetPackage": "SQLitePCLRaw.provider.e_sqlite3",
+      "nugetVersion": "2.1.10",
+      "extractedFrom": "lib/net6.0/SQLitePCLRaw.provider.e_sqlite3.dll",
+      "sourceUrl": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/2.1.10/sqlitepclraw.provider.e_sqlite3.2.1.10.nupkg",
+      "expectedAuthenticodeSubject": null
+    },
+    "SQLitePCLRaw.batteries_v2.dll": {
+      "sha256": "0981B1E1E24DDF18E42D0F6CEA7A318E735B875F987B3E306F555118726B24A7",
+      "nugetPackage": "SQLitePCLRaw.bundle_e_sqlite3",
+      "nugetVersion": "2.1.10",
+      "extractedFrom": "lib/netstandard2.0/SQLitePCLRaw.batteries_v2.dll",
+      "sourceUrl": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.10/sqlitepclraw.bundle_e_sqlite3.2.1.10.nupkg",
+      "expectedAuthenticodeSubject": null,
+      "nameDrift": "The upstream NuGet package is named 'SQLitePCLRaw.bundle_e_sqlite3' but the actual managed assembly identity inside the package is 'SQLitePCLRaw.batteries_v2.dll'. The on-disk filename must match the assembly identity or .NET Assembly.Load fails."
+    },
+    "e_sqlite3.dll": {
+      "sha256": "39923CFDAD272169C217406A60214FFE9BD6C1B3BD396A3EFF94B781BD8D3376",
+      "nugetPackage": "SQLitePCLRaw.lib.e_sqlite3",
+      "nugetVersion": "2.1.10",
+      "extractedFrom": "runtimes/win-x64/native/e_sqlite3.dll",
+      "sourceUrl": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.lib.e_sqlite3/2.1.10/sqlitepclraw.lib.e_sqlite3.2.1.10.nupkg",
+      "expectedAuthenticodeSubject": null
+    }
+  }
+}

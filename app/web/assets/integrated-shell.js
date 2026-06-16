@@ -1,0 +1,291 @@
+// Integrated shell controller.
+//
+// The legacy app chrome -- top bar, left navigation rail, help panel, lock
+// overlay, close modal, and status rail -- stays at the top level. The main
+// content area hosts a single same-origin iframe that renders the React
+// Mini-Kitchen content surface in its content-only (embed) mode. The legacy
+// left nav drives which section the iframe shows, so the familiar navigation
+// controls the rebuilt content pane.
+//
+// Navigation switches the visible section by posting a message to the iframe
+// rather than reloading it, so the React surface keeps its state (including an
+// in-progress recipe import) as the operator moves between sections.
+(function () {
+    'use strict';
+
+    var FRAME_ID = 'mk-content-frame';
+
+    // Legacy nav hash -> React shell section id.
+    var HASH_TO_SECTION = {
+        '#/home': 'home',
+        '#/pantry': 'pantry',
+        '#/recipes': 'recipes',
+        '#/bakes': 'bakes',
+        '#/taste-tests': 'tastetests',
+        '#/keys': 'chefskeys',
+        '#/settings': 'settings',
+        '#/updates': 'updates'
+    };
+    var DEFAULT_HASH = '#/home';
+
+    var frame = null;
+    var frameReady = false;
+    var loadedSection = null;
+    var desiredSection = null;
+
+    function sectionForHash(hash) {
+        return Object.prototype.hasOwnProperty.call(HASH_TO_SECTION, hash)
+            ? HASH_TO_SECTION[hash]
+            : null;
+    }
+
+    function buildFrameSrc(section, importId) {
+        var src = 'app/index.html?embed=1&section=' + encodeURIComponent(section);
+        if (importId) {
+            src += '&import=' + encodeURIComponent(importId);
+        }
+        return src;
+    }
+
+    function updateNavCurrent(hash) {
+        var items = document.querySelectorAll('.nav-item');
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (item.getAttribute('href') === hash) {
+                item.setAttribute('aria-current', 'page');
+            } else {
+                item.removeAttribute('aria-current');
+            }
+        }
+        var updateLink = document.getElementById('nav-rail-update-link');
+        if (updateLink) {
+            if (hash === '#/updates') {
+                updateLink.setAttribute('aria-current', 'page');
+            } else {
+                updateLink.removeAttribute('aria-current');
+            }
+        }
+    }
+
+    function postSection(section) {
+        if (section === loadedSection) {
+            return;
+        }
+        if (frame && frame.contentWindow) {
+            try {
+                frame.contentWindow.postMessage(
+                    { type: 'mk-nav', section: section },
+                    window.location.origin
+                );
+            } catch (e) {
+                /* cross-document post failures are non-fatal */
+            }
+        }
+        loadedSection = section;
+    }
+
+    function applyHash(hash) {
+        var canonical = sectionForHash(hash) ? hash : DEFAULT_HASH;
+        var section = sectionForHash(canonical) || 'home';
+        desiredSection = section;
+        updateNavCurrent(canonical);
+        if (frameReady) {
+            postSection(section);
+        }
+    }
+
+    function setText(id, text) {
+        var el = document.getElementById(id);
+        if (el) {
+            el.textContent = text;
+        }
+    }
+
+    // Footer status summary mirrors the same read-only rail signals in the
+    // full-width strip beneath the workspace. The dot tone follows overall
+    // health; the text never exposes a folder path or triggers any action.
+    function setFooterState(text, tone) {
+        setText('app-footer-state', text);
+        var dot = document.getElementById('app-footer-dot');
+        if (dot) {
+            dot.classList.remove('is-warning', 'is-danger');
+            if (tone === 'warning') {
+                dot.classList.add('is-warning');
+            } else if (tone === 'danger') {
+                dot.classList.add('is-danger');
+            }
+        }
+    }
+
+    // Footer PAX value shows the BUNDLED engine version that ships with this
+    // app -- the same value the Settings cards and About section present
+    // (expected.paxScriptVersion, sourced from VERSION.json). Runtime
+    // acquisition state is surfaced on Home and Settings, not folded into the
+    // engine version shown here.
+    function derivePaxRail(resp) {
+        if (!resp || !resp.ok || !resp.body) {
+            return null;
+        }
+        var b = resp.body;
+        var ver = (b.expected && b.expected.paxScriptVersion)
+            ? String(b.expected.paxScriptVersion)
+            : null;
+        return ver;
+    }
+
+    // Workspace rail value reflects whether the app's storage is ready to use.
+    // A responding broker has already resolved and created its workspace during
+    // startup, so a healthy response means the workspace is ready. The rail
+    // shows a plain status word -- never the underlying folder path, which is a
+    // technical detail that belongs in support diagnostics, not the nav rail.
+    function deriveWorkspaceRail(resp) {
+        if (resp && resp.ok && resp.body &&
+            typeof resp.body.workspaceFolderPath === 'string' &&
+            resp.body.workspaceFolderPath.length > 0) {
+            return 'Ready';
+        }
+        return 'Needs attention';
+    }
+
+    // Populate the footer status values. These are read-only reflections of
+    // existing broker state (app version, workspace readiness, PAX engine
+    // status); nothing here writes or triggers any cooking action.
+    function populateNavRail() {
+        var api = window.cookbookApi;
+        if (!api || typeof api.get !== 'function') {
+            return;
+        }
+        api.get('/api/v1/runtime/version').then(function (resp) {
+            if (resp && resp.ok && resp.body) {
+                var v = resp.body;
+                var appVer = (v.cookbook && v.cookbook.version)
+                    ? v.cookbook.version
+                    : (v.cookbookVersion || null);
+                if (appVer) {
+                    setText('app-footer-app', 'App ' + String(appVer));
+                }
+            }
+        }).catch(function () { /* footer keeps its default text on failure */ });
+
+        api.get('/api/v1/health').then(function (resp) {
+            var ready = deriveWorkspaceRail(resp) === 'Ready';
+            setText('app-footer-workspace', deriveWorkspaceRail(resp));
+            if (resp && resp.ok) {
+                setFooterState('All systems nominal', 'ok');
+            } else {
+                setFooterState('Attention needed', ready ? 'warning' : 'danger');
+            }
+        }).catch(function () {
+            setText('app-footer-workspace', 'Needs attention');
+            setFooterState('Server unreachable', 'danger');
+        });
+
+        api.get('/api/v1/setup/acquire-pax/state').then(function (resp) {
+            var pax = derivePaxRail(resp);
+            if (pax) {
+                setText('app-footer-pax', 'PAX Engine ' + pax);
+            }
+        }).catch(function () { /* footer keeps its default text on failure */ });
+    }
+
+    function init() {
+        frame = document.getElementById(FRAME_ID);
+        if (!frame) {
+            return;
+        }
+
+        var search = '';
+        try {
+            search = window.location.search || '';
+        } catch (e) {
+            search = '';
+        }
+        var importId = null;
+        try {
+            importId = new URLSearchParams(search).get('import');
+        } catch (e) {
+            importId = null;
+        }
+
+        // A file-open handoff arrives at the top-level shell with `?import=<id>`.
+        // Route the embedded surface to Recipes and forward the one-time ticket
+        // into the iframe, which consumes it the same way the standalone surface
+        // did. Other launches start on Home (or the requested hash).
+        var startHash;
+        if (importId) {
+            startHash = '#/recipes';
+        } else {
+            startHash = sectionForHash(window.location.hash) ? window.location.hash : DEFAULT_HASH;
+        }
+        var startSection = sectionForHash(startHash) || 'home';
+        loadedSection = startSection;
+        desiredSection = startSection;
+
+        frame.addEventListener('load', function () {
+            frameReady = true;
+            if (desiredSection && desiredSection !== loadedSection) {
+                postSection(desiredSection);
+            }
+        });
+
+        frame.src = buildFrameSrc(startSection, importId);
+
+        // Drop the consumed import ticket from the top-level URL so a manual
+        // reload does not attempt to re-open an already-consumed file.
+        if (importId) {
+            try {
+                window.history.replaceState(null, '', window.location.pathname + startHash);
+            } catch (e) {
+                /* history rewrite is best-effort */
+            }
+        }
+
+        if (window.location.hash !== startHash) {
+            window.location.hash = startHash;
+        }
+        updateNavCurrent(startHash);
+
+        window.addEventListener('hashchange', function () {
+            applyHash(window.location.hash);
+        });
+
+        // A nav-rail click always re-selects its section in the embedded
+        // surface, even when the hash and loaded section are unchanged. The
+        // hash router only reacts to hash CHANGES and same-section posts are
+        // de-duplicated, so clicking the current section (for example Recipes
+        // while a recipe is open) would otherwise be inert. This delegated
+        // handler posts the section with a reselect flag straight to the frame
+        // so the surface can return to that section's default view (the recipe
+        // list) on an explicit click. Cross-section clicks still flow through
+        // the hash router; this message is additive and idempotent.
+        document.addEventListener('click', function (ev) {
+            var target = ev.target;
+            var item = (target && target.closest) ? target.closest('.nav-item') : null;
+            if (!item) {
+                return;
+            }
+            var section = sectionForHash(item.getAttribute('href'));
+            if (!section) {
+                return;
+            }
+            if (frameReady && frame && frame.contentWindow) {
+                try {
+                    frame.contentWindow.postMessage(
+                        { type: 'mk-nav', section: section, reselect: true },
+                        window.location.origin
+                    );
+                } catch (e) {
+                    /* cross-document post failures are non-fatal */
+                }
+            }
+        });
+
+        populateNavRail();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+        init();
+    }
+})();
