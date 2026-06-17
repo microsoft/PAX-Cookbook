@@ -83,6 +83,53 @@ export function openShellHelp(): void {
   }
 }
 
+/**
+ * Cross-surface intent: ask the Pantry to open the bundled PAX Cookbook User
+ * Guide. The flag lives on the top window so it is shared (same-origin) between
+ * the legacy shell's help panel and the embedded React surfaces; the Pantry
+ * reads and clears it on mount / re-selection. Pure in-memory hint — no storage,
+ * no network. Falling back to the local window keeps a standalone render safe.
+ */
+const PANTRY_DOC_INTENT_KEY = '__paxPantryDocIntent';
+
+function intentHost(): Record<string, unknown> | null {
+  try {
+    return (window.top ?? window) as unknown as Record<string, unknown>;
+  } catch {
+    return window as unknown as Record<string, unknown>;
+  }
+}
+
+/** Navigate to the Pantry and request that it open the User Guide document. */
+export function requestPantryUserGuide(): void {
+  const host = intentHost();
+  if (host) {
+    try {
+      host[PANTRY_DOC_INTENT_KEY] = 'userguide';
+    } catch {
+      // ignore — Pantry simply lands on its default view
+    }
+  }
+  requestShellSection('pantry');
+}
+
+/** Read and clear the one-shot Pantry doc intent. */
+export function takePantryDocIntent(): boolean {
+  const host = intentHost();
+  if (!host) {
+    return false;
+  }
+  try {
+    if (host[PANTRY_DOC_INTENT_KEY] === 'userguide') {
+      delete host[PANTRY_DOC_INTENT_KEY];
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 /** Remember which recipe the Recipes workspace should pre-select on load. */
 export function rememberPendingSelect(recipeId: string): void {
   try {

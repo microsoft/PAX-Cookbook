@@ -8,6 +8,7 @@ import {
   type PantryRepoResult,
   type PantryContentItem,
 } from '../host/brokerBridge';
+import { takePantryDocIntent } from './shellNav';
 
 interface PantryResource {
   id: string;
@@ -17,12 +18,35 @@ interface PantryResource {
   repo: string;
   url: string;
   githubOnly?: boolean;
+  /** The PAX Cookbook User Guide entry — rendered in-app by PantryDocViewer
+   *  (online-first PDF with a bundled offline fallback) rather than the repo
+   *  reader. */
+  isUserGuide?: boolean;
 }
 
 /** Curated resources surfaced in the Pantry. Read-only — each opens its public
  *  GitHub repository in a native in-app reader (rendered README + repo stats),
  *  with a persistent open-on-GitHub action. */
 const PANTRY_RESOURCES: ReadonlyArray<PantryResource> = [
+  {
+    id: 'user-guide',
+    name: '\u{1F4D6} PAX Cookbook User Guide',
+    short: 'The complete guide \u2014 installation, recipes, bakes, scheduling, and every feature. Opens right here in the app.',
+    owner: 'microsoft',
+    repo: 'PAX-Cookbook',
+    url: 'https://github.com/microsoft/PAX-Cookbook/blob/main/docs/PAX-Cookbook-User-Guide.md',
+    githubOnly: true,
+    isUserGuide: true,
+  },
+  {
+    id: 'pax-cookbook',
+    name: 'PAX Cookbook',
+    short: 'The PAX Cookbook app itself \u2014 source code, releases, and documentation on GitHub.',
+    owner: 'microsoft',
+    repo: 'PAX-Cookbook',
+    url: 'https://github.com/microsoft/PAX-Cookbook',
+    githubOnly: true,
+  },
   {
     id: 'ai-in-one',
     name: 'AI-in-One Dashboard',
@@ -937,6 +961,143 @@ function PantryShelfIcon() {
   );
 }
 
+const USER_GUIDE_ONLINE_PDF =
+  'https://raw.githubusercontent.com/microsoft/PAX-Cookbook/main/docs/PAX-Cookbook-User-Guide.pdf';
+// The bundled offline copy ships in the SPA static root (vite base is '/app/'),
+// so it is always available even with no network.
+const USER_GUIDE_LOCAL_PDF = '/app/PAX-Cookbook-User-Guide.pdf';
+const USER_GUIDE_BROWSER_URL =
+  'https://github.com/microsoft/PAX-Cookbook/blob/main/docs/PAX-Cookbook-User-Guide.md';
+const USER_GUIDE_ONLINE_TIMEOUT_MS = 10000;
+
+/**
+ * The PAX Cookbook User Guide, shown in the embedded viewer. It always tries the
+ * latest copy from GitHub first (through the broker's download proxy, ~10s
+ * budget); if that cannot be reached in time it falls back to the copy bundled
+ * with the install, so the guide is always available — even offline. The only
+ * external link is the explicit "Open in browser" action.
+ */
+function PantryDocViewer({ onBack }: { onBack: () => void }) {
+  const [phase, setPhase] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [source, setSource] = useState<'online' | 'offline' | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let created: string | null = null;
+    setPhase('loading');
+    setBlobUrl(null);
+    setSource(null);
+
+    async function tryOnline(): Promise<ArrayBuffer | null> {
+      try {
+        const resp = await fetchPantryDownload(USER_GUIDE_ONLINE_PDF, {
+          timeoutMs: USER_GUIDE_ONLINE_TIMEOUT_MS,
+        });
+        if (!resp.ok) {
+          return null;
+        }
+        return await resp.arrayBuffer();
+      } catch {
+        return null;
+      }
+    }
+
+    async function tryLocal(): Promise<ArrayBuffer | null> {
+      try {
+        const resp = await fetch(USER_GUIDE_LOCAL_PDF, { cache: 'no-store' });
+        if (!resp.ok) {
+          return null;
+        }
+        return await resp.arrayBuffer();
+      } catch {
+        return null;
+      }
+    }
+
+    void (async () => {
+      let buffer = await tryOnline();
+      let src: 'online' | 'offline' = 'online';
+      if (!buffer) {
+        buffer = await tryLocal();
+        src = 'offline';
+      }
+      if (cancelled) {
+        return;
+      }
+      if (!buffer) {
+        setPhase('error');
+        return;
+      }
+      created = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+      setBlobUrl(created);
+      setSource(src);
+      setPhase('loaded');
+    })();
+
+    return () => {
+      cancelled = true;
+      if (created) {
+        URL.revokeObjectURL(created);
+      }
+    };
+  }, []);
+
+  return (
+    <div className="pantry-preview">
+      <div className="pantry-preview__toolbar">
+        <button type="button" className="pantry-preview__back" onClick={onBack}>
+          <span aria-hidden="true">←</span> Back
+        </button>
+        <div className="pantry-preview__heading">
+          <span className="pantry-preview__filename" title="PAX Cookbook User Guide">
+            PAX Cookbook User Guide
+          </span>
+          {source === 'offline' ? (
+            <span className="pantry-preview__meta">
+              Offline copy — couldn't reach the latest version
+            </span>
+          ) : source === 'online' ? (
+            <span className="pantry-preview__meta">Latest version</span>
+          ) : null}
+        </div>
+        <div className="pantry-preview__actions">
+          <a
+            className="pantry-preview__btn"
+            href={USER_GUIDE_BROWSER_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Open in browser
+            <span aria-hidden="true"> ↗</span>
+          </a>
+        </div>
+      </div>
+      <div className="pantry-preview__body">
+        {phase === 'loading' ? (
+          <div className="pantry-preview__status">
+            <span className="pantry-preview__spinner" aria-hidden="true" />
+            <span>Loading the User Guide…</span>
+          </div>
+        ) : phase === 'error' ? (
+          <div className="pantry-preview__status">
+            <span>
+              The User Guide could not be loaded right now. Use “Open in browser”
+              to read it on GitHub.
+            </span>
+          </div>
+        ) : blobUrl ? (
+          <iframe
+            className="pantry-preview__frame"
+            src={blobUrl}
+            title="PAX Cookbook User Guide"
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function PantryWorkspace() {
   const [online, setOnline] = useState(
     typeof navigator === 'undefined' ? true : navigator.onLine,
@@ -971,6 +1132,16 @@ export function PantryWorkspace() {
   // splash), close any open file preview, and scroll to the top. The reselect
   // flag gates this so the programmatic section posts that have no reselect flag
   // are never disturbed.
+  // A help-panel / Settings request to open the User Guide is handed off via a
+  // one-shot intent flag on the top window. Honour it on first mount so landing
+  // on the Pantry from those entry points lands directly on the guide.
+  useEffect(() => {
+    if (takePantryDocIntent()) {
+      setPreviewFile(null);
+      setSelectedId('user-guide');
+    }
+  }, []);
+
   useEffect(() => {
     const onMessage = (ev: MessageEvent) => {
       if (ev.origin !== window.location.origin) {
@@ -981,14 +1152,25 @@ export function PantryWorkspace() {
         data &&
         typeof data === 'object' &&
         (data as { type?: unknown }).type === 'mk-nav' &&
-        (data as { section?: unknown }).section === 'pantry' &&
-        (data as { reselect?: unknown }).reselect === true
+        (data as { section?: unknown }).section === 'pantry'
       ) {
-        setSelectedId(null);
-        setPreviewFile(null);
-        if (typeof window !== 'undefined') {
-          window.scrollTo({ top: 0, left: 0 });
-          window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0 }));
+        // A pending "open the User Guide" intent (from the help panel or the
+        // Settings link) wins over the default reselect-to-splash behaviour.
+        if (takePantryDocIntent()) {
+          setPreviewFile(null);
+          setSelectedId('user-guide');
+          if (typeof window !== 'undefined') {
+            window.scrollTo({ top: 0, left: 0 });
+          }
+          return;
+        }
+        if ((data as { reselect?: unknown }).reselect === true) {
+          setSelectedId(null);
+          setPreviewFile(null);
+          if (typeof window !== 'undefined') {
+            window.scrollTo({ top: 0, left: 0 });
+            window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0 }));
+          }
         }
       }
     };
@@ -1005,7 +1187,7 @@ export function PantryWorkspace() {
       return;
     }
     const resource = PANTRY_RESOURCES.find(r => r.id === selectedId);
-    if (!resource) {
+    if (!resource || resource.isUserGuide) {
       return;
     }
     let cancelled = false;
@@ -1168,6 +1350,8 @@ export function PantryWorkspace() {
                 docs, and download what you need.
               </p>
             </div>
+          ) : selected.isUserGuide ? (
+            <PantryDocViewer onBack={() => setSelectedId(null)} />
           ) : previewFile !== null ? (
             <PantryFilePreview item={previewFile} onBack={() => setPreviewFile(null)} />
           ) : (

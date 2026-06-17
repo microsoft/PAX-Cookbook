@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
 import { ContextualHelpButton } from '../components/ContextualHelpButton';
 import { StatusCard } from './StatusCard';
-import { openShellHelp, requestShellSection } from './shellNav';
+import { openShellHelp, requestShellSection, requestPantryUserGuide } from './shellNav';
 import { CopyButton } from '../features/mini-kitchen/components/CopyButton';
 import {
   getRuntimeVersion,
@@ -668,6 +668,13 @@ export function SettingsWorkspace() {
             </div>
             <div className="dvw-settings__help">
               <span className="dvw-settings__help-label">Help &amp; getting started</span>
+              <button
+                type="button"
+                className="dvw-settings__help-link"
+                onClick={requestPantryUserGuide}
+              >
+                View the full PAX Cookbook User Guide
+              </button>
               <button
                 type="button"
                 className="dvw-settings__help-link"

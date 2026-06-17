@@ -1,4 +1,16 @@
+<p align="center">
+  <a href="https://microsoft.github.io/PAX-Cookbook">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../images/pax-cookbook-logo-readme-dark.png">
+      <source media="(prefers-color-scheme: light)" srcset="../images/pax-cookbook-logo-readme.png">
+      <img alt="PAX Cookbook" src="../images/pax-cookbook-logo-readme.png" width="400">
+    </picture>
+  </a>
+</p>
+
 # PAX Cookbook — User Guide
+
+<p align="center"><strong>PAX Cookbook v1.0.0</strong> · Last updated: June 17, 2026</p>
 
 Welcome to **PAX Cookbook**. This guide explains everything you need to collect Microsoft 365 Copilot adoption and usage data and turn it into reports — even if you have never written a line of code.
 

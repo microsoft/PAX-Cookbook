@@ -1,8 +1,11 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/pax-cookbook-logo-readme-dark.png">
-    <img src="images/pax-cookbook-logo-readme.png" alt="PAX Cookbook" width="520">
-  </picture>
+  <a href="https://microsoft.github.io/PAX-Cookbook">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="images/pax-cookbook-logo-readme-dark.png">
+      <source media="(prefers-color-scheme: light)" srcset="images/pax-cookbook-logo-readme.png">
+      <img alt="PAX Cookbook" src="images/pax-cookbook-logo-readme.png" width="400">
+    </picture>
+  </a>
 </p>
 
 <p align="center">

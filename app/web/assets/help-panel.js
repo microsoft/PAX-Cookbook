@@ -997,6 +997,15 @@
         refs.btnTopbar && refs.btnTopbar.setAttribute('aria-expanded', 'true');
 
         var html = [];
+        html.push(
+            '<button type="button" class="help-panel-doclink" data-help-userguide="1" style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:12px 14px;margin:0 0 14px 0;border:1px solid #c7d2e8;border-radius:8px;background:#eef4ff;cursor:pointer;">',
+                '<span aria-hidden="true" style="font-size:22px;line-height:1;">📖</span>',
+                '<span style="display:flex;flex-direction:column;gap:2px;">',
+                    '<span style="font-weight:600;color:#0a1f44;font-size:14px;">PAX Cookbook User Guide</span>',
+                    '<span style="color:#4a5568;font-size:12px;">Complete guide covering installation, recipes, bakes, and every feature</span>',
+                '</span>',
+            '</button>'
+        );
         html.push('<p class="help-panel-intro">Pick a category, search above, or use the small <strong>?</strong> next to any control on the page.</p>');
         html.push('<div class="help-panel-grid">');
         for (var i = 0; i < CATEGORIES.length; i += 1) {
@@ -1157,6 +1166,29 @@
         if (refs.panel.hidden) { openPanel('home'); } else { closePanel(); }
     }
 
+    // Open the PAX Cookbook User Guide in the in-app Pantry viewer. Hands the
+    // Pantry surface a one-shot intent flag (shared on this top window with the
+    // embedded React iframe, same origin) and switches the shell to the Pantry.
+    // Also nudges the embedded surface directly in case it is already showing
+    // the Pantry (same hash fires no hashchange). Navigation only -- no HTTP,
+    // no storage, no external browser.
+    function openUserGuideInPantry() {
+        try { window.__paxPantryDocIntent = 'userguide'; } catch (e) {}
+        try { window.location.hash = '#/pantry'; } catch (e) {}
+        try {
+            var frames = document.querySelectorAll('iframe');
+            for (var i = 0; i < frames.length; i += 1) {
+                try {
+                    frames[i].contentWindow.postMessage(
+                        { type: 'mk-nav', section: 'pantry' },
+                        window.location.origin
+                    );
+                } catch (e) {}
+            }
+        } catch (e) {}
+        closePanel();
+    }
+
     // ---------------------------------------------------------------
     // Lock Session
     // ---------------------------------------------------------------
@@ -1250,6 +1282,12 @@
 
         // 2. Inside the panel: topic links, category cards, home crumbs.
         if (insidePanel) {
+            var userGuideLink = target.closest('[data-help-userguide]');
+            if (userGuideLink) {
+                ev.preventDefault();
+                openUserGuideInPantry();
+                return;
+            }
             var topicLink = target.closest('[data-help-topic]');
             if (topicLink) {
                 ev.preventDefault();
