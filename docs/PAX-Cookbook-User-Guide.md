@@ -215,7 +215,7 @@ Double-click `PAX_Cookbook_Setup.exe` to launch the wizard. It walks you through
 
 **Prerequisites screen.** PAX Cookbook relies on three standard Microsoft tools. The wizard checks for each one and installs any that are missing:
 
-- **.NET 8** — the runtime that the app itself is built on. Think of it as the engine that lets the app run on Windows.
+- **.NET 8** — a standard Microsoft software component that PAX Cookbook needs in order to run.
 - **PowerShell 7** — a modern automation tool from Microsoft that PAX uses to do its work.
 - **Python** — used to build the dashboard-ready summary files for the Power BI presets.
 
@@ -263,7 +263,7 @@ When you open PAX Cookbook, the home page gives you an at-a-glance view of every
 - **Last Bake summary** — how your most recent collection run went.
 - **Recent Recipes** — quick links to the recipes you use most.
 - **What needs attention** — anything that needs a fix, such as a failed run or a sign-in that needs renewing.
-- **Recent Outputs** — the latest files produced, with quick access to open them.
+- **Recent Outputs** — the latest files produced, each with quick links to **Open folder**, **Open log**, and **Download log**.
 - **System health indicator** — a simple signal that the app and its background service are running normally.
 
 > 📸 **Screenshot:** The home page with labels pointing to the Last Bake summary, Recent Recipes, What needs attention, Recent Outputs, and the system health indicator.
@@ -315,6 +315,10 @@ Once you save a recipe, you can run it again and again — by hand or automatica
 
 From the **Recipes** page, click **New Recipe** to open the seven-step builder. Each step is explained below.
 
+**Already have a recipe file?** The New Recipe options also let you **import** a recipe someone shared with you. Choose **Import PAX Cookbook recipe (`.pax`)** or **Import Mini-Kitchen recipe (`.paxlite`)**, pick the file from the browse dialog, and the builder opens pre-filled with that recipe's settings — ready for you to review and save.
+
+> 📸 **Screenshot:** The New Recipe screen showing the dashboard presets alongside the Import `.pax` and Import `.paxlite` options.
+
 #### 4.2.1 Step 1: Basics
 
 Give your recipe a clear **name**, then choose a **dashboard preset**. The preset is a shortcut that fills in sensible defaults for a specific reporting goal:
@@ -337,7 +341,7 @@ To read your organization's data, PAX Cookbook needs permission to sign in to yo
 - **App Registration with a Client Secret** — uses an app identity (created in Entra ID) plus a secret password. It runs **unattended**, which is exactly what scheduled runs need.
 - **App Registration with a Certificate** — also uses an app identity, but with a certificate instead of a password. This is the most secure option and is recommended for production and automated use.
 
-Your sign-in details are stored as a **Chef's Key** (see [Chef's Keys](#7-chefs-keys-managing-authentication)). You can create the key here or pick an existing one.
+Your sign-in details are stored as a **Chef's Key** (see [Chef's Keys](#7-chefs-keys-managing-authentication)). You can create the key here or pick an existing one. When you choose an existing Chef's Key, PAX Cookbook automatically fills in the matching tenant for you, so you don't have to type it again.
 
 **Setting up an app registration:** An app registration is created once in the Microsoft Entra admin center and given permission to read audit and usage data. This is usually done by your IT or identity team. For the exact permissions and steps, see Microsoft's documentation on registering an app and assigning Microsoft Graph permissions.
 
@@ -447,12 +451,16 @@ You can scroll and search to find a specific bake.
 
 Click any bake to open its detail view, which shows:
 
-- The **status**, **timing**, and the **recipe** that was used.
-- **Output files** — each file produced, with the ability to open them.
-- **Cook log** — a detailed record of exactly what happened during the run, which you can open to investigate any issue.
-- An **Open folder** button to jump straight to where the files were saved.
+- The **status**, **timing**, and the **recipe** that was used, including the **dashboard target** the recipe was built for.
+- **Output files** — each file produced, with an **Open folder** button to jump straight to where the files were saved.
+- **Cook log** — a detailed record of exactly what happened during the run. You have three ways to work with it:
+  - **Open log** — opens the log in your default text app.
+  - **Copy log** — copies the log text to your clipboard.
+  - **Download log** — opens a **Save As** dialog so you can save the log wherever you like.
 
-> 📸 **Screenshot:** A bake detail view showing the output files list and the log card.
+> The **Open folder**, **Open log**, and **Download log** shortcuts also appear for recent runs in the **Recent Outputs** list on the Home page, so you can reach them without opening the full bake.
+
+> 📸 **Screenshot:** A bake detail view showing the output files list, the Open folder button, and the log card with Open log, Copy log, and Download log.
 
 ### 5.5 Scheduled bakes
 
@@ -667,7 +675,7 @@ Windows may show "Windows protected your PC" because the installer isn't code-si
 - **Custom date range** — a date setting where you pick specific start and end dates, ideal for backfills and one-time pulls.
 - **Audit operations** — the specific types of activity records collected from Purview (the dashboard preset fills these in for you).
 - **Check Readiness** — a pre-run check that confirms the engine, sign-in, output location, and permissions are all ready before you bake.
-- **Background service** — the part of PAX Cookbook that keeps running in the system tray so scheduled bakes can fire even when the main window is closed. (Also called the background broker.)
+- **Background service** — the part of PAX Cookbook that keeps running in the system tray so scheduled bakes can fire even when the main window is closed.
 - **Cook log** — the detailed record of what happened during a bake, used to confirm success or investigate a failure.
 - **Taste Test** — a quick validation check used to confirm a recipe or sign-in is working as expected before relying on it.
 - **PAX** — the PAX Purview Audit Log Processor, the open-source engine that performs the actual data collection. PAX Cookbook drives it for you.
