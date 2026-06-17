@@ -32,7 +32,6 @@ import {
   IconBook,
   IconChevronRight,
   IconChevronDown,
-  IconDots,
   IconAlertCircle,
   IconCheckCircle,
   IconRefresh,
@@ -952,9 +951,6 @@ function RecentRecipesPanel({
                   </span>
                 </button>
                 <RecipeStatusBadge tone={tone} />
-                <span className="dvw-recipe-row__more" aria-hidden="true">
-                  <IconDots />
-                </span>
               </li>
             );
           })}

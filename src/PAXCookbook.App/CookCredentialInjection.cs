@@ -147,6 +147,12 @@ internal static class CookCredentialInjection
             if (ck.AuthType == ChefKeyModel.AuthAppRegSecret &&
                 !additions.ContainsKey(GraphClientSecret))
             {
+                // Secret-free: logs the non-secret key identifier only, never the
+                // secret value.
+                Console.WriteLine(
+                    "[CRED-DIAG] AppRegistrationSecret recipe but the client secret " +
+                    $"was not readable from Windows Credential Manager (chefKeyId={ck.ChefKeyId}); " +
+                    "failing the spawn.");
                 return CredentialInjectionOutcome.SecretMissingAtSpawn;
             }
 
@@ -155,6 +161,9 @@ internal static class CookCredentialInjection
                 childEnv[kv.Key] = kv.Value;
             }
 
+            Console.WriteLine(
+                $"[CRED-DIAG] injected GRAPH_* for {ck.AuthType} " +
+                $"(chefKeyId={ck.ChefKeyId}, secretPresent={additions.ContainsKey(GraphClientSecret)}).");
             return CredentialInjectionOutcome.Injected;
         }
         finally

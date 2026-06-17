@@ -641,11 +641,21 @@ internal static class RecipeScheduleModel
             string stdout = Bound(outTask.GetAwaiter().GetResult());
             string stderr = Bound(errTask.GetAwaiter().GetResult());
             int exit = proc.ExitCode;
+            if (exit != 0)
+            {
+                // Secret-free: the registrar argv carries no secret and the
+                // registrar only writes bounded [Registrar] tokens to stderr.
+                Console.WriteLine(
+                    $"[SCHEDULE-DIAG] registrar action={action} exit={exit} " +
+                    $"token={ExtractToken(stderr, stdout)} stderr={stderr.Trim()}");
+            }
             return new RegistrarResult(
                 true, exit, exit == 0 ? null : ExtractToken(stderr, stdout), stdout, stderr);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.WriteLine(
+                $"[SCHEDULE-DIAG] registrar launch failed (pwsh='{pwsh}'): {ex.Message}");
             return new RegistrarResult(false, -1, "registrar_launch_failed", string.Empty, string.Empty);
         }
         finally

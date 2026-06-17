@@ -748,7 +748,7 @@ export function BakesWorkspace() {
           {listPhase === 'error' ? (
             <div className="bk-status-block" role="status">
               <p className="tt-muted">
-                Could not load bake history. Make sure PAX Cookbook is running, then refresh.
+                Bake history couldn’t be loaded right now. Try refreshing.
               </p>
             </div>
           ) : null}

@@ -186,8 +186,52 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status)
 
         Execute(conn, CoreDdl);
         Execute(conn, ScheduledTasksDdl);
+        MigrateCookColumns(conn);
 
         SeedSchemaMeta(conn);
+    }
+
+    // Oracle parity: the additive cook columns applied AFTER the M1 DDL
+    // (Start-Broker.ps1 Apply-M1Schema). The native broker reads and writes
+    // cooks.closure_reason; the others are carried for oracle-schema fidelity.
+    // SQLite has no ADD COLUMN IF NOT EXISTS, so each column is added only when
+    // PRAGMA table_info reports it absent -- which also repairs an existing
+    // database created before these columns were added.
+    private static readonly (string Column, string Type)[] CookColumnMigrations =
+    {
+        ("closure_reason", "TEXT"),
+        ("closure_evidence_json", "TEXT"),
+        ("abnormal_close_recorded_utc", "TEXT"),
+        ("orphan_pid", "INTEGER"),
+        ("orphan_probe_verdict", "TEXT"),
+        ("recovery_run_id", "TEXT"),
+        ("broker_session_id_at_shutdown", "TEXT"),
+    };
+
+    private static void MigrateCookColumns(SqliteConnection conn)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (SqliteCommand info = conn.CreateCommand())
+        {
+            info.CommandText = "PRAGMA table_info(cooks);";
+            using SqliteDataReader r = info.ExecuteReader();
+            while (r.Read())
+            {
+                // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
+                existing.Add(r.GetString(1));
+            }
+        }
+
+        foreach ((string column, string type) in CookColumnMigrations)
+        {
+            if (!existing.Contains(column))
+            {
+                // column + type come from the fixed list above, never user input.
+                Execute(conn, $"ALTER TABLE cooks ADD COLUMN {column} {type};");
+            }
+        }
+
+        Execute(conn, "CREATE INDEX IF NOT EXISTS idx_cooks_closure_reason ON cooks(closure_reason);");
     }
 
     private static void Execute(SqliteConnection conn, string sql)

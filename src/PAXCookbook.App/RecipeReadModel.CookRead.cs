@@ -136,32 +136,44 @@ internal static partial class RecipeReadModel
     internal static object ListCooks(string workspacePath)
     {
         var items = new List<CookListItem>();
-        using SqliteConnection? conn = OpenReadOnly(workspacePath);
-        if (conn is not null)
+        try
         {
-            using SqliteCommand cmd = conn.CreateCommand();
-            cmd.CommandText =
-                "SELECT cook_id, recipe_id, recipe_snapshot_json, status, trigger, started_at, " +
-                "finished_at, duration_seconds, exit_code, closure_reason, error_class, " +
-                "created_at, updated_at FROM cooks ORDER BY created_at DESC, cook_id DESC;";
-            using SqliteDataReader r = cmd.ExecuteReader();
-            while (r.Read())
+            using SqliteConnection? conn = OpenReadOnly(workspacePath);
+            if (conn is not null)
             {
-                items.Add(new CookListItem(
-                    CookId: r.GetString(0),
-                    RecipeId: r.IsDBNull(1) ? string.Empty : r.GetString(1),
-                    RecipeName: ExtractRecipeName(r.IsDBNull(2) ? null : r.GetString(2)),
-                    Status: CookStatuses.Normalize(r.IsDBNull(3) ? null : r.GetString(3)),
-                    Trigger: r.IsDBNull(4) ? null : r.GetString(4),
-                    StartedAt: r.IsDBNull(5) ? null : r.GetString(5),
-                    FinishedAt: r.IsDBNull(6) ? null : r.GetString(6),
-                    DurationSeconds: r.IsDBNull(7) ? (double?)null : r.GetDouble(7),
-                    ExitCode: r.IsDBNull(8) ? (long?)null : r.GetInt64(8),
-                    ClosureReason: r.IsDBNull(9) ? null : r.GetString(9),
-                    ErrorClass: r.IsDBNull(10) ? null : r.GetString(10),
-                    CreatedAt: r.IsDBNull(11) ? string.Empty : r.GetString(11),
-                    UpdatedAt: r.IsDBNull(12) ? null : r.GetString(12)));
+                using SqliteCommand cmd = conn.CreateCommand();
+                cmd.CommandText =
+                    "SELECT cook_id, recipe_id, recipe_snapshot_json, status, trigger, started_at, " +
+                    "finished_at, duration_seconds, exit_code, closure_reason, error_class, " +
+                    "created_at, updated_at FROM cooks ORDER BY created_at DESC, cook_id DESC;";
+                using SqliteDataReader r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    items.Add(new CookListItem(
+                        CookId: r.GetString(0),
+                        RecipeId: r.IsDBNull(1) ? string.Empty : r.GetString(1),
+                        RecipeName: ExtractRecipeName(r.IsDBNull(2) ? null : r.GetString(2)),
+                        Status: CookStatuses.Normalize(r.IsDBNull(3) ? null : r.GetString(3)),
+                        Trigger: r.IsDBNull(4) ? null : r.GetString(4),
+                        StartedAt: r.IsDBNull(5) ? null : r.GetString(5),
+                        FinishedAt: r.IsDBNull(6) ? null : r.GetString(6),
+                        DurationSeconds: r.IsDBNull(7) ? (double?)null : r.GetDouble(7),
+                        ExitCode: r.IsDBNull(8) ? (long?)null : r.GetInt64(8),
+                        ClosureReason: r.IsDBNull(9) ? null : r.GetString(9),
+                        ErrorClass: r.IsDBNull(10) ? null : r.GetString(10),
+                        CreatedAt: r.IsDBNull(11) ? string.Empty : r.GetString(11),
+                        UpdatedAt: r.IsDBNull(12) ? null : r.GetString(12)));
+                }
             }
+        }
+        catch (SqliteException ex)
+        {
+            // A readable database whose cooks query fails (for example a schema
+            // mismatch) must not turn the Bakes page into a hard error -- bake
+            // history is a best-effort projection. Surface the cause to the
+            // broker console for diagnosis and return an empty list.
+            Console.WriteLine($"[BAKE-HIST-DIAG] cooks list query failed: {ex.Message}");
+            items.Clear();
         }
 
         return new
