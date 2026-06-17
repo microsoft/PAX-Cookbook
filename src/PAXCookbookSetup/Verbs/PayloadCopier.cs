@@ -1,3 +1,4 @@
+using System.Threading;
 using PAXCookbook.Shared.Contracts;
 using PAXCookbook.Shared.ExitCodes;
 using PAXCookbook.Shared.Hashing;
@@ -8,6 +9,13 @@ namespace PAXCookbookSetup.Verbs;
 // Shared payload copy helper.
 public static class PayloadCopier
 {
+    // A file that has just been released by a stopped process can stay briefly
+    // locked while the OS flushes handles, so each copy is retried a few times
+    // before giving up. On final failure the destination path is named so the
+    // installer can tell the user exactly which file is in use.
+    private const int MaxCopyAttempts = 6;
+    private const int CopyRetryDelayMs = 400;
+
     public static void Copy(Manifest m, string payloadRoot, string installRoot, string appRoot)
     {
         // Non-EXE files first.
@@ -15,8 +23,7 @@ public static class PayloadCopier
         {
             var src = SafePath.CombineUnderRoot(payloadRoot, f.RelativeInstallPath);
             var dst = SafePath.CombineUnderRoot(installRoot, f.RelativeInstallPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-            File.Copy(src, dst, overwrite: true);
+            CopyFileWithRetry(src, dst);
         }
         // SetupExe → installRoot\Setup\<name>, ONLY when the build embedded it in
         // the payload. In the bootstrapper model the Setup EXE is NOT shipped in
@@ -26,14 +33,42 @@ public static class PayloadCopier
         {
             var setupDst = SafePath.CombineUnderRoot(installRoot,
                 Path.Combine("Setup", m.Payload.SetupExe.Name));
-            Directory.CreateDirectory(Path.GetDirectoryName(setupDst)!);
-            File.Copy(setupSrc, setupDst, overwrite: true);
+            CopyFileWithRetry(setupSrc, setupDst);
         }
         // AppExe last.
         var appSrc = SafePath.CombineUnderRoot(payloadRoot, m.Payload.AppExe.RelativeInstallPath);
         var appDst = SafePath.CombineUnderRoot(installRoot, m.Payload.AppExe.RelativeInstallPath);
-        Directory.CreateDirectory(Path.GetDirectoryName(appDst)!);
-        File.Copy(appSrc, appDst, overwrite: true);
+        CopyFileWithRetry(appSrc, appDst);
+    }
+
+    // Copy one file, overwriting an existing destination. When the destination
+    // is momentarily locked (a just-stopped app still releasing the handle) the
+    // copy is retried; a file that stays locked is reported by name so the
+    // installer surfaces a clear "file in use" message instead of a bare error.
+    private static void CopyFileWithRetry(string src, string dst)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Copy(src, dst, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (
+                (ex is IOException || ex is UnauthorizedAccessException)
+                && attempt < MaxCopyAttempts)
+            {
+                Thread.Sleep(CopyRetryDelayMs);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                throw new IOException(
+                    $"could not write '{dst}' — the file is in use after {MaxCopyAttempts} attempts. " +
+                    "Close PAX Cookbook (including its system tray icon) and run Setup again. " +
+                    $"({ex.Message})", ex);
+            }
+        }
     }
 
     public static void VerifyInstalled(Manifest m, string installRoot)

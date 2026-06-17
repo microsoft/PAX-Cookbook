@@ -291,7 +291,9 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
 
         return parsed.Verb switch
         {
-            "install" => InstallVerb.Run(parsed, m, payloadRoot, installRoot, log, shellOps: BuildShellOperations()),
+            "install" => InstallVerb.Run(parsed, m, payloadRoot, installRoot, log,
+                                         shellOps: BuildShellOperations(),
+                                         progress: parsed.Quiet ? null : Console.WriteLine),
             "update"  => UpdateVerb.Run(parsed, m, payloadRoot, installRoot, log, shellOps: BuildShellOperations()),
             "repair"  => RepairVerb.Run(parsed, m, payloadRoot, installRoot, log, shellOps: BuildShellOperations()),
             _         => SetupExitCodes.UsageError

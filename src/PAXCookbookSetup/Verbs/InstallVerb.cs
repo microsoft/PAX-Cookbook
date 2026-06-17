@@ -2,17 +2,24 @@ using PAXCookbook.Shared.Contracts;
 using PAXCookbook.Shared.ExitCodes;
 using PAXCookbookSetup.Payload;
 using PAXCookbookSetup.Shell;
+using PAXCookbookSetup.Uninstall;
 
 namespace PAXCookbookSetup.Verbs;
 
 public static class InstallVerb
 {
+    // How long to wait for a running PAX Cookbook to close before installing.
+    private const int AppStopTimeoutMs = 15_000;
+
     public static int Run(ParsedArgs args, Manifest m, string payloadRoot,
                           string installRoot, SetupLogger log,
                           IPayloadOperations? payloadOps = null,
-                          IShellOperations? shellOps = null)
+                          IShellOperations? shellOps = null,
+                          Action<string>? progress = null,
+                          IAppStopper? appStopper = null)
     {
         payloadOps ??= DefaultPayloadOperations.Instance;
+        appStopper ??= new RealAppStopper();
         log.Write("install-begin", fields: new Dictionary<string, object?>
         {
             ["installRoot"] = installRoot, ["appVersion"] = m.AppVersion
@@ -24,6 +31,35 @@ public static class InstallVerb
             log.Write("install-manifest-invalid", "error",
                 new Dictionary<string, object?> { ["errors"] = string.Join("; ", validation.Errors) });
             return SetupExitCodes.InstallFailed;
+        }
+
+        // Reinstall / upgrade support: a running PAX Cookbook from this install
+        // (its window, tray icon, and in-process broker — all hosted in one
+        // dotnet.exe under WDAC) holds locks on App\bin, which is what makes a
+        // naive reinstall fail. Close it first. This is expected behaviour, not
+        // an error: a stop that cannot complete never fails the install on its
+        // own — the copy step retries and, if a file is still locked, reports
+        // exactly which one.
+        if (Directory.Exists(installRoot))
+        {
+            progress?.Invoke("Closing PAX Cookbook\u2026");
+            try
+            {
+                var stop = appStopper.TryStop(installRoot, AppStopTimeoutMs);
+                log.Write("install-app-stop", fields: new Dictionary<string, object?>
+                {
+                    ["invoked"] = stop.Invoked,
+                    ["exeFound"] = stop.ExeFound,
+                    ["exited"] = stop.Exited,
+                    ["exitCode"] = stop.ExitCode,
+                    ["detail"] = stop.Detail
+                });
+            }
+            catch (Exception ex)
+            {
+                log.Write("install-app-stop-error", "warn",
+                    new Dictionary<string, object?> { ["detail"] = ex.Message });
+            }
         }
 
         var appRoot = Path.Combine(installRoot, "App");
@@ -46,6 +82,45 @@ public static class InstallVerb
             log.Write("install-copy-failed", "error",
                 new Dictionary<string, object?> { ["detail"] = ex.Message });
             return SetupExitCodes.InstallFailed;
+        }
+
+        // Remove stale binaries from an older version: files under App\bin that
+        // are not part of the new payload (old DLLs that would otherwise shadow
+        // the new ones). Strictly scoped to App\bin — user data (Workspace,
+        // database, Logs, install-state, recipes, bake history) is never
+        // touched. Best-effort: a failure here never fails an otherwise-good
+        // install, and a stale file that is still locked is simply left.
+        try
+        {
+            var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                NormalizeRel(m.Payload.AppExe.RelativeInstallPath),
+            };
+            foreach (var f in m.Payload.Files)
+                expected.Add(NormalizeRel(f.RelativeInstallPath));
+
+            var binDirAbs = Path.Combine(appRoot, "bin");
+            int staleRemoved = 0;
+            if (Directory.Exists(binDirAbs))
+            {
+                foreach (var file in Directory.EnumerateFiles(
+                             binDirAbs, "*", SearchOption.AllDirectories))
+                {
+                    var rel = NormalizeRel(Path.GetRelativePath(installRoot, file));
+                    if (!expected.Contains(rel))
+                    {
+                        try { File.Delete(file); staleRemoved++; }
+                        catch { /* locked stale file left in place; harmless */ }
+                    }
+                }
+            }
+            log.Write("install-stale-cleaned",
+                fields: new Dictionary<string, object?> { ["removed"] = staleRemoved });
+        }
+        catch (Exception ex)
+        {
+            log.Write("install-stale-clean-failed", "warn",
+                new Dictionary<string, object?> { ["detail"] = ex.Message });
         }
 
         // Bootstrapper model: the Setup EXE is not shipped in the payload, so
@@ -166,19 +241,23 @@ public static class InstallVerb
                 new Dictionary<string, object?> { ["detail"] = ex.Message });
         }
 
+        var prior = InstallStateStore.TryLoad(installRoot);
         var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
         var state = new InstallState
         {
             AppVersion = m.AppVersion,
             SetupVersion = m.SetupVersion,
             AppExeVersion = m.AppVersion,
-            InstalledAtUtc = now,
+            // Preserve the original first-install time across reinstalls/upgrades.
+            InstalledAtUtc = !string.IsNullOrEmpty(prior?.InstalledAtUtc) ? prior!.InstalledAtUtc : now,
             UpdatedAtUtc = now,
             InstallRoot = installRoot,
             AppRoot = appRoot,
             BinRoot = binRoot,
             AppExe = Path.Combine(installRoot, m.Payload.AppExe.RelativeInstallPath),
-            WorkspaceFolderPath = "",
+            // Preserve the user's recorded workspace location across upgrades so
+            // their recipes and bake history continue to resolve.
+            WorkspaceFolderPath = prior?.WorkspaceFolderPath ?? "",
             WebView2RuntimeStatus = new WebView2RuntimeStatus { DetectedAtUtc = now },
             WebView2UserDataFolder = Path.Combine(installRoot, "WebView2Data"),
             LastOperation = new LastOperation
@@ -220,6 +299,11 @@ public static class InstallVerb
         });
         return SetupExitCodes.Ok;
     }
+
+    // Normalize an install-relative path for case-insensitive comparison against
+    // the manifest (which records paths with backslashes).
+    private static string NormalizeRel(string rel)
+        => rel.Replace('/', '\\').TrimStart('\\');
 }
 
 public interface IPayloadOperations

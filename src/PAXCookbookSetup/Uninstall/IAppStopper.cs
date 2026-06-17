@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Net.Sockets;
+using System.Text.Json;
 using PAXCookbook.Shared;
 
 namespace PAXCookbookSetup.Uninstall;
@@ -42,7 +44,7 @@ public sealed class RealAppStopper : IAppStopper
 
         // Identify the broker process(es) launched from THIS install's app exe.
         // Nothing running means there is nothing to stop — uninstall proceeds.
-        var procs = FindAppProcesses(appExe);
+        var procs = FindAppProcesses(installRoot, appExe);
         if (procs.Count == 0)
             return new AppStopResult(Invoked: false, ExeFound: File.Exists(appExe),
                 Exited: true, ExitCode: null,
@@ -118,41 +120,124 @@ public sealed class RealAppStopper : IAppStopper
         }
     }
 
-    // Find running processes whose main module is exactly this install's app
-    // exe. Any process whose module path cannot be read (access denied) is
-    // skipped, never assumed to be ours.
-    private static List<Process> FindAppProcesses(string appExeFull)
+    // Find running processes that belong to THIS install. Two discovery paths,
+    // because under corporate WDAC the app runs as the Microsoft-signed
+    // dotnet.exe host (with PAX Cookbook.dll as its argument), not the apphost:
+    //   1. Any process whose main module is exactly this install's apphost exe.
+    //   2. The broker process recorded in <workspace>\Runtime\workspace.lock
+    //      (brokerProcessId) — this catches the dotnet.exe host. To guard
+    //      against a stale lock whose pid was recycled by an unrelated app, the
+    //      recorded pid is only trusted when it is the apphost OR it is a
+    //      dotnet.exe whose broker port is currently accepting connections.
+    // Any process whose module path cannot be read (access denied) is skipped,
+    // never assumed to be ours.
+    private static List<Process> FindAppProcesses(string installRoot, string appExeFull)
     {
         var matches = new List<Process>();
-        string name;
-        try { name = Path.GetFileNameWithoutExtension(appExeFull); }
-        catch { return matches; }
-        if (string.IsNullOrEmpty(name)) return matches;
-
-        Process[] candidates;
-        try { candidates = Process.GetProcessesByName(name); }
-        catch { return matches; }
+        var seen = new HashSet<int>();
 
         string target;
         try { target = Path.GetFullPath(appExeFull); }
         catch { target = appExeFull; }
 
-        foreach (var p in candidates)
+        // 1. Name-based match on the apphost exe (exact path).
+        string name;
+        try { name = Path.GetFileNameWithoutExtension(appExeFull); }
+        catch { name = string.Empty; }
+        if (!string.IsNullOrEmpty(name))
         {
-            bool keep = false;
-            try
+            Process[] candidates;
+            try { candidates = Process.GetProcessesByName(name); }
+            catch { candidates = Array.Empty<Process>(); }
+            foreach (var p in candidates)
             {
-                string? modPath = p.MainModule?.FileName;
-                if (modPath is not null
-                    && string.Equals(Path.GetFullPath(modPath), target,
-                                     StringComparison.OrdinalIgnoreCase))
-                    keep = true;
+                bool keep = false;
+                try
+                {
+                    string? modPath = p.MainModule?.FileName;
+                    if (modPath is not null
+                        && string.Equals(Path.GetFullPath(modPath), target,
+                                         StringComparison.OrdinalIgnoreCase))
+                        keep = true;
+                }
+                catch { keep = false; }
+                if (keep && seen.Add(p.Id)) matches.Add(p);
+                else { try { p.Dispose(); } catch { } }
             }
-            catch { keep = false; }
-            if (keep) matches.Add(p);
-            else { try { p.Dispose(); } catch { } }
         }
+
+        // 2. PID recorded in workspace.lock (catches the dotnet.exe host).
+        var (lockPid, lockPort) = ReadBrokerLock(installRoot);
+        if (lockPid is int pid && pid > 0 && !seen.Contains(pid))
+        {
+            Process? p = null;
+            try { p = Process.GetProcessById(pid); }
+            catch { p = null; }
+            if (p is not null)
+            {
+                bool keep = false;
+                try
+                {
+                    string? modPath = p.MainModule?.FileName;
+                    if (modPath is not null)
+                    {
+                        bool isApphost = string.Equals(Path.GetFullPath(modPath), target,
+                                                       StringComparison.OrdinalIgnoreCase);
+                        bool isDotnetHost = string.Equals(
+                            Path.GetFileName(modPath), "dotnet.exe",
+                            StringComparison.OrdinalIgnoreCase);
+                        // A recycled stale-lock pid would not have an open broker
+                        // port, so a live dotnet host is only ours when its port
+                        // is reachable.
+                        keep = isApphost ||
+                               (isDotnetHost && lockPort is int port && port > 0
+                                && BrokerPortReachable(port));
+                    }
+                }
+                catch { keep = false; }
+                if (keep && seen.Add(p.Id)) matches.Add(p);
+                else { try { p.Dispose(); } catch { } }
+            }
+        }
+
         return matches;
+    }
+
+    // Reads (brokerProcessId, brokerPort) from <workspace>\Runtime\workspace.lock.
+    // The workspace path comes from install-state when recorded, else the
+    // canonical <installRoot>\Workspace. Returns (null, null) on any absence or
+    // parse error — the lock is advisory and never required to stop the app.
+    private static (int? Pid, int? Port) ReadBrokerLock(string installRoot)
+    {
+        try
+        {
+            string? workspace = InstallStateStore.TryLoad(installRoot)?.WorkspaceFolderPath;
+            if (string.IsNullOrWhiteSpace(workspace))
+                workspace = Path.Combine(installRoot, ProductConstants.WorkspaceFolderName);
+            string lockPath = Path.Combine(workspace, "Runtime", "workspace.lock");
+            if (!File.Exists(lockPath)) return (null, null);
+            using var doc = JsonDocument.Parse(File.ReadAllText(lockPath));
+            var root = doc.RootElement;
+            int? pid = root.TryGetProperty("brokerProcessId", out var pidEl)
+                       && pidEl.TryGetInt32(out int pidVal) ? pidVal : (int?)null;
+            int? port = root.TryGetProperty("brokerPort", out var portEl)
+                        && portEl.TryGetInt32(out int portVal) ? portVal : (int?)null;
+            return (pid, port);
+        }
+        catch { return (null, null); }
+    }
+
+    // True when something is accepting TCP connections on the loopback broker
+    // port — a cheap liveness probe so a stale lock's recycled pid is not killed.
+    private static bool BrokerPortReachable(int port)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            var connect = client.ConnectAsync("127.0.0.1", port);
+            return connect.Wait(TimeSpan.FromMilliseconds(500)) && client.Connected;
+        }
+        catch { return false; }
     }
 
     private static bool WaitForAllExit(IReadOnlyList<Process> procs, int timeoutMs)
