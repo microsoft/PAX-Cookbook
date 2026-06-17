@@ -45,7 +45,6 @@ internal sealed class SetupWizardForm : Form
 
     // Prerequisites screen
     private Label _prereqHeading = null!, _dotnet8Line = null!, _ps7Line = null!, _pyLine = null!, _prereqIntro = null!, _prereqNote = null!;
-    private CheckBox _chkInstallPs7 = null!, _chkInstallPy = null!;
     private PrerequisiteStatus? _dotnet8Status, _ps7Status, _pyStatus;
 
     // Location screen
@@ -186,21 +185,17 @@ internal sealed class SetupWizardForm : Form
         _dotnet8Line = Body("• .NET 8 Desktop Runtime: checking…", 40, 70, 600, 24);
         _ps7Line = Body("• PowerShell 7: checking…", 40, 100, 600, 24);
         _pyLine = Body("• Python: checking…", 40, 130, 600, 24);
-        _prereqIntro = Body("", 28, 146, 612, 24, 10F, FontStyle.Bold);
-        _chkInstallPs7 = new CheckBox { Text = "Install PowerShell 7 automatically", Location = new Point(44, 176), Size = new Size(560, 24), Checked = true, Visible = false };
-        _chkInstallPy = new CheckBox { Text = "Install Python automatically", Location = new Point(44, 204), Size = new Size(560, 24), Checked = true, Visible = false };
+        _prereqIntro = Body("", 28, 170, 612, 48, 10F);
         _prereqNote = Body(
             "Note: installing PowerShell 7 may require administrator approval. PAX Cookbook " +
             "itself installs for your user account only and does not require administrator rights.",
-            28, 250, 612, 60, 9F);
+            28, 230, 612, 60, 9F);
         _prereqNote.ForeColor = Color.FromArgb(0x60, 0x60, 0x60);
         p.Controls.Add(_prereqHeading);
         p.Controls.Add(_dotnet8Line);
         p.Controls.Add(_ps7Line);
         p.Controls.Add(_pyLine);
         p.Controls.Add(_prereqIntro);
-        p.Controls.Add(_chkInstallPs7);
-        p.Controls.Add(_chkInstallPy);
         p.Controls.Add(_prereqNote);
         return p;
     }
@@ -402,8 +397,6 @@ internal sealed class SetupWizardForm : Form
         _ps7Line.Text = "• PowerShell 7: checking…";
         _pyLine.Text = "• Python: checking…";
         _prereqIntro.Text = "";
-        _chkInstallPs7.Visible = false;
-        _chkInstallPy.Visible = false;
         _btnNext.Enabled = false;
 
         Task.Run(() =>
@@ -424,36 +417,23 @@ internal sealed class SetupWizardForm : Form
         _ps7Line.Text = (ps7.Satisfied ? "✓  " : "⚠  ") + ps7.ToDisplayLine();
         _pyLine.Text = (py.Satisfied ? "✓  " : "⚠  ") + py.ToDisplayLine();
         _dotnet8Line.ForeColor = dotnet8.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0xC8, 0x1F, 0x1F);
-        _ps7Line.ForeColor = ps7.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0x9A, 0x6A, 0x00);
-        _pyLine.ForeColor = py.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0x9A, 0x6A, 0x00);
+        _ps7Line.ForeColor = ps7.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0xC8, 0x1F, 0x1F);
+        _pyLine.ForeColor = py.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0xC8, 0x1F, 0x1F);
 
-        bool dotnet8Met = dotnet8.Satisfied;
-        bool optionalsMet = ps7.Satisfied && py.Satisfied;
+        bool allMet = dotnet8.Satisfied && ps7.Satisfied && py.Satisfied;
         
-        if (!dotnet8Met)
-        {
-            _prereqHeading.Text = "Required prerequisite missing";
-            _prereqIntro.Text = ".NET 8 Desktop Runtime is required to run PAX Cookbook. Click Install to download and install it automatically.";
-            _chkInstallPs7.Visible = false;
-            _chkInstallPy.Visible = false;
-            _btnNext.Enabled = false;
-        }
-        else if (optionalsMet)
+        if (allMet)
         {
             _prereqHeading.Text = "All prerequisites met";
-            _prereqIntro.Text = "All prerequisites are present. Click Next to continue.";
-            _chkInstallPs7.Visible = false;
-            _chkInstallPy.Visible = false;
-            _btnNext.Enabled = true;
+            _prereqIntro.Text = "All required components are present. Click Next to continue.";
         }
         else
         {
-            _prereqHeading.Text = "Prerequisites";
-            _prereqIntro.Text = "The following will be installed automatically:";
-            _chkInstallPs7.Visible = !ps7.Satisfied;
-            _chkInstallPy.Visible = !py.Satisfied;
-            _btnNext.Enabled = true;
+            _prereqHeading.Text = "Required prerequisites";
+            int missing = (dotnet8.Satisfied ? 0 : 1) + (ps7.Satisfied ? 0 : 1) + (py.Satisfied ? 0 : 1);
+            _prereqIntro.Text = $"PAX Cookbook requires all three components.\n{missing} missing component{(missing > 1 ? "s" : "")} will be installed automatically.";
         }
+        _btnNext.Enabled = true;
     }
 
     // -----------------------------------------------------------------
@@ -490,10 +470,10 @@ internal sealed class SetupWizardForm : Form
         AppendLog("Installing PAX Cookbook to:");
         AppendLog("  " + _installRoot);
 
-        // .NET 8 is always required. PowerShell 7 and Python are optional (checkboxes).
-        bool wantDotNet8 = _dotnet8Status is { Satisfied: false };
-        bool wantPs7 = _ps7Status is { Satisfied: false } && _chkInstallPs7.Checked;
-        bool wantPy = _pyStatus is { Satisfied: false } && _chkInstallPy.Checked;
+        // All three prerequisites are REQUIRED. Install any that are missing.
+        bool needDotNet8 = _dotnet8Status is { Satisfied: false };
+        bool needPs7 = _ps7Status is { Satisfied: false };
+        bool needPy = _pyStatus is { Satisfied: false };
 
         Task.Run(() =>
         {
@@ -507,11 +487,9 @@ internal sealed class SetupWizardForm : Form
                 Action<string> progress = msg =>
                     BeginInvokeSafe(() => { _progressStatus.Text = msg; AppendLog(msg); });
 
-                if (wantDotNet8 || wantPs7 || wantPy)
+                if (needDotNet8 || needPs7 || needPy)
                 {
-                    if (wantDotNet8)
-                        BeginInvokeSafe(() => AppendLog(
-                            "Installing prerequisites…"));
+                    BeginInvokeSafe(() => AppendLog("Installing required prerequisites…"));
 
                     using var downloader = new HttpPrereqDownloader();
                     var coordinator = new PrerequisiteCoordinator(new IPrerequisiteInstaller[]
@@ -520,15 +498,26 @@ internal sealed class SetupWizardForm : Form
                         new PowerShell7Installer(downloader, new RealElevatedLauncher(), _detector),
                         new PythonInstaller(downloader, new RealSilentLauncher(), _detector)
                     });
-                    var wanted = new Dictionary<PrerequisiteKind, bool>
+                    var needed = new Dictionary<PrerequisiteKind, bool>
                     {
-                        [PrerequisiteKind.DotNet8DesktopRuntime] = wantDotNet8,
-                        [PrerequisiteKind.PowerShell7] = wantPs7,
-                        [PrerequisiteKind.Python] = wantPy
+                        [PrerequisiteKind.DotNet8DesktopRuntime] = needDotNet8,
+                        [PrerequisiteKind.PowerShell7] = needPs7,
+                        [PrerequisiteKind.Python] = needPy
                     };
-                    prereq = coordinator.Run(wanted, tempDir, progress, OnPrereqError);
+                    var coordResult = coordinator.Run(needed, tempDir, progress, OnPrereqError);
+                    prereq = coordResult.Results;
                     foreach (var r in prereq)
                         BeginInvokeSafe(() => AppendLog($"  {r.DisplayName}: {Describe(r.Result.Outcome)}"));
+
+                    // If any required prerequisite was cancelled, abort the install.
+                    if (coordResult.IsCancelled)
+                    {
+                        BeginInvokeSafe(() => OnInstallFinished(
+                            new WizardInstallResult(false, SetupExitCodes.GenericError,
+                                "Setup was cancelled because a required prerequisite could not be installed."),
+                            prereq));
+                        return;
+                    }
                 }
 
                 var result = WizardInstallRunner.Run(
@@ -556,25 +545,31 @@ internal sealed class SetupWizardForm : Form
         });
     }
 
-    // Invoked on a background thread by the coordinator when a prerequisite
-    // install fails or is declined. Prompts (synchronously, on the UI thread)
-    // for Retry or Skip.
-    private RetrySkipDecision OnPrereqError(PrerequisiteKind kind, string message)
+    // Invoked on a background thread by the coordinator when a required
+    // prerequisite install fails or is declined. Prompts (synchronously, on the
+    // UI thread) for Retry or Exit Setup.
+    private RetryExitDecision OnPrereqError(PrerequisiteKind kind, string message)
     {
-        var name = kind == PrerequisiteKind.PowerShell7 ? "PowerShell 7" : "Python";
+        var name = kind switch
+        {
+            PrerequisiteKind.DotNet8DesktopRuntime => ".NET 8 Desktop Runtime",
+            PrerequisiteKind.PowerShell7 => "PowerShell 7",
+            PrerequisiteKind.Python => "Python",
+            _ => kind.ToString()
+        };
         return InvokeSafeSync(
-            () => RetrySkipDialog.Show(this, "PAX Cookbook Setup",
-                $"{name} could not be installed:\n\n{message}\n\n" +
-                "Click Retry to try again, or Skip to continue installing PAX Cookbook without it."),
-            RetrySkipDecision.Skip);
+            () => RetryExitDialog.Show(this, "PAX Cookbook Setup",
+                $"{name} is required for PAX Cookbook and could not be installed:\n\n{message}\n\n" +
+                "Click Retry to try again, or Exit Setup to cancel."),
+            RetryExitDecision.ExitSetup);
     }
 
     private static string Describe(PrerequisiteInstallOutcome o) => o switch
     {
         PrerequisiteInstallOutcome.Installed => "installed",
         PrerequisiteInstallOutcome.AlreadyPresent => "already present",
-        PrerequisiteInstallOutcome.UserDeclined => "not installed (declined)",
-        PrerequisiteInstallOutcome.Skipped => "skipped",
+        PrerequisiteInstallOutcome.UserDeclined => "declined (required)",
+        PrerequisiteInstallOutcome.Cancelled => "cancelled",
         _ => "not installed"
     };
 
@@ -602,17 +597,18 @@ internal sealed class SetupWizardForm : Form
         _btnCancel.Visible = true;
     }
 
-    // A non-blocking warning for the Complete screen when a prerequisite the
-    // user needs is still missing (the prompt's "show a warning, don't block").
+    // Safety-net warning if a required prerequisite somehow wasn't installed.
+    // (Should never happen since prerequisites are mandatory and we abort on
+    // failure, but kept for defensive visibility.)
     private string BuildPrereqWarning()
     {
         var warns = new List<string>();
         if (_dotnet8Status is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.DotNet8DesktopRuntime))
-            warns.Add("⚠ .NET 8 Desktop Runtime is not installed. Try installing it manually from https://dotnet.microsoft.com/download/dotnet/8.0");
+            warns.Add("⚠ .NET 8 Desktop Runtime is required but not installed.");
         if (_ps7Status is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.PowerShell7))
-            warns.Add("⚠ PowerShell 7 is not installed. Bakes need it — install it later from https://aka.ms/powershell.");
+            warns.Add("⚠ PowerShell 7 is required but not installed.");
         if (_pyStatus is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.Python))
-            warns.Add("⚠ Python is not installed. Install it later from https://www.python.org/downloads/ if a recipe needs it.");
+            warns.Add("⚠ Python is required but not installed.");
         return string.Join(Environment.NewLine, warns);
     }
 

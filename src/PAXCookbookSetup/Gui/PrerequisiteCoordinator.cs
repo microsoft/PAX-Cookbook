@@ -1,18 +1,16 @@
 namespace PAXCookbookSetup.Gui;
 
 // Orchestrates the prerequisite installs for the wizard's Progress screen.
-// For each prerequisite the user opted to install, it runs the installer and —
-// on a Failed or UserDeclined outcome — asks the caller (the wizard) whether to
-// Retry or Skip, looping on Retry. A prerequisite the user did not opt into is
-// recorded as Skipped without running.
+// All three prerequisites (.NET 8 Desktop Runtime, PowerShell 7, Python) are
+// REQUIRED for PAX Cookbook to function. For each missing prerequisite, the
+// coordinator runs the installer and — on a Failed or UserDeclined outcome —
+// asks the caller (the wizard) whether to Retry or Exit Setup, looping on
+// Retry. If the user chooses Exit, the coordinator marks the prerequisite as
+// Cancelled and immediately returns (Setup must abort).
 //
-// A prerequisite failure NEVER aborts the sequence: PAX Cookbook must still
-// install even when PowerShell 7 / Python could not be installed (the prompt's
-// "show a warning, don't block"). The coordinator returns one result per
-// prerequisite so the wizard can summarise on the Complete screen.
-//
-// All decision/looping logic is here (pure orchestration over the injected
-// IPrerequisiteInstaller seam) so it is unit-tested with fakes.
+// Returns IsCancelled=true when any required prerequisite could not be
+// satisfied because the user chose to exit. The wizard must NOT proceed with
+// the PAX Cookbook install in this case.
 public sealed class PrerequisiteCoordinator
 {
     private readonly IReadOnlyList<IPrerequisiteInstaller> _installers;
@@ -22,11 +20,11 @@ public sealed class PrerequisiteCoordinator
         _installers = installers;
     }
 
-    public IReadOnlyList<NamedPrerequisiteResult> Run(
-        IReadOnlyDictionary<PrerequisiteKind, bool> wanted,
+    public PrerequisiteCoordinatorResult Run(
+        IReadOnlyDictionary<PrerequisiteKind, bool> needed,
         string downloadDir,
         Action<string> progress,
-        Func<PrerequisiteKind, string, RetrySkipDecision> onError)
+        Func<PrerequisiteKind, string, RetryExitDecision> onError)
     {
         var results = new List<NamedPrerequisiteResult>();
 
@@ -35,16 +33,17 @@ public sealed class PrerequisiteCoordinator
             var kind = installer.Kind;
             var name = DisplayName(kind);
 
-            if (!wanted.TryGetValue(kind, out var doInstall) || !doInstall)
+            if (!needed.TryGetValue(kind, out var doInstall) || !doInstall)
             {
+                // Prerequisite already satisfied — skip install step.
                 results.Add(new NamedPrerequisiteResult(kind, name,
-                    PrerequisiteInstallResult.Skipped($"{name} install was skipped.")));
+                    PrerequisiteInstallResult.AlreadyPresent($"{name} is already installed.")));
                 continue;
             }
 
             // Retry loop: re-run the installer until it succeeds or the user
-            // chooses Skip on a failure/decline. The user controls the loop;
-            // there is no artificial retry cap.
+            // chooses Exit Setup on a failure/decline. The user controls the
+            // loop; there is no artificial retry cap.
             while (true)
             {
                 var result = installer.Install(downloadDir, progress);
@@ -53,8 +52,11 @@ public sealed class PrerequisiteCoordinator
                                     or PrerequisiteInstallOutcome.UserDeclined)
                 {
                     var decision = onError(kind, result.Message);
-                    if (decision == RetrySkipDecision.Retry) continue;
-                    // Skip: keep the (failed/declined) result and move on.
+                    if (decision == RetryExitDecision.Retry) continue;
+                    // User chose to exit — record cancellation and abort.
+                    results.Add(new NamedPrerequisiteResult(kind, name,
+                        PrerequisiteInstallResult.Cancelled($"{name} installation was cancelled.")));
+                    return new PrerequisiteCoordinatorResult(results, IsCancelled: true);
                 }
 
                 results.Add(new NamedPrerequisiteResult(kind, name, result));
@@ -62,7 +64,7 @@ public sealed class PrerequisiteCoordinator
             }
         }
 
-        return results;
+        return new PrerequisiteCoordinatorResult(results, IsCancelled: false);
     }
 
     private static string DisplayName(PrerequisiteKind kind) => kind switch
@@ -73,3 +75,13 @@ public sealed class PrerequisiteCoordinator
         _ => kind.ToString()
     };
 }
+
+// Result of running all prerequisite installers.
+//
+//   Results     - outcome for each prerequisite (may be partial if cancelled).
+//   IsCancelled - true when a required prerequisite failed and the user chose
+//                 to exit Setup. The wizard must NOT proceed with installing
+//                 PAX Cookbook.
+public sealed record PrerequisiteCoordinatorResult(
+    IReadOnlyList<NamedPrerequisiteResult> Results,
+    bool IsCancelled);

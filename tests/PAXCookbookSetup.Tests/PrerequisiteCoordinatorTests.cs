@@ -6,10 +6,9 @@ using Xunit;
 
 namespace PAXCookbookSetup.Tests;
 
-// Slice D: unit tests for PrerequisiteCoordinator — the retry/skip orchestration
-// over the prerequisite installers, exercised with fake installers (no network,
-// no process). The wizard wiring itself is GUI and validated in the Slice F
-// sandbox; this covers the decision logic.
+// Unit tests for PrerequisiteCoordinator — the retry/exit orchestration over the
+// prerequisite installers, exercised with fake installers (no network, no process).
+// All prerequisites are REQUIRED; IsCancelled=true aborts the install.
 public class PrerequisiteCoordinatorTests
 {
     private sealed class FakeInstaller : IPrerequisiteInstaller
@@ -36,7 +35,7 @@ public class PrerequisiteCoordinatorTests
         }
     }
 
-    private static Dictionary<PrerequisiteKind, bool> Wanted(bool ps7, bool py) => new()
+    private static Dictionary<PrerequisiteKind, bool> Needed(bool ps7, bool py) => new()
     {
         [PrerequisiteKind.PowerShell7] = ps7,
         [PrerequisiteKind.Python] = py
@@ -46,7 +45,7 @@ public class PrerequisiteCoordinatorTests
         => all.First(r => r.Kind == k);
 
     [Fact]
-    public void NotWanted_RecordsSkippedWithoutRunning()
+    public void NotNeeded_RecordsAlreadyPresentWithoutRunning()
     {
         var ps7 = new FakeInstaller(PrerequisiteKind.PowerShell7,
             PrerequisiteInstallResult.Installed("should not run"));
@@ -54,16 +53,17 @@ public class PrerequisiteCoordinatorTests
             PrerequisiteInstallResult.Installed("should not run"));
         var coord = new PrerequisiteCoordinator(new IPrerequisiteInstaller[] { ps7, py });
 
-        var results = coord.Run(Wanted(false, false), "C:\\tmp", _ => { }, (_, _) => RetrySkipDecision.Skip);
+        var result = coord.Run(Needed(false, false), "C:\\tmp", _ => { }, (_, _) => RetryExitDecision.ExitSetup);
 
         Assert.Equal(0, ps7.Calls);
         Assert.Equal(0, py.Calls);
-        Assert.Equal(PrerequisiteInstallOutcome.Skipped, ResultFor(results, PrerequisiteKind.PowerShell7).Result.Outcome);
-        Assert.Equal(PrerequisiteInstallOutcome.Skipped, ResultFor(results, PrerequisiteKind.Python).Result.Outcome);
+        Assert.False(result.IsCancelled);
+        Assert.Equal(PrerequisiteInstallOutcome.AlreadyPresent, ResultFor(result.Results, PrerequisiteKind.PowerShell7).Result.Outcome);
+        Assert.Equal(PrerequisiteInstallOutcome.AlreadyPresent, ResultFor(result.Results, PrerequisiteKind.Python).Result.Outcome);
     }
 
     [Fact]
-    public void Wanted_Success_RunsOnce()
+    public void Needed_Success_RunsOnce()
     {
         var ps7 = new FakeInstaller(PrerequisiteKind.PowerShell7,
             PrerequisiteInstallResult.Installed("ok"));
@@ -71,15 +71,16 @@ public class PrerequisiteCoordinatorTests
             PrerequisiteInstallResult.AlreadyPresent("already"));
         var coord = new PrerequisiteCoordinator(new IPrerequisiteInstaller[] { ps7, py });
 
-        var results = coord.Run(Wanted(true, true), "C:\\tmp", _ => { }, (_, _) => RetrySkipDecision.Skip);
+        var result = coord.Run(Needed(true, true), "C:\\tmp", _ => { }, (_, _) => RetryExitDecision.ExitSetup);
 
         Assert.Equal(1, ps7.Calls);
         Assert.Equal(1, py.Calls);
-        Assert.Equal(PrerequisiteInstallOutcome.Installed, ResultFor(results, PrerequisiteKind.PowerShell7).Result.Outcome);
+        Assert.False(result.IsCancelled);
+        Assert.Equal(PrerequisiteInstallOutcome.Installed, ResultFor(result.Results, PrerequisiteKind.PowerShell7).Result.Outcome);
     }
 
     [Fact]
-    public void Failure_Skip_RecordsFailedAndContinues()
+    public void Failure_Exit_RecordsCancelledAndAborts()
     {
         var ps7 = new FakeInstaller(PrerequisiteKind.PowerShell7,
             PrerequisiteInstallResult.Failed("boom"));
@@ -87,12 +88,12 @@ public class PrerequisiteCoordinatorTests
             PrerequisiteInstallResult.Installed("ok"));
         var coord = new PrerequisiteCoordinator(new IPrerequisiteInstaller[] { ps7, py });
 
-        var results = coord.Run(Wanted(true, true), "C:\\tmp", _ => { }, (_, _) => RetrySkipDecision.Skip);
+        var result = coord.Run(Needed(true, true), "C:\\tmp", _ => { }, (_, _) => RetryExitDecision.ExitSetup);
 
-        Assert.Equal(1, ps7.Calls);                 // tried once, then skipped
-        Assert.Equal(1, py.Calls);                  // sequence continued to Python
-        Assert.Equal(PrerequisiteInstallOutcome.Failed, ResultFor(results, PrerequisiteKind.PowerShell7).Result.Outcome);
-        Assert.Equal(PrerequisiteInstallOutcome.Installed, ResultFor(results, PrerequisiteKind.Python).Result.Outcome);
+        Assert.Equal(1, ps7.Calls);                 // tried once, then exit
+        Assert.Equal(0, py.Calls);                  // sequence aborted, Python not attempted
+        Assert.True(result.IsCancelled);
+        Assert.Equal(PrerequisiteInstallOutcome.Cancelled, ResultFor(result.Results, PrerequisiteKind.PowerShell7).Result.Outcome);
     }
 
     [Fact]
@@ -105,15 +106,15 @@ public class PrerequisiteCoordinatorTests
                 : PrerequisiteInstallResult.Installed("second try"));
         var coord = new PrerequisiteCoordinator(new IPrerequisiteInstaller[] { ps7 });
 
-        // onError returns Retry the first time, then would return Skip — but the
-        // second install succeeds, so onError is consulted only once.
+        // onError returns Retry the first time; the second install succeeds.
         int errorCalls = 0;
-        var results = coord.Run(Wanted(true, false), "C:\\tmp", _ => { },
-            (_, _) => { errorCalls++; return RetrySkipDecision.Retry; });
+        var result = coord.Run(Needed(true, false), "C:\\tmp", _ => { },
+            (_, _) => { errorCalls++; return RetryExitDecision.Retry; });
 
         Assert.Equal(2, ps7.Calls);
         Assert.Equal(1, errorCalls);
-        Assert.Equal(PrerequisiteInstallOutcome.Installed, ResultFor(results, PrerequisiteKind.PowerShell7).Result.Outcome);
+        Assert.False(result.IsCancelled);
+        Assert.Equal(PrerequisiteInstallOutcome.Installed, ResultFor(result.Results, PrerequisiteKind.PowerShell7).Result.Outcome);
     }
 
     [Fact]
@@ -124,11 +125,12 @@ public class PrerequisiteCoordinatorTests
         var coord = new PrerequisiteCoordinator(new IPrerequisiteInstaller[] { ps7 });
 
         int errorCalls = 0;
-        var results = coord.Run(Wanted(true, false), "C:\\tmp", _ => { },
-            (_, _) => { errorCalls++; return RetrySkipDecision.Skip; });
+        var result = coord.Run(Needed(true, false), "C:\\tmp", _ => { },
+            (_, _) => { errorCalls++; return RetryExitDecision.ExitSetup; });
 
         Assert.Equal(1, errorCalls); // declined is treated as a retryable error prompt
-        Assert.Equal(PrerequisiteInstallOutcome.UserDeclined, ResultFor(results, PrerequisiteKind.PowerShell7).Result.Outcome);
+        Assert.True(result.IsCancelled);
+        Assert.Equal(PrerequisiteInstallOutcome.Cancelled, ResultFor(result.Results, PrerequisiteKind.PowerShell7).Result.Outcome);
     }
 
     [Fact]
@@ -147,7 +149,7 @@ public class PrerequisiteCoordinatorTests
         });
         var coord = new PrerequisiteCoordinator(new IPrerequisiteInstaller[] { ps7, py });
 
-        coord.Run(Wanted(true, true), "C:\\tmp", _ => { }, (_, _) => RetrySkipDecision.Skip);
+        coord.Run(Needed(true, true), "C:\\tmp", _ => { }, (_, _) => RetryExitDecision.ExitSetup);
 
         Assert.Equal(new[] { PrerequisiteKind.PowerShell7, PrerequisiteKind.Python }, order);
     }

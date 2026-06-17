@@ -20,9 +20,10 @@ public sealed record NamedPrerequisiteResult(
     string DisplayName,
     PrerequisiteInstallResult Result);
 
-// The user's choice when a prerequisite install fails or is declined.
-public enum RetrySkipDecision
+// The user's choice when a required prerequisite install fails or is declined.
+// Prerequisites are mandatory — the user can Retry or exit Setup entirely.
+public enum RetryExitDecision
 {
     Retry,
-    Skip
+    ExitSetup
 }

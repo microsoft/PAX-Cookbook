@@ -3,13 +3,12 @@ using System.Windows.Forms;
 
 namespace PAXCookbookSetup.Gui;
 
-// A tiny modal prompt with exactly two buttons — "Retry" and "Skip" — shown
-// when a prerequisite install fails or is declined (the wizard's Progress
-// screen offers Retry/Skip per the spec). WinForms' MessageBox has no
-// Retry/Skip button pair, so this minimal dialog provides the exact labels.
-internal static class RetrySkipDialog
+// A modal prompt with exactly two buttons — "Retry" and "Exit Setup" — shown
+// when a required prerequisite install fails or is declined. All prerequisites
+// are mandatory; the user must either retry or exit Setup entirely.
+internal static class RetryExitDialog
 {
-    public static RetrySkipDecision Show(IWin32Window owner, string title, string message)
+    public static RetryExitDecision Show(IWin32Window owner, string title, string message)
     {
         using var form = new Form
         {
@@ -36,23 +35,23 @@ internal static class RetrySkipDialog
             Text = "Retry",
             DialogResult = DialogResult.Retry,
             Size = new Size(96, 30),
-            Location = new Point(224, 126)
+            Location = new Point(212, 126)
         };
-        var skip = new Button
+        var exit = new Button
         {
-            Text = "Skip",
-            DialogResult = DialogResult.Ignore,
-            Size = new Size(96, 30),
-            Location = new Point(328, 126)
+            Text = "Exit Setup",
+            DialogResult = DialogResult.Cancel,
+            Size = new Size(110, 30),
+            Location = new Point(316, 126)
         };
 
         form.Controls.Add(label);
         form.Controls.Add(retry);
-        form.Controls.Add(skip);
+        form.Controls.Add(exit);
         form.AcceptButton = retry;
-        form.CancelButton = skip;
+        form.CancelButton = exit;
 
         var result = form.ShowDialog(owner);
-        return result == DialogResult.Retry ? RetrySkipDecision.Retry : RetrySkipDecision.Skip;
+        return result == DialogResult.Retry ? RetryExitDecision.Retry : RetryExitDecision.ExitSetup;
     }
 }
