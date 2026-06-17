@@ -85,7 +85,7 @@ internal sealed class SetupWizardForm : Form
         MaximizeBox = false;
         MinimizeBox = true;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(680, 500);
+        ClientSize = new Size(680, 560);
         BackColor = Color.White;
         Font = new Font("Segoe UI", 9F);
         try { Icon = WizardAssets.LoadAppIcon(); } catch { /* default icon */ }
@@ -165,16 +165,82 @@ internal sealed class SetupWizardForm : Form
             ForeColor = Color.FromArgb(0x20, 0x20, 0x20)
         };
 
+    // Appends one styled run to a RichTextBox, preserving the caret at the end
+    // so successive calls build a single formatted paragraph block.
+    private static void AppendRun(RichTextBox rtb, string text, float size, bool bold, Color color)
+    {
+        int start = rtb.TextLength;
+        rtb.AppendText(text);
+        rtb.Select(start, text.Length);
+        rtb.SelectionFont = new Font("Segoe UI", size, bold ? FontStyle.Bold : FontStyle.Regular);
+        rtb.SelectionColor = color;
+        rtb.Select(rtb.TextLength, 0);
+    }
+
     private Panel BuildWelcomePanel()
     {
-        var p = new Panel { Padding = new Padding(28, 24, 28, 16) };
-        p.Controls.Add(Body("Welcome to PAX Cookbook Setup", 28, 28, 600, 36, 17F, FontStyle.Bold));
-        p.Controls.Add(Body($"Version v{DisplayVersion()}", 28, 74, 600, 24, 10.5F));
-        p.Controls.Add(Body(
-            "PAX Cookbook helps you pull Microsoft 365 Copilot adoption and usage data " +
-            "into Power BI dashboards.\n\nThis wizard will install PAX Cookbook on your PC " +
-            "and check for the tools it needs.\n\nClick Next to continue.",
-            28, 116, 612, 170, 10.5F));
+        var p = new Panel { Padding = new Padding(28, 22, 28, 16) };
+        var navy = Color.FromArgb(0x0A, 0x1F, 0x44);
+        var body = Color.FromArgb(0x20, 0x20, 0x20);
+        var muted = Color.FromArgb(0x60, 0x60, 0x60);
+
+        p.Controls.Add(Body("Welcome to PAX Cookbook Setup", 28, 22, 624, 34, 17F, FontStyle.Bold));
+
+        var rtb = new RichTextBox
+        {
+            Location = new Point(28, 64),
+            Size = new Size(624, 316),
+            BorderStyle = BorderStyle.None,
+            ReadOnly = true,
+            BackColor = Color.White,
+            ScrollBars = RichTextBoxScrollBars.None,
+            WordWrap = true,
+            TabStop = false,
+            Cursor = Cursors.Default
+        };
+        _ = rtb.Handle; // force handle creation so SelectionFont/Color apply
+
+        AppendRun(rtb,
+            "PAX Cookbook automates pulling Microsoft 365 Copilot adoption and usage data " +
+            "from Microsoft Purview audit logs and prepares it for Power BI dashboards.\n\n",
+            10.5F, false, body);
+
+        AppendRun(rtb, "\u2022  What it does\u2003", 10.5F, true, navy);
+        AppendRun(rtb,
+            "Connects to your Microsoft 365 tenant, pulls Copilot usage and adoption data " +
+            "from Purview, and outputs it ready for Power BI dashboards.\n",
+            10.5F, false, body);
+
+        AppendRun(rtb, "\u2022  Who it\u2019s for\u2003", 10.5F, true, navy);
+        AppendRun(rtb,
+            "Microsoft 365 admins, IT teams, and analysts measuring Copilot ROI and adoption " +
+            "across the organization.\n",
+            10.5F, false, body);
+
+        AppendRun(rtb, "\u2022  How it works\u2003", 10.5F, true, navy);
+        AppendRun(rtb,
+            "A guided recipe builder sets up what data to pull, how to sign in, where to save " +
+            "the output, and whether to run on a schedule \u2014 no scripting required.\n",
+            10.5F, false, body);
+
+        AppendRun(rtb, "\u2022  What it powers\u2003", 10.5F, true, navy);
+        AppendRun(rtb,
+            "Ready-made dashboards for AI-in-One, AI Business Value, M365 Usage Analytics, and " +
+            "Entra Directory Export \u2014 or build your own recipe.\n",
+            10.5F, false, body);
+
+        AppendRun(rtb, "\u2022  Runs locally\u2003", 10.5F, true, navy);
+        AppendRun(rtb,
+            "Installs on your PC with a system tray icon for background operation and scheduled " +
+            "data pulls.",
+            10.5F, false, body);
+
+        rtb.Select(0, 0); // keep the view scrolled to the top
+        p.Controls.Add(rtb);
+
+        var footer = Body($"Version v{DisplayVersion()}    \u00B7    Click Next to continue.", 28, 388, 624, 18, 9F);
+        footer.ForeColor = muted;
+        p.Controls.Add(footer);
         return p;
     }
 

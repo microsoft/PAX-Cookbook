@@ -239,7 +239,7 @@ public static class AuthProfileMutationRoutes
         "DeviceNotPresent"     => "No verification device is available. This appliance requires Windows Hello, PIN, or a fallback credential prompt.",
         "DeviceBusy"           => "The verification device is busy. Please try again in a moment.",
         "RetriesExhausted"     => "Too many failed verification attempts. Please wait and try again.",
-        "ComInteropFailure"    => "Windows verification surface is unavailable. Restart the appliance and try again; if the problem persists, see TROUBLESHOOTING \u00a713b.",
+        "ComInteropFailure"    => "Windows verification surface is unavailable. Restart the appliance and try again; if the problem persists, see the PAX Cookbook User Guide.",
         _                      => "Verification did not succeed. Please try the operation again.",
     };
 

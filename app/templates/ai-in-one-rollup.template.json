@@ -72,7 +72,7 @@
         "This recipe runs PAX in Rollup mode. PAX's rollup post-processor is implemented in Python (3.10 or newer).",
         "Python detection and per-user installation are handled by the underlying PAX script (Resolve-PythonExe inside PAX_Purview_Audit_Log_Processor.ps1), not by PAX Cookbook. If no compatible interpreter is on PATH, PAX itself attempts a per-user install via winget (Python.Python.3.13) and falls back to the python.org installer.",
         "PAX Cookbook does not detect, install, configure, validate, or vendor Python. Cookbook orchestrates the PAX invocation and surfaces PAX's stdout / stderr verbatim in the embedded cook terminal.",
-        "If a rollup cook fails because Python is unavailable, see docs/TROUBLESHOOTING.md §11a. The corrective action is environment-side (provide a Python interpreter or unblock the PAX-owned installer paths), not Cookbook-side."
+        "If a rollup cook fails because Python is unavailable, the corrective action is environment-side (provide a Python interpreter or unblock the PAX-owned installer paths), not Cookbook-side."
       ]
     },
     {
