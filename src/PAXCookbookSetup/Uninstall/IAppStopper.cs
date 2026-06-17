@@ -15,15 +15,17 @@ namespace PAXCookbookSetup.Uninstall;
 // way the in-app "Exit" stops it — an authenticated loopback HTTP shutdown:
 //   POST http://127.0.0.1:<port>/api/v1/shutdown
 //        Authorization: Bearer <token>   X-Cookbook-Request: 1
-// The port is read from <installRoot>\broker.port and the session token from
-// <installRoot>\Workspace\Runtime\broker.token — the files the broker itself
-// writes. The broker answers 200 immediately and then stops on a background
+// The port is read from <workspace>\Runtime\workspace.lock and the session
+// token from <workspace>\Runtime\broker.token — the files the broker itself
+// writes (the workspace path comes from install-state, else <installRoot>\
+// Workspace). The broker answers 200 immediately and then stops on a background
 // task, so a clean stop is observed by waiting for the process to exit, not in
-// the HTTP response. If the shutdown cannot be performed (no port/token file,
+// the HTTP response. If the shutdown cannot be performed (no port/token, a
 // connection refused, broker locked → 423, or timeout) the stopper falls back
-// to terminating the broker process(es) launched from this install's app exe.
-// Process termination is scoped to the exact app exe path under <installRoot>;
-// there is no arbitrary command line and no broad process killing.
+// to terminating every process that has loaded this install's binaries — the
+// background broker/tray daemon AND any open window instance — including their
+// child processes (e.g. the WebView2 host). Termination is scoped to processes
+// with a module under <installRoot>\App\bin; there is no broad process killing.
 public interface IAppStopper
 {
     AppStopResult TryStop(string installRoot, int timeoutMs);
@@ -53,16 +55,23 @@ public sealed class RealAppStopper : IAppStopper
         try
         {
             // 1. Ask the broker to shut itself down gracefully over loopback.
+            //    Only the broker daemon answers /shutdown; a separately-launched
+            //    window instance does not, so the graceful stop covers the
+            //    broker and the terminate step below covers any window still
+            //    holding a lock on App\bin.
             string detail = TryHttpShutdown(installRoot, timeoutMs);
 
-            // 2. Wait for the process(es) to exit. A 200 from /shutdown only
-            //    schedules the stop, so the exit is the authoritative signal.
-            if (WaitForAllExit(procs, timeoutMs))
+            // 2. Give the process(es) a short grace to exit on their own. A 200
+            //    from /shutdown only schedules the broker's stop, so the exit is
+            //    the authoritative signal.
+            int graceMs = Math.Min(timeoutMs, 5_000);
+            if (WaitForAllExit(procs, graceMs))
                 return new AppStopResult(true, true, true, 0, detail);
 
-            // 3. Fallback: terminate the broker process(es) directly. This is
-            //    the last resort when the broker is locked, unreachable, or the
-            //    port/token sidecars are absent.
+            // 3. Terminate any process(es) still running (the window instance,
+            //    or a broker that did not exit), including child processes such
+            //    as the WebView2 host. This is what frees the App\bin file locks
+            //    so a reinstall/upgrade can overwrite them.
             KillAll(procs);
             if (WaitForAllExit(procs, timeoutMs))
                 return new AppStopResult(true, true, true, 0,
@@ -83,12 +92,14 @@ public sealed class RealAppStopper : IAppStopper
     {
         try
         {
-            string portFile = Path.Combine(installRoot, "broker.port");
-            if (!File.Exists(portFile)) return "no broker.port";
-            if (!int.TryParse(File.ReadAllText(portFile).Trim(), out int port)
-                || port < 1 || port > 65535) return "broker.port malformed";
+            // The broker records its loopback port INSIDE workspace.lock (there
+            // is no separate broker.port file); the session token sits next to
+            // it at <workspace>\Runtime\broker.token.
+            var (_, lockPort) = ReadBrokerLock(installRoot);
+            if (lockPort is not int port || port < 1 || port > 65535)
+                return "no broker port in workspace.lock";
 
-            string tokenFile = Path.Combine(installRoot, "Workspace", "Runtime", "broker.token");
+            string tokenFile = Path.Combine(ResolveWorkspace(installRoot), "Runtime", "broker.token");
             if (!File.Exists(tokenFile)) return "no broker.token";
             string token = File.ReadAllText(tokenFile).Trim();
             if (token.Length == 0) return "broker.token empty";
@@ -120,53 +131,85 @@ public sealed class RealAppStopper : IAppStopper
         }
     }
 
-    // Find running processes that belong to THIS install. Two discovery paths,
-    // because under corporate WDAC the app runs as the Microsoft-signed
-    // dotnet.exe host (with PAX Cookbook.dll as its argument), not the apphost:
-    //   1. Any process whose main module is exactly this install's apphost exe.
-    //   2. The broker process recorded in <workspace>\Runtime\workspace.lock
-    //      (brokerProcessId) — this catches the dotnet.exe host. To guard
-    //      against a stale lock whose pid was recycled by an unrelated app, the
-    //      recorded pid is only trusted when it is the apphost OR it is a
-    //      dotnet.exe whose broker port is currently accepting connections.
-    // Any process whose module path cannot be read (access denied) is skipped,
+    // Find EVERY running process that belongs to THIS install. A process is
+    // ours when it has loaded a module from <installRoot>\App\bin — which is
+    // true for:
+    //   * the Microsoft-signed dotnet.exe host (it loads PAX Cookbook.dll from
+    //     App\bin, the WDAC production launch shape), and
+    //   * the unsigned apphost PAX Cookbook.exe (its main module is App\bin),
+    // and crucially catches BOTH the background broker/tray daemon AND a
+    // separately-launched window instance. Each loads — and therefore locks —
+    // App\bin\PAX Cookbook.dll, so missing the window is exactly what left a
+    // file locked and failed a reinstall/upgrade with exit 50.
+    //
+    // Candidates are narrowed by process name first (dotnet + the apphost name)
+    // so we never enumerate the modules of unrelated processes. The broker PID
+    // recorded in workspace.lock is added as a supplement (trusted when its
+    // recorded port is reachable) so the broker is still stopped even if its
+    // module list cannot be read. A process whose modules cannot be read is
     // never assumed to be ours.
     private static List<Process> FindAppProcesses(string installRoot, string appExeFull)
     {
         var matches = new List<Process>();
         var seen = new HashSet<int>();
 
-        string target;
-        try { target = Path.GetFullPath(appExeFull); }
-        catch { target = appExeFull; }
+        string binPrefix;
+        try
+        {
+            binPrefix = Path.GetFullPath(Path.Combine(installRoot, "App", "bin"))
+                        + Path.DirectorySeparatorChar;
+        }
+        catch { binPrefix = Path.Combine(installRoot, "App", "bin") + Path.DirectorySeparatorChar; }
 
-        // 1. Name-based match on the apphost exe (exact path).
-        string name;
-        try { name = Path.GetFileNameWithoutExtension(appExeFull); }
-        catch { name = string.Empty; }
-        if (!string.IsNullOrEmpty(name))
+        // True when any loaded module of p lives under <installRoot>\App\bin.
+        bool LoadsOurBinaries(Process p)
+        {
+            try
+            {
+                foreach (ProcessModule m in p.Modules)
+                {
+                    string? f;
+                    try { f = m.FileName; } catch { f = null; }
+                    if (f is null) continue;
+                    string full;
+                    try { full = Path.GetFullPath(f); } catch { full = f; }
+                    if (full.StartsWith(binPrefix, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+            catch { /* module list unreadable (denied/exited) — not treated as ours */ }
+            return false;
+        }
+
+        // Candidate process names: the dotnet.exe host (production under WDAC)
+        // and the apphost exe (dev / non-WDAC). Both are scanned so neither the
+        // broker daemon nor an open window is missed.
+        var names = new List<string> { "dotnet" };
+        try
+        {
+            string apphostName = Path.GetFileNameWithoutExtension(appExeFull);
+            if (!string.IsNullOrEmpty(apphostName)
+                && !names.Contains(apphostName, StringComparer.OrdinalIgnoreCase))
+                names.Add(apphostName);
+        }
+        catch { }
+
+        foreach (var nm in names)
         {
             Process[] candidates;
-            try { candidates = Process.GetProcessesByName(name); }
+            try { candidates = Process.GetProcessesByName(nm); }
             catch { candidates = Array.Empty<Process>(); }
             foreach (var p in candidates)
             {
-                bool keep = false;
-                try
-                {
-                    string? modPath = p.MainModule?.FileName;
-                    if (modPath is not null
-                        && string.Equals(Path.GetFullPath(modPath), target,
-                                         StringComparison.OrdinalIgnoreCase))
-                        keep = true;
-                }
-                catch { keep = false; }
+                bool keep = !seen.Contains(p.Id) && LoadsOurBinaries(p);
                 if (keep && seen.Add(p.Id)) matches.Add(p);
                 else { try { p.Dispose(); } catch { } }
             }
         }
 
-        // 2. PID recorded in workspace.lock (catches the dotnet.exe host).
+        // Supplement: the broker PID recorded in workspace.lock. Trusted when
+        // its loaded modules confirm it, or when its recorded port is currently
+        // reachable (a recycled stale-lock pid would not have an open port).
         var (lockPid, lockPort) = ReadBrokerLock(installRoot);
         if (lockPid is int pid && pid > 0 && !seen.Contains(pid))
         {
@@ -175,26 +218,8 @@ public sealed class RealAppStopper : IAppStopper
             catch { p = null; }
             if (p is not null)
             {
-                bool keep = false;
-                try
-                {
-                    string? modPath = p.MainModule?.FileName;
-                    if (modPath is not null)
-                    {
-                        bool isApphost = string.Equals(Path.GetFullPath(modPath), target,
-                                                       StringComparison.OrdinalIgnoreCase);
-                        bool isDotnetHost = string.Equals(
-                            Path.GetFileName(modPath), "dotnet.exe",
-                            StringComparison.OrdinalIgnoreCase);
-                        // A recycled stale-lock pid would not have an open broker
-                        // port, so a live dotnet host is only ours when its port
-                        // is reachable.
-                        keep = isApphost ||
-                               (isDotnetHost && lockPort is int port && port > 0
-                                && BrokerPortReachable(port));
-                    }
-                }
-                catch { keep = false; }
+                bool keep = LoadsOurBinaries(p)
+                            || (lockPort is int port && port > 0 && BrokerPortReachable(port));
                 if (keep && seen.Add(p.Id)) matches.Add(p);
                 else { try { p.Dispose(); } catch { } }
             }
@@ -204,17 +229,13 @@ public sealed class RealAppStopper : IAppStopper
     }
 
     // Reads (brokerProcessId, brokerPort) from <workspace>\Runtime\workspace.lock.
-    // The workspace path comes from install-state when recorded, else the
-    // canonical <installRoot>\Workspace. Returns (null, null) on any absence or
-    // parse error — the lock is advisory and never required to stop the app.
+    // Returns (null, null) on any absence or parse error — the lock is advisory
+    // and never required to stop the app.
     private static (int? Pid, int? Port) ReadBrokerLock(string installRoot)
     {
         try
         {
-            string? workspace = InstallStateStore.TryLoad(installRoot)?.WorkspaceFolderPath;
-            if (string.IsNullOrWhiteSpace(workspace))
-                workspace = Path.Combine(installRoot, ProductConstants.WorkspaceFolderName);
-            string lockPath = Path.Combine(workspace, "Runtime", "workspace.lock");
+            string lockPath = Path.Combine(ResolveWorkspace(installRoot), "Runtime", "workspace.lock");
             if (!File.Exists(lockPath)) return (null, null);
             using var doc = JsonDocument.Parse(File.ReadAllText(lockPath));
             var root = doc.RootElement;
@@ -225,6 +246,19 @@ public sealed class RealAppStopper : IAppStopper
             return (pid, port);
         }
         catch { return (null, null); }
+    }
+
+    // Resolve the workspace folder for this install: the path recorded in
+    // install-state when present, else the canonical <installRoot>\Workspace.
+    private static string ResolveWorkspace(string installRoot)
+    {
+        try
+        {
+            string? ws = InstallStateStore.TryLoad(installRoot)?.WorkspaceFolderPath;
+            if (!string.IsNullOrWhiteSpace(ws)) return ws!;
+        }
+        catch { }
+        return Path.Combine(installRoot, ProductConstants.WorkspaceFolderName);
     }
 
     // True when something is accepting TCP connections on the loopback broker
@@ -261,7 +295,9 @@ public sealed class RealAppStopper : IAppStopper
     {
         foreach (var p in procs)
         {
-            try { if (!p.HasExited) p.Kill(entireProcessTree: false); }
+            // entireProcessTree: true also terminates child processes (e.g. the
+            // WebView2 host) that could otherwise keep a file handle open.
+            try { if (!p.HasExited) p.Kill(entireProcessTree: true); }
             catch { /* best effort */ }
         }
     }
