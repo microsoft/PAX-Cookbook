@@ -15,9 +15,9 @@
     "sha256": "0DD230734715ABD15CF4C0A76013672BF9AD6713C3F82520A6333B0DCDAAD361",
     "acquisitionPolicy": "external",
     "exportEnabled": false,
-    "engineManifestUrl": "http://127.0.0.1:60443/internal-test/approved-engine-manifest.json",
+    "engineManifestUrl": "https://github.com/microsoft/PAX/releases/latest/download/approved-engine-manifest.json",
     "engineManifestTrustAnchorThumbprint": null,
-    "manifestSignaturePolicy": "internal-test-bypass"
+    "manifestSignaturePolicy": "required"
   },
   "compatibility": {
     "minCookbookVersionForPaxScript": "1.0.0",

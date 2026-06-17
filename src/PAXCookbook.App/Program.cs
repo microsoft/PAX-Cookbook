@@ -489,6 +489,18 @@ internal static class Program
         string? engineLocalAppDataOverride = ResolveEngineLocalAppDataOverride(args);
         string engineLocalAppDataBase = EngineAcquisition.ResolveLocalAppDataBase(engineLocalAppDataOverride);
 
+        // First-launch engine auto-acquisition. When the per-user managed engine
+        // has not been acquired yet, silently activate the approved engine that
+        // ships in the install tree so a fresh install is ready to cook with no
+        // acquisition prompt. Skipped under the test-only --engine-localappdata
+        // override so the acquisition-flow smokes still exercise the pending
+        // state against their isolated fixtures. appRoot is non-null here (an
+        // earlier guard returns when it cannot be located).
+        if (engineLocalAppDataOverride is null)
+        {
+            EngineBundleAutoAcquire.TryAcquireFromBundle(versionInfo, appRoot, engineLocalAppDataBase);
+        }
+
         // X14 acquisition staging anchor. The oracle (installer) puts work
         // dirs under <install-root>\Updates; the native runtime defaults to
         // <engineLocalAppDataBase>\PAXCookbook\Updates. A --updates-dir
