@@ -83,22 +83,24 @@ public class Phase8ShellTests
 
     // ---- 4. Target is the signed dotnet host; args carry the DLL + paths. ----
     [Fact]
-    public void Catalog_TargetIsDotNet_ArgsCarryDll()
+    public void Catalog_TargetIsWScript_ArgsCarryVbs()
     {
         var defs = ShortcutCatalog.StartMenuShortcuts(FakeInstallRoot, true, true);
         var primary = defs.First(d => d.Name == ShortcutCatalog.PrimaryName);
-        // WDAC-safe: the shortcut runs dotnet.exe, not the unsigned apphost.
-        Assert.EndsWith("dotnet.exe", primary.Target, System.StringComparison.OrdinalIgnoreCase);
-        var expectedDll = Path.Combine(FakeInstallRoot, "App", "bin", "PAX Cookbook.dll");
+        // No console window: the shortcut runs wscript.exe on the hidden
+        // launch.vbs (which starts the signed dotnet host hidden), never dotnet
+        // directly and never the unsigned apphost.
+        Assert.EndsWith("wscript.exe", primary.Target, System.StringComparison.OrdinalIgnoreCase);
+        var expectedVbs = Path.Combine(FakeInstallRoot, "App", "bin", "launch.vbs");
         var expectedWs  = Path.Combine(FakeInstallRoot, "Workspace");
         var expectedApp = Path.Combine(FakeInstallRoot, "App");
-        Assert.Equal($"\"{expectedDll}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", primary.Arguments);
+        Assert.Equal($"\"{expectedVbs}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", primary.Arguments);
         // Icon still comes from the apphost EXE (icon reads are allowed).
         Assert.EndsWith(@"App\bin\PAX Cookbook.exe,0", primary.IconLocation);
-        // The desktop shortcut shares the same dotnet launch.
+        // The desktop shortcut shares the same hidden launch.
         var desktop = ShortcutCatalog.DesktopShortcut(FakeInstallRoot);
-        Assert.EndsWith("dotnet.exe", desktop.Target, System.StringComparison.OrdinalIgnoreCase);
-        Assert.Equal($"\"{expectedDll}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", desktop.Arguments);
+        Assert.EndsWith("wscript.exe", desktop.Target, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Equal($"\"{expectedVbs}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", desktop.Arguments);
     }
 
     // ---- 5. ShellOperations.Install creates expected shortcut count. ----
@@ -422,16 +424,16 @@ public class Phase8ShellTests
         Assert.Contains(h.InstallRoot, us);
     }
 
-    // ---- 30. Manifest produced by default flow contains the dotnet primary entry. ----
+    // ---- 30. Manifest produced by default flow contains the launcher entry. ----
     [Fact]
-    public void Manifest_DefaultFlow_ContainsPrimaryDotNetEntry()
+    public void Manifest_DefaultFlow_ContainsPrimaryLauncherEntry()
     {
         var h = Build();
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         var m = h.ManifestStore.TryLoad(h.InstallRoot)!;
         Assert.Contains(m.Shortcuts,
-            e => e.Target.EndsWith("dotnet.exe", System.StringComparison.OrdinalIgnoreCase)
-                 && e.Arguments.Contains("PAX Cookbook.dll")
+            e => e.Target.EndsWith("wscript.exe", System.StringComparison.OrdinalIgnoreCase)
+                 && e.Arguments.Contains("launch.vbs")
                  && e.Arguments.Contains("--workspace"));
     }
 

@@ -34,4 +34,22 @@ internal static class DotNetLaunch
     // Valid whether the process was started via the apphost or via dotnet.
     public static string OwnDllPath()
         => Path.Combine(AppContext.BaseDirectory, "PAX Cookbook.dll");
+
+    // Microsoft-signed Windows Script Host (windowed/no-console). Runs the
+    // shipped launch.vbs hidden so dotnet.exe's console window never appears.
+    // Mirror of PAXCookbook.Shared.DotNetLaunch.WScriptExePath.
+    public static string WScriptExePath()
+    {
+        try
+        {
+            var sysRoot = Environment.GetEnvironmentVariable("SystemRoot");
+            if (!string.IsNullOrEmpty(sysRoot))
+            {
+                var p = Path.Combine(sysRoot, "System32", "wscript.exe");
+                if (File.Exists(p)) return p;
+            }
+        }
+        catch { /* fall back to PATH */ }
+        return "wscript.exe";
+    }
 }

@@ -709,7 +709,14 @@ internal sealed class SetupWizardForm : Form
             var dotnet = DotNetLaunch.DotNetExePath();
             var ws = Path.Combine(_installRoot, ProductConstants.WorkspaceFolderName);
             var ar = Path.Combine(_installRoot, ProductConstants.AppRootFolderName);
-            var psi = new ProcessStartInfo { FileName = dotnet, UseShellExecute = true };
+            // CreateNoWindow + UseShellExecute=false suppress dotnet.exe's
+            // console window (no blank terminal alongside the app).
+            var psi = new ProcessStartInfo
+            {
+                FileName = dotnet,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
             psi.ArgumentList.Add(appDll);
             psi.ArgumentList.Add("--workspace"); psi.ArgumentList.Add(ws);
             psi.ArgumentList.Add("--approot"); psi.ArgumentList.Add(ar);

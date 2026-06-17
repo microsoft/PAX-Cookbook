@@ -209,6 +209,8 @@ Invoke-Step '[5/7] write manifest.json' {
 
     $requiredRuntime = @(
         'App\bin\PAX Cookbook.exe'
+        'App\bin\PAX Cookbook.dll'
+        'App\bin\launch.vbs'
         'App\broker\Start-Broker.ps1'
         'App\web\index.html'
         'App\resources\manifest.json'

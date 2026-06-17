@@ -61,6 +61,112 @@ internal static class WebViewShell
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
+    // Force the top-level window visible regardless of the show state this
+    // process inherited from its launcher. The app is started through a hidden
+    // launcher so the signed dotnet host's console window never flashes; that
+    // launcher starts the process with SW_HIDE, which the first form show would
+    // otherwise honor and leave the main window hidden. A direct ShowWindow on
+    // the realized handle overrides the inherited state for the GUI window.
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    private const int SW_SHOWNORMAL = 1;
+
+    // Taskbar button icon for the running window. Under corporate WDAC the app
+    // runs via the Microsoft-signed dotnet.exe host, launched from a shortcut
+    // that targets wscript.exe (the hidden launcher that suppresses the console
+    // window). Because the shortcut points at that intermediary rather than at
+    // this process, Windows cannot relate the running window back to the
+    // shortcut to adopt its icon, and the taskbar falls back to the dotnet
+    // host's generic icon. Setting the per-window
+    // System.AppUserModel.RelaunchIconResource property gives the taskbar an
+    // explicit icon source for this window's button — the documented mechanism
+    // for host/intermediary launch scenarios.
+    [DllImport("shell32.dll")]
+    private static extern int SHGetPropertyStoreForWindow(
+        IntPtr hwnd, ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IPropertyStore propertyStore);
+
+    [ComImport]
+    [Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPropertyStore
+    {
+        void GetCount(out uint cProps);
+        void GetAt(uint iProp, out PropertyKey pkey);
+        void GetValue(ref PropertyKey key, out PropVariant pv);
+        void SetValue(ref PropertyKey key, ref PropVariant pv);
+        void Commit();
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    private struct PropertyKey
+    {
+        public Guid fmtid;
+        public uint pid;
+        public PropertyKey(Guid g, uint p) { fmtid = g; pid = p; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PropVariant
+    {
+        public ushort vt;
+        public ushort wReserved1;
+        public ushort wReserved2;
+        public ushort wReserved3;
+        public IntPtr p;
+        public int p2;
+    }
+
+    [DllImport("ole32.dll")]
+    private static extern int PropVariantClear(ref PropVariant pvar);
+
+    private static readonly Guid IID_IPropertyStore =
+        new("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+
+    // PKEY_AppUserModel_RelaunchIconResource = {9F4C2855-...}, 3
+    private static PropertyKey PKEY_AppUserModel_RelaunchIconResource =
+        new(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 3);
+
+    private const ushort VT_LPWSTR = 31;
+
+    // Point the running window's taskbar button at an explicit icon resource
+    // ("path,index" — an exe/.ico the shell can rasterize). Safe to call more
+    // than once and before or after the taskbar button is realized.
+    private static void SetWindowRelaunchIcon(IntPtr hwnd, string iconResource)
+    {
+        if (hwnd == IntPtr.Zero || string.IsNullOrEmpty(iconResource)) { return; }
+        IPropertyStore? store = null;
+        try
+        {
+            var iid = IID_IPropertyStore;
+            if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store is null)
+            {
+                return;
+            }
+            var pv = new PropVariant { vt = VT_LPWSTR, p = Marshal.StringToCoTaskMemUni(iconResource) };
+            try
+            {
+                store.SetValue(ref PKEY_AppUserModel_RelaunchIconResource, ref pv);
+                store.Commit();
+            }
+            finally
+            {
+                PropVariantClear(ref pv);
+            }
+        }
+        catch
+        {
+            // Non-fatal: the taskbar falls back to its default icon resolution.
+        }
+        finally
+        {
+            if (store is not null) { Marshal.ReleaseComObject(store); }
+        }
+    }
+
+
     // Window-mode test-only close seam. When selfCloseAfterMs is greater than
     // zero the shell schedules a single full-close on the UI thread after the
     // given delay, driving the EXACT same teardown path as the operator
@@ -114,6 +220,19 @@ internal static class WebViewShell
             // Non-fatal: identity is a taskbar-quality nicety, not a launch
             // prerequisite.
         }
+
+        // Resolve an explicit taskbar-button icon source for this window. Prefer
+        // the bundled apphost EXE that ships next to this DLL — it embeds the
+        // multi-resolution app icon and is exactly the source the Start-menu
+        // shortcut points at — and fall back to the .ico the shell already
+        // loads. This is applied to the window via RelaunchIconResource so the
+        // taskbar shows the app icon even though the process is the generic
+        // dotnet.exe host launched through the wscript intermediary.
+        string appHostExe = Path.Combine(AppContext.BaseDirectory, "PAX Cookbook.exe");
+        string relaunchIconResource =
+            File.Exists(appHostExe) ? appHostExe + ",0"
+            : File.Exists(iconPath) ? iconPath + ",0"
+            : string.Empty;
 
         // Fail fast and clearly if the Evergreen WebView2 Runtime is absent.
         // We do not install or bootstrap the runtime in X2.
@@ -223,7 +342,11 @@ internal static class WebViewShell
             }
         }
 
-        form.HandleCreated += (_, _) => ApplyWindowIcons();
+        form.HandleCreated += (_, _) =>
+        {
+            ApplyWindowIcons();
+            SetWindowRelaunchIcon(form.Handle, relaunchIconResource);
+        };
         form.Shown += (_, _) => ApplyWindowIcons();
 
         var web = new WebView2 { Dock = DockStyle.Fill };
@@ -559,6 +682,51 @@ internal static class WebViewShell
             };
             restoreThread.Start();
         }
+
+        // Defeat an inherited hidden show state. The app is launched through a
+        // hidden launcher so the signed dotnet host never flashes a console
+        // window; that launcher starts this process with SW_HIDE, which the
+        // first form show honors and would otherwise leave the main window
+        // hidden with no affordance to restore it. A one-shot timer fires once
+        // the message loop is pumping (the window handle is realized by then)
+        // and forces the window visible and foreground. This is a no-op for a
+        // process started normally visible.
+        var forceShowTimer = new System.Windows.Forms.Timer { Interval = 1 };
+        forceShowTimer.Tick += (_, _) =>
+        {
+            forceShowTimer.Stop();
+            forceShowTimer.Dispose();
+            try
+            {
+                if (form.IsDisposed) { return; }
+                // The inherited hidden show state only suppresses the FIRST
+                // ShowWindow call: Win32 honors the launcher's STARTUPINFO show
+                // state on the first show and ignores the requested nCmdShow.
+                // WinForms' own first show already consumed that, so this
+                // subsequent ShowWindow is honored and brings the window visible
+                // WITHOUT a Hide/Show toggle. A toggle would destroy and recreate
+                // the taskbar button (a hidden window has no button), and the
+                // fresh button would adopt the dotnet host process's generic icon
+                // instead of the bundled high-resolution app icon.
+                ShowWindow(form.Handle, SW_SHOWNORMAL);
+                if (form.WindowState == FormWindowState.Minimized)
+                {
+                    form.WindowState = FormWindowState.Normal;
+                }
+                form.Activate();
+                form.BringToFront();
+                // Re-assert the explicit high-resolution icon handles on the now
+                // visible window so the freshly realized taskbar button shows the
+                // bundled app icon rather than the host process's generic icon.
+                ApplyWindowIcons();
+                SetWindowRelaunchIcon(form.Handle, relaunchIconResource);
+            }
+            catch
+            {
+                // Non-fatal: force-show is a best-effort correction.
+            }
+        };
+        forceShowTimer.Start();
 
         Application.Run(form);
 

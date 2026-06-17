@@ -9,8 +9,8 @@ namespace PAXCookbookSetup.Tests;
 //
 // Contract under test:
 //   - AutoStartRegistrar writes ONE named value "PAX Cookbook" under the
-//     SHARED Run key, carrying "<dotnet.exe>" "<installRoot>\App\bin\PAX
-//     Cookbook.dll" --headless --workspace <ws> --approot <app> (WDAC-safe).
+//     SHARED Run key, carrying "<wscript.exe>" "<installRoot>\App\bin\launch.vbs"
+//     --headless --workspace <ws> --approot <app> (hidden launcher, WDAC-safe).
 //   - ShellRemover removes that value ONLY when it points under installRoot
 //     (positive-ID); a value pointing elsewhere is left intact.
 //   - ShellOperations.Install wires the registrar through so the install
@@ -41,10 +41,10 @@ public class AutoStartTests
         Assert.NotNull(cmd);
         Assert.Equal(result.CommandLine, cmd);
         Assert.Contains("--headless", cmd);
-        // WDAC-safe: launches the signed dotnet.exe host with the app DLL,
-        // NOT the unsigned apphost EXE.
-        Assert.Contains("dotnet.exe", cmd);
-        Assert.Contains(@"App\bin\PAX Cookbook.dll", cmd);
+        // No console window: launches via wscript.exe + the hidden launch.vbs
+        // (which starts the signed dotnet host), NOT dotnet/the apphost directly.
+        Assert.Contains("wscript.exe", cmd);
+        Assert.Contains(@"App\bin\launch.vbs", cmd);
         Assert.DoesNotContain(@"App\bin\PAX Cookbook.exe", cmd);
         Assert.Contains(@"--workspace """ + Path.Combine(InstallRoot, "Workspace") + @"""", cmd);
         Assert.Contains(@"--approot """ + Path.Combine(InstallRoot, "App") + @"""", cmd);

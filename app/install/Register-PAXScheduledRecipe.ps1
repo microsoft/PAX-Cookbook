@@ -268,19 +268,22 @@ function Resolve-DllPath {
     return (Join-Path -Path $appDir -ChildPath (Join-Path 'bin' 'PAX Cookbook.dll'))
 }
 
-function Resolve-DotNetPath {
-    # Microsoft-signed dotnet.exe host. Corporate WDAC blocks the unsigned
-    # apphost (PAX Cookbook.exe), so the scheduled task runs dotnet.exe with the
-    # app DLL as its argument. Prefer the standard per-machine install; fall
-    # back to PATH.
-    foreach ($base in @($env:ProgramFiles, ${env:ProgramW6432}, ${env:ProgramFiles(x86)})) {
-        if ([string]::IsNullOrEmpty($base)) { continue }
-        $cand = Join-Path -Path $base -ChildPath (Join-Path 'dotnet' 'dotnet.exe')
-        if (Test-Path -LiteralPath $cand -PathType Leaf) { return $cand }
-    }
-    $cmd = Get-Command dotnet.exe -ErrorAction SilentlyContinue
+function Resolve-VbsPath {
+    # The hidden launcher shipped next to the app DLL:
+    #   <App>\bin\launch.vbs
+    $installDir = Split-Path -Parent $PSCommandPath
+    $appDir     = Split-Path -Parent $installDir
+    return (Join-Path -Path $appDir -ChildPath (Join-Path 'bin' 'launch.vbs'))
+}
+
+function Resolve-WScriptPath {
+    # Microsoft-signed Windows Script Host (windowed/no-console). Runs launch.vbs
+    # hidden so dotnet.exe's console window never appears when a bake fires.
+    $p = Join-Path -Path $env:SystemRoot -ChildPath (Join-Path 'System32' 'wscript.exe')
+    if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+    $cmd = Get-Command wscript.exe -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source) { return $cmd.Source }
-    return 'dotnet.exe'
+    return 'wscript.exe'
 }
 
 function Invoke-Register {
@@ -312,28 +315,36 @@ function Invoke-Register {
         Write-RegistrarLine ('dll_missing: ' + $dllPath) 'stderr'
         exit 3
     }
-    $dotnetPath = Resolve-DotNetPath
+    $vbsPath = Resolve-VbsPath
+    if (-not (Test-Path -LiteralPath $vbsPath -PathType Leaf)) {
+        Write-RegistrarLine ('launcher_missing: ' + $vbsPath) 'stderr'
+        exit 3
+    }
+    $wscriptPath = Resolve-WScriptPath
     $binDir = Split-Path -Parent $dllPath
     $appDir = Split-Path -Parent $binDir
 
     # Build the OS-side action. New-ScheduledTaskAction accepts a SINGLE
     # -Argument string. Under corporate WDAC the unsigned apphost cannot be
-    # executed, so the task runs the Microsoft-signed dotnet.exe host with the
-    # app DLL as the FIRST argument token, followed by the headless one-shot
-    # flags. At fire time:
-    #   dotnet.exe "<App>\bin\PAX Cookbook.dll" --run-scheduled-recipe <id>
-    #              --workspace <ws> --approot <app>
+    # executed AND dotnet.exe is a console app (it would flash a terminal when a
+    # bake fires), so the task runs the Microsoft-signed wscript.exe on the
+    # shipped launch.vbs, which starts dotnet hidden. The "--pax-wait" sentinel
+    # makes the launcher WAIT for the cook and return its exit code, so the
+    # task's run result reflects the bake and the MultipleInstances=IgnoreNew
+    # overlap policy still works. At fire time:
+    #   wscript.exe "<App>\bin\launch.vbs" --pax-wait --run-scheduled-recipe <id>
+    #               --workspace <ws> --approot <app>
     # runs exactly ONE scheduled cook through the same cook pipeline a manual
-    # bake uses (constraint 8). Paths that may contain spaces (the DLL,
+    # bake uses (constraint 8). Paths that may contain spaces (the VBS,
     # workspace, app root) are double-quoted; the RecipeId is a ULID with no
     # spaces or quotes. The argv carries NO secret -- the bound Chef's Key is
     # read from Windows Credential Manager at fire time.
-    $argString = '"' + $dllPath + '" --run-scheduled-recipe ' + $RecipeIdArg + ' --workspace "' + $WorkspaceFull + '" --approot "' + $appDir + '"'
+    $argString = '"' + $vbsPath + '" --pax-wait --run-scheduled-recipe ' + $RecipeIdArg + ' --workspace "' + $WorkspaceFull + '" --approot "' + $appDir + '"'
 
     $taskName = Get-WindowsTaskNameForRecipe -RecipeIdArg $RecipeIdArg
 
     try {
-        $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $argString -WorkingDirectory $binDir
+        $action = New-ScheduledTaskAction -Execute $wscriptPath -Argument $argString -WorkingDirectory $binDir
         $trigger = New-RecurrenceTrigger -Recurrence $rec
         $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive
         # Doctrine knobs:

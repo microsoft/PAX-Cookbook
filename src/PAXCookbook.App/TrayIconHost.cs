@@ -87,7 +87,12 @@ internal static class TrayIconHost
                 var dll = DotNetLaunch.OwnDllPath();
                 if (File.Exists(dll))
                 {
-                    var psi = new ProcessStartInfo(dotnet) { UseShellExecute = false };
+                    // CreateNoWindow suppresses dotnet.exe's console window.
+                    var psi = new ProcessStartInfo(dotnet)
+                    {
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    };
                     psi.ArgumentList.Add(dll);
                     Process.Start(psi);
                 }

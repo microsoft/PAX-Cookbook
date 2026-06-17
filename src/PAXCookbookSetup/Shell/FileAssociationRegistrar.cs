@@ -48,11 +48,10 @@ public sealed class FileAssociationRegistrar
     public FileAssociationRegistrationResult Register(string installRoot)
     {
         var appExe = ShortcutCatalog.AppExePath(installRoot);
-        var dotnet = DotNetLaunch.DotNetExePath();
-        var appDll = DotNetLaunch.AppDllPath(installRoot);
-        // WDAC-safe: signed dotnet.exe host + app DLL. DefaultIcon still uses the
-        // apphost EXE (icon reads are allowed).
-        var command = $"\"{dotnet}\" \"{appDll}\" \"%1\"";
+        // WDAC-safe + NO console window: wscript.exe runs the shipped launch.vbs,
+        // which starts the signed dotnet.exe host hidden. DefaultIcon still uses
+        // the apphost EXE (icon reads are allowed).
+        var command = DotNetLaunch.VbsLauncherCommand(installRoot, "\"%1\"");
         var registered = new List<string>();
 
         foreach (var a in Associations)

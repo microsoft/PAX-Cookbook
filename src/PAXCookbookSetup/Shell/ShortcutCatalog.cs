@@ -40,21 +40,22 @@ public static class ShortcutCatalog
     }
 
     // The one canonical launch shortcut, shared by the Start Menu and Desktop.
-    // WDAC-safe: target the Microsoft-signed dotnet.exe host and pass the app
-    // DLL plus the canonical production workspace/app root as arguments. The
-    // icon still comes from the apphost EXE (icon reads are allowed).
+    // WDAC-safe AND console-free: target the Microsoft-signed wscript.exe on the
+    // shipped launch.vbs, which starts the signed dotnet.exe host hidden (no
+    // blank terminal window). The icon still comes from the apphost EXE (icon
+    // reads are allowed).
     private static ShortcutDefinition PrimaryDefinition(string installRoot, string kind = "start-menu")
     {
-        var dotnet = DotNetLaunch.DotNetExePath();
-        var appDll = DotNetLaunch.AppDllPath(installRoot);
         var appExe = AppExePath(installRoot);
         var appDir = Path.GetDirectoryName(appExe)!;
         var workspacePath = Path.Combine(installRoot, ProductConstants.WorkspaceFolderName);
         var appRootPath   = Path.Combine(installRoot, ProductConstants.AppRootFolderName);
-        var launchArgs = $"\"{appDll}\" --workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
+        var argTail = $"--workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
         return new ShortcutDefinition(
-            Kind: kind, Name: kind == "desktop" ? DesktopName : PrimaryName, Target: dotnet,
-            Arguments: launchArgs, WorkingDirectory: appDir,
+            Kind: kind, Name: kind == "desktop" ? DesktopName : PrimaryName,
+            Target: DotNetLaunch.WScriptExePath(),
+            Arguments: DotNetLaunch.VbsLauncherArguments(installRoot, argTail),
+            WorkingDirectory: appDir,
             Aumid: ProductConstants.Aumid, IconLocation: appExe + ",0",
             ExcludeFromRecommended: false, OrderHint: 0);
     }

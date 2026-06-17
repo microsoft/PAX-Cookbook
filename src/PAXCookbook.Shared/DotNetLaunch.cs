@@ -45,6 +45,52 @@ public static class DotNetLaunch
         => Path.Combine(installRoot, ProductConstants.AppRootFolderName,
                         ProductConstants.BinRootFolderName, ProductConstants.AppExeName);
 
+    // dotnet.exe is a CONSOLE app, so launching it from a shortcut / Run key /
+    // protocol / file-association would flash a blank terminal window. The
+    // shell-invoked launches instead run the Microsoft-signed wscript.exe on the
+    // shipped launch.vbs, which starts dotnet hidden (window style 0). C#
+    // Process.Start callers use CreateNoWindow=true instead.
+    public const string WScriptExeName = "wscript.exe";
+    public const string LaunchVbsName = "launch.vbs";
+
+    // Full path to the Microsoft-signed Windows Script Host (windowed/no-console
+    // wscript.exe). Falls back to the bare name (PATH) when SystemRoot is unset.
+    public static string WScriptExePath()
+    {
+        try
+        {
+            var sysRoot = Environment.GetEnvironmentVariable("SystemRoot");
+            if (!string.IsNullOrEmpty(sysRoot))
+            {
+                var p = Path.Combine(sysRoot, "System32", WScriptExeName);
+                if (File.Exists(p)) return p;
+            }
+        }
+        catch { /* fall back to PATH resolution */ }
+        return WScriptExeName;
+    }
+
+    // <installRoot>\App\bin\launch.vbs — the hidden launcher (ships in the
+    // payload next to the app DLL; resolves dotnet + the DLL relative to itself).
+    public static string LaunchVbsPath(string installRoot)
+        => Path.Combine(installRoot, ProductConstants.AppRootFolderName,
+                        ProductConstants.BinRootFolderName, LaunchVbsName);
+
+    // The argument string passed to wscript.exe to launch the app hidden:
+    //   "<launch.vbs>" <argTail>
+    // argTail is the already-quoted argument list forwarded to the app (may be
+    // empty). Used for the .lnk Arguments field (Target = wscript.exe).
+    public static string VbsLauncherArguments(string installRoot, string argTail)
+    {
+        var vbs = LaunchVbsPath(installRoot);
+        return string.IsNullOrEmpty(argTail) ? $"\"{vbs}\"" : $"\"{vbs}\" {argTail}";
+    }
+
+    // A full shell command line that launches the app hidden via wscript +
+    // launch.vbs (for HKCU Run / protocol / file-association registry commands).
+    public static string VbsLauncherCommand(string installRoot, string argTail)
+        => $"\"{WScriptExePath()}\" {VbsLauncherArguments(installRoot, argTail)}";
+
     // True when ANY whitespace-delimited, quote-aware token of a command line is
     // a filesystem path that resolves under installRoot. Used for positive-ID of
     // OUR registry commands / shortcuts before removal: with the dotnet launch

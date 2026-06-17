@@ -40,16 +40,14 @@ public sealed class AutoStartRegistrar
     public AutoStartRegistrationResult Register(string installRoot)
     {
         var installRootFull = Path.GetFullPath(installRoot);
-        var dotnet = DotNetLaunch.DotNetExePath();
-        var appDll = Path.GetFullPath(DotNetLaunch.AppDllPath(installRootFull));
         var workspacePath = Path.Combine(installRootFull, ProductConstants.WorkspaceFolderName);
         var appRootPath = Path.Combine(installRootFull, ProductConstants.AppRootFolderName);
 
-        // WDAC-safe headless auto-start: run the Microsoft-signed dotnet.exe host
-        // with the app DLL (the unsigned apphost cannot be executed). Same
-        // --headless/--workspace/--approot contract as before.
-        var command =
-            $"\"{dotnet}\" \"{appDll}\" --headless --workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
+        // WDAC-safe headless auto-start with NO console window: wscript.exe runs
+        // the shipped launch.vbs, which starts the signed dotnet.exe host hidden.
+        // Same --headless/--workspace/--approot contract as before.
+        var argTail = $"--headless --workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
+        var command = DotNetLaunch.VbsLauncherCommand(installRootFull, argTail);
 
         _registry.SetString(RootSubKey, ValueName, command);
 
