@@ -1183,7 +1183,7 @@ export function BakesWorkspace() {
                         type="button"
                         className="dvw-btn dvw-btn--ghost"
                         onClick={() =>
-                          downloadBakeLogText(
+                          void downloadBakeLogText(
                             logText,
                             detail?.recipe?.name ?? null,
                             detail?.startedAt ?? detail?.createdAt ?? null,
