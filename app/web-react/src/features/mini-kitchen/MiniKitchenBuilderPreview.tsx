@@ -207,19 +207,19 @@ interface ActionStatus {
 // never claims the recipe failed to save.
 function describeScheduleFailure(error: string | null, status: number): string {
   if (status === 409 || error === 'schedule_requires_chef_key') {
-    return 'Saved, but scheduling needs a Chef\u2019s Key. Bind one and save again.';
+    return 'The scheduled run needs a Chef\u2019s Key. Bind one and save again.';
   }
   if (status === 400 || error === 'invalid_recurrence') {
-    return 'Saved, but the schedule time was invalid. Adjust it and save again.';
+    return 'The schedule time was invalid. Adjust it and save again.';
   }
   if (status === 412 || error === 'recipe_invalid') {
-    return 'Saved, but the recipe could not be scheduled in its current state.';
+    return 'The recipe could not be scheduled in its current state.';
   }
   if (status === 404) {
-    return 'Saved, but the recipe could not be found to schedule. Refresh and try again.';
+    return 'The recipe could not be found to schedule. Refresh and try again.';
   }
   // 500 / 502 schedule_registration_failed, network errors, anything else.
-  return 'Saved, but Windows could not register the schedule. Try saving again.';
+  return 'The scheduled run could not be registered with Windows Task Scheduler. Try saving again, or set up the schedule later from the recipe settings.';
 }
 
 // Fold a schedule reconcile outcome into the recipe save status. The recipe is
@@ -801,7 +801,7 @@ export function MiniKitchenBuilderPreview({
       }
       return {
         kind: 'info',
-        text: 'Saved, but the schedule could not be removed. Try saving again.',
+        text: 'The schedule could not be turned off. Try saving again.',
       };
     }
 
@@ -817,11 +817,6 @@ export function MiniKitchenBuilderPreview({
     }
     setBusy(true);
     setActionStatus({ kind: 'info', text: savedRecipeId ? 'Updating…' : 'Saving…' });
-
-    const droppedNote =
-      createBuild.droppedForSchema.length > 0
-        ? ` A few builder-only details are kept in the export file but not in the saved recipe: ${createBuild.droppedForSchema.join(' ')}`
-        : '';
 
     try {
       if (savedRecipeId) {
@@ -841,7 +836,7 @@ export function MiniKitchenBuilderPreview({
           const sched = await reconcileSchedule(savedRecipeId);
           setActionStatus(
             buildSaveStatus(
-              'Updated the saved recipe in PAX Cookbook.' + droppedNote,
+              'Recipe saved.',
               sched,
             ),
           );
@@ -871,7 +866,7 @@ export function MiniKitchenBuilderPreview({
           const sched = newId ? await reconcileSchedule(newId) : null;
           setActionStatus(
             buildSaveStatus(
-              'Saved as a full recipe in PAX Cookbook.' + droppedNote,
+              'Recipe saved.',
               sched,
             ),
           );

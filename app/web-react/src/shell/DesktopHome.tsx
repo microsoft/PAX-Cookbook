@@ -711,7 +711,7 @@ function LastBakePanel({
           </h2>
         </header>
         <p className="dvw-card__muted" role="status">
-          Your recent bakes will appear here once PAX Cookbook is reachable.
+          Your first bake results will appear here after you run a recipe.
         </p>
       </section>
     );
@@ -913,7 +913,7 @@ function RecentRecipesPanel({
 
       {phase === 'error' ? (
         <p className="dvw-card__muted" role="status">
-          Recipes load here once PAX Cookbook is reachable.
+          Your recipes will appear here once you create one.
         </p>
       ) : null}
 
@@ -1054,7 +1054,7 @@ function RecentOutputsPanel({
 
       {phase === 'error' ? (
         <p className="dvw-card__muted" role="status">
-          Your output files will appear here once PAX Cookbook is reachable.
+          Your output files will appear here after your first bake.
         </p>
       ) : null}
 

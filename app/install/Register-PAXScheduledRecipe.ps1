@@ -379,7 +379,7 @@ function Invoke-Register {
     Write-RegistrarLine ('  recipeId        : ' + $RecipeIdArg)
     Write-RegistrarLine ('  scheduledTaskId : ' + $ScheduledTaskIdArg)
     Write-RegistrarLine ('  recurrence      : ' + ($rec | ConvertTo-Json -Compress -Depth 5))
-    Write-RegistrarLine ('  exe             : ' + $exePath)
+    Write-RegistrarLine ('  execute         : ' + $wscriptPath)
     Write-RegistrarLine ('  arguments       : ' + $argString)
     exit 0
 }
