@@ -10,6 +10,7 @@ namespace PAXCookbookSetup.Gui;
 // to upgrade); otherwise it reports "not found".
 public sealed class PrerequisiteDetector
 {
+    public static readonly Version MinDotNet8 = new(8, 0);
     public static readonly Version MinPowerShell = new(7, 2);
     public static readonly Version MinPython = new(3, 9);
 
@@ -19,11 +20,41 @@ public sealed class PrerequisiteDetector
 
     private readonly record struct Candidate(bool Located, string? Path, Version? Version, string Source);
 
+    public PrerequisiteStatus DetectDotNet8DesktopRuntime()
+        => EvaluateDotNet8();
+
     public PrerequisiteStatus DetectPowerShell7()
         => Evaluate(PrerequisiteKind.PowerShell7, "PowerShell 7", MinPowerShell, PowerShellCandidates());
 
     public PrerequisiteStatus DetectPython()
         => Evaluate(PrerequisiteKind.Python, "Python", MinPython, PythonCandidates());
+
+    // Check the registry for .NET 8 Desktop Runtime. The WindowsDesktop app
+    // framework is installed in HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App
+    // with subkeys named after versions (e.g. "8.0.11"). We look for any 8.0.x version.
+    private PrerequisiteStatus EvaluateDotNet8()
+    {
+        const string root = @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App";
+        var versions = _probe.EnumerateHklmSubKeyNames(root).ToList();
+        if (!versions.Any())
+            return PrerequisiteStatus.Missing(PrerequisiteKind.DotNet8DesktopRuntime, ".NET 8 Desktop Runtime");
+
+        foreach (var verStr in versions.OrderByDescending(v => v))
+        {
+            if (TryParseVersion(verStr, out var version) && version >= MinDotNet8 && version.Major == 8)
+            {
+                return new PrerequisiteStatus(
+                    PrerequisiteKind.DotNet8DesktopRuntime,
+                    ".NET 8 Desktop Runtime",
+                    true,
+                    FormatVersion(version),
+                    null,
+                    "Registry");
+            }
+        }
+
+        return PrerequisiteStatus.Missing(PrerequisiteKind.DotNet8DesktopRuntime, ".NET 8 Desktop Runtime");
+    }
 
     // -----------------------------------------------------------------
     // Search-order candidate generators (lazy — probing stops as soon as

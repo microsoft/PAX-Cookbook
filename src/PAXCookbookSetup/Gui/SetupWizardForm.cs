@@ -44,9 +44,9 @@ internal sealed class SetupWizardForm : Form
                   _panelProgress = null!, _panelComplete = null!;
 
     // Prerequisites screen
-    private Label _prereqHeading = null!, _ps7Line = null!, _pyLine = null!, _prereqIntro = null!, _prereqNote = null!;
+    private Label _prereqHeading = null!, _dotnet8Line = null!, _ps7Line = null!, _pyLine = null!, _prereqIntro = null!, _prereqNote = null!;
     private CheckBox _chkInstallPs7 = null!, _chkInstallPy = null!;
-    private PrerequisiteStatus? _ps7Status, _pyStatus;
+    private PrerequisiteStatus? _dotnet8Status, _ps7Status, _pyStatus;
 
     // Location screen
     private TextBox _txtPath = null!;
@@ -183,8 +183,9 @@ internal sealed class SetupWizardForm : Form
     {
         var p = new Panel { Padding = new Padding(28, 24, 28, 16) };
         _prereqHeading = Body("Checking prerequisites…", 28, 24, 612, 28, 11F, FontStyle.Bold);
-        _ps7Line = Body("• PowerShell 7: checking…", 40, 70, 600, 24);
-        _pyLine = Body("• Python: checking…", 40, 100, 600, 24);
+        _dotnet8Line = Body("• .NET 8 Desktop Runtime: checking…", 40, 70, 600, 24);
+        _ps7Line = Body("• PowerShell 7: checking…", 40, 100, 600, 24);
+        _pyLine = Body("• Python: checking…", 40, 130, 600, 24);
         _prereqIntro = Body("", 28, 146, 612, 24, 10F, FontStyle.Bold);
         _chkInstallPs7 = new CheckBox { Text = "Install PowerShell 7 automatically", Location = new Point(44, 176), Size = new Size(560, 24), Checked = true, Visible = false };
         _chkInstallPy = new CheckBox { Text = "Install Python automatically", Location = new Point(44, 204), Size = new Size(560, 24), Checked = true, Visible = false };
@@ -194,6 +195,7 @@ internal sealed class SetupWizardForm : Form
             28, 250, 612, 60, 9F);
         _prereqNote.ForeColor = Color.FromArgb(0x60, 0x60, 0x60);
         p.Controls.Add(_prereqHeading);
+        p.Controls.Add(_dotnet8Line);
         p.Controls.Add(_ps7Line);
         p.Controls.Add(_pyLine);
         p.Controls.Add(_prereqIntro);
@@ -396,6 +398,7 @@ internal sealed class SetupWizardForm : Form
     private void StartDetection()
     {
         _prereqHeading.Text = "Checking prerequisites…";
+        _dotnet8Line.Text = "• .NET 8 Desktop Runtime: checking…";
         _ps7Line.Text = "• PowerShell 7: checking…";
         _pyLine.Text = "• Python: checking…";
         _prereqIntro.Text = "";
@@ -405,36 +408,52 @@ internal sealed class SetupWizardForm : Form
 
         Task.Run(() =>
         {
+            var dotnet8 = _detector.DetectDotNet8DesktopRuntime();
             var ps7 = _detector.DetectPowerShell7();
             var py = _detector.DetectPython();
-            BeginInvokeSafe(() => RenderPrereq(ps7, py));
+            BeginInvokeSafe(() => RenderPrereq(dotnet8, ps7, py));
         });
     }
 
-    private void RenderPrereq(PrerequisiteStatus ps7, PrerequisiteStatus py)
+    private void RenderPrereq(PrerequisiteStatus dotnet8, PrerequisiteStatus ps7, PrerequisiteStatus py)
     {
+        _dotnet8Status = dotnet8;
         _ps7Status = ps7;
         _pyStatus = py;
+        _dotnet8Line.Text = (dotnet8.Satisfied ? "✓  " : "⚠  ") + dotnet8.ToDisplayLine();
         _ps7Line.Text = (ps7.Satisfied ? "✓  " : "⚠  ") + ps7.ToDisplayLine();
         _pyLine.Text = (py.Satisfied ? "✓  " : "⚠  ") + py.ToDisplayLine();
+        _dotnet8Line.ForeColor = dotnet8.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0xC8, 0x1F, 0x1F);
         _ps7Line.ForeColor = ps7.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0x9A, 0x6A, 0x00);
         _pyLine.ForeColor = py.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0x9A, 0x6A, 0x00);
 
-        bool allMet = ps7.Satisfied && py.Satisfied;
-        _prereqHeading.Text = allMet ? "All prerequisites met" : "Prerequisites";
-        if (allMet)
+        bool dotnet8Met = dotnet8.Satisfied;
+        bool optionalsMet = ps7.Satisfied && py.Satisfied;
+        
+        if (!dotnet8Met)
         {
+            _prereqHeading.Text = "Required prerequisite missing";
+            _prereqIntro.Text = ".NET 8 Desktop Runtime is required to run PAX Cookbook. Click Install to download and install it automatically.";
+            _chkInstallPs7.Visible = false;
+            _chkInstallPy.Visible = false;
+            _btnNext.Enabled = false;
+        }
+        else if (optionalsMet)
+        {
+            _prereqHeading.Text = "All prerequisites met";
             _prereqIntro.Text = "All prerequisites are present. Click Next to continue.";
             _chkInstallPs7.Visible = false;
             _chkInstallPy.Visible = false;
+            _btnNext.Enabled = true;
         }
         else
         {
+            _prereqHeading.Text = "Prerequisites";
             _prereqIntro.Text = "The following will be installed automatically:";
             _chkInstallPs7.Visible = !ps7.Satisfied;
             _chkInstallPy.Visible = !py.Satisfied;
+            _btnNext.Enabled = true;
         }
-        _btnNext.Enabled = true;
     }
 
     // -----------------------------------------------------------------
@@ -461,6 +480,7 @@ internal sealed class SetupWizardForm : Form
         _log.Write("wizard-install-begin", fields: new Dictionary<string, object?>
         {
             ["installRoot"] = _installRoot,
+            ["dotnet8"] = _dotnet8Status?.DetectionSource ?? "unknown",
             ["ps7"] = _ps7Status?.DetectionSource ?? "unknown",
             ["python"] = _pyStatus?.DetectionSource ?? "unknown"
         });
@@ -470,8 +490,8 @@ internal sealed class SetupWizardForm : Form
         AppendLog("Installing PAX Cookbook to:");
         AppendLog("  " + _installRoot);
 
-        // Prerequisites the user opted to install (checkbox shown + checked only
-        // when detection did NOT already find a satisfying version).
+        // .NET 8 is always required. PowerShell 7 and Python are optional (checkboxes).
+        bool wantDotNet8 = _dotnet8Status is { Satisfied: false };
         bool wantPs7 = _ps7Status is { Satisfied: false } && _chkInstallPs7.Checked;
         bool wantPy = _pyStatus is { Satisfied: false } && _chkInstallPy.Checked;
 
@@ -487,20 +507,22 @@ internal sealed class SetupWizardForm : Form
                 Action<string> progress = msg =>
                     BeginInvokeSafe(() => { _progressStatus.Text = msg; AppendLog(msg); });
 
-                if (wantPs7 || wantPy)
+                if (wantDotNet8 || wantPs7 || wantPy)
                 {
-                    if (wantPs7)
+                    if (wantDotNet8)
                         BeginInvokeSafe(() => AppendLog(
-                            "Note: you may see a Windows security prompt to install PowerShell 7."));
+                            "Installing prerequisites…"));
 
                     using var downloader = new HttpPrereqDownloader();
                     var coordinator = new PrerequisiteCoordinator(new IPrerequisiteInstaller[]
                     {
+                        new DotNet8DesktopRuntimeInstaller(downloader, new RealElevatedLauncher(), _detector),
                         new PowerShell7Installer(downloader, new RealElevatedLauncher(), _detector),
                         new PythonInstaller(downloader, new RealSilentLauncher(), _detector)
                     });
                     var wanted = new Dictionary<PrerequisiteKind, bool>
                     {
+                        [PrerequisiteKind.DotNet8DesktopRuntime] = wantDotNet8,
                         [PrerequisiteKind.PowerShell7] = wantPs7,
                         [PrerequisiteKind.Python] = wantPy
                     };
@@ -585,6 +607,8 @@ internal sealed class SetupWizardForm : Form
     private string BuildPrereqWarning()
     {
         var warns = new List<string>();
+        if (_dotnet8Status is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.DotNet8DesktopRuntime))
+            warns.Add("⚠ .NET 8 Desktop Runtime is not installed. Try installing it manually from https://dotnet.microsoft.com/download/dotnet/8.0");
         if (_ps7Status is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.PowerShell7))
             warns.Add("⚠ PowerShell 7 is not installed. Bakes need it — install it later from https://aka.ms/powershell.");
         if (_pyStatus is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.Python))

@@ -1,11 +1,11 @@
 namespace PAXCookbookSetup.Gui;
 
-// Host allow-list for prerequisite downloads. The two prerequisite installers
-// fetch ONLY from Microsoft's PowerShell GitHub releases and python.org, so
-// every URL — whether hard-coded, returned by the GitHub API, or a redirect
-// target — is validated against this list before any request is made. This is
-// the SSRF / open-relay guard for the download seam (mirrors the Pantry
-// download-proxy host validation already sanctioned in constraint 1).
+// Host allow-list for prerequisite and payload downloads. Installers fetch
+// ONLY from Microsoft / GitHub / python.org hosts. Every URL — whether
+// hard-coded, returned by the GitHub API, or a redirect target — is validated
+// against this list before any request is made. This is the SSRF / open-relay
+// guard for the download seam (mirrors the Pantry download-proxy host
+// validation already sanctioned in constraint 1).
 public static class PrereqDownloadHosts
 {
     // Exact hosts or parent suffixes (".x" matches host == x or *.x).
@@ -14,6 +14,7 @@ public static class PrereqDownloadHosts
         "github.com",
         "githubusercontent.com",
         "python.org",
+        "microsoft.com",               // .NET 8 Desktop Runtime downloads
     };
 
     // True only for an absolute https URL whose host is GitHub or python.org.

@@ -11,8 +11,9 @@ public sealed record WizardInstallResult(bool Success, int ExitCode, string? Err
 // Drives a PAX Cookbook install for the GUI wizard, reusing the SAME payload
 // resolution + manifest verification + InstallVerb path as the CLI `install`
 // verb (Program.RunPayloadVerb). The only differences are (a) it reports
-// coarse progress through a callback for the Progress screen and (b) it
-// returns a structured result instead of writing to the console.
+// coarse progress through a callback for the Progress screen, (b) it downloads
+// the payload from GitHub if not embedded, and (c) it returns a structured
+// result instead of writing to the console.
 //
 // Prerequisite (PowerShell 7 / Python) installation is intentionally NOT
 // performed here — that is wired into the wizard's Progress screen in a
@@ -20,36 +21,61 @@ public sealed record WizardInstallResult(bool Success, int ExitCode, string? Err
 // and shell integration.
 public static class WizardInstallRunner
 {
-    public static WizardInstallResult Run(
+    // Async entry point — downloads payload if needed, then installs.
+    public static async Task<WizardInstallResult> RunAsync(
         string installRoot,
         string? payloadRootOverride,
         Action<string> progress,
         SetupLogger log,
-        IShellOperations shellOps)
+        IShellOperations shellOps,
+        CancellationToken cancel = default)
     {
         string? tempExtractRoot = null;
+        string? downloadedZipPath = null;
         try
         {
             IPayloadSourceResolver resolver;
             if (!string.IsNullOrEmpty(payloadRootOverride))
+            {
                 resolver = new DirectoryPayloadSourceResolver(payloadRootOverride);
+            }
             else if (EmbeddedPayloadSourceResolver.HasEmbeddedPayload())
+            {
+                progress("Extracting installation files…");
                 resolver = new EmbeddedPayloadSourceResolver();
+            }
             else if (LocalCachePayloadSourceResolver.HasCache(installRoot))
+            {
                 resolver = new LocalCachePayloadSourceResolver(installRoot);
+            }
             else
-                return Fail(SetupExitCodes.UsageError,
-                    "No installation payload is available. Run the distributable Setup EXE.");
+            {
+                // No embedded payload — download from GitHub
+                var downloader = new PayloadDownloader(log, progress);
+                var downloadResult = await downloader.DownloadAsync(cancel);
+                
+                if (!downloadResult.Success || string.IsNullOrEmpty(downloadResult.ZipPath))
+                {
+                    return Fail(SetupExitCodes.InstallFailed,
+                        downloadResult.Error ?? "Unable to download PAX Cookbook. Please check your internet connection.");
+                }
+                
+                downloadedZipPath = downloadResult.ZipPath;
+                progress("Extracting installation files…");
+                resolver = new DownloadedPayloadSourceResolver(downloadedZipPath);
+            }
 
-            progress("Preparing installation files…");
             var src = resolver.Resolve();
             if (!src.Success || string.IsNullOrEmpty(src.PayloadRoot))
             {
                 tempExtractRoot = src.TempExtractionRoot;
                 return Fail(SetupExitCodes.InstallFailed, $"Could not prepare files: {src.Error}");
             }
-            if (string.Equals(src.Origin, "embedded", StringComparison.Ordinal))
+            if (string.Equals(src.Origin, "embedded", StringComparison.Ordinal) ||
+                string.Equals(src.Origin, "downloaded", StringComparison.Ordinal))
+            {
                 tempExtractRoot = src.TempExtractionRoot;
+            }
 
             var payloadRoot = src.PayloadRoot!;
             var manifestPath = Path.Combine(payloadRoot, "manifest.json");
@@ -61,7 +87,8 @@ public static class WizardInstallRunner
             catch (Exception ex) { return Fail(SetupExitCodes.InstallFailed, $"Payload manifest is invalid: {ex.Message}"); }
 
             if (string.Equals(src.Origin, "embedded", StringComparison.Ordinal) ||
-                string.Equals(src.Origin, "local-cache", StringComparison.Ordinal))
+                string.Equals(src.Origin, "local-cache", StringComparison.Ordinal) ||
+                string.Equals(src.Origin, "downloaded", StringComparison.Ordinal))
             {
                 var v = PayloadManifestVerifier.Verify(payloadRoot, m);
                 if (!v.Ok)
@@ -83,6 +110,10 @@ public static class WizardInstallRunner
             progress("Finishing up…");
             return new WizardInstallResult(true, SetupExitCodes.Ok, null);
         }
+        catch (OperationCanceledException)
+        {
+            return Fail(SetupExitCodes.GenericError, "Installation was cancelled.");
+        }
         catch (Exception ex)
         {
             log.Write("wizard-install-exception", "error",
@@ -91,9 +122,27 @@ public static class WizardInstallRunner
         }
         finally
         {
+            // Cleanup extraction temp folder
             if (!string.IsNullOrEmpty(tempExtractRoot))
+            {
                 EmbeddedPayloadSourceResolver.TryCleanup(tempExtractRoot);
+                DownloadedPayloadSourceResolver.TryCleanup(tempExtractRoot);
+            }
+            // Cleanup downloaded zip
+            PayloadDownloader.Cleanup(downloadedZipPath);
         }
+    }
+
+    // Sync wrapper for backwards compatibility
+    public static WizardInstallResult Run(
+        string installRoot,
+        string? payloadRootOverride,
+        Action<string> progress,
+        SetupLogger log,
+        IShellOperations shellOps)
+    {
+        return RunAsync(installRoot, payloadRootOverride, progress, log, shellOps, CancellationToken.None)
+            .GetAwaiter().GetResult();
     }
 
     private static WizardInstallResult Fail(int code, string message)

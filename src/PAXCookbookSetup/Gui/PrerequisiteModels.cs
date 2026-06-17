@@ -3,6 +3,7 @@ namespace PAXCookbookSetup.Gui;
 // Which external prerequisite a status describes.
 public enum PrerequisiteKind
 {
+    DotNet8DesktopRuntime,
     PowerShell7,
     Python
 }

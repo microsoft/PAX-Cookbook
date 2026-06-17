@@ -1,8 +1,9 @@
 #requires -Version 7.4
 
 # =====================================================================
-# Build-Setup.ps1  Build the distributable single-file installer
-# PAX_Cookbook_Setup.exe with an embedded payload.
+# Build-Setup.ps1  Build the distributable bootstrapper installer
+# PAX_Cookbook_Setup.exe (lightweight, downloads payload at runtime)
+# and the separate PAX_Cookbook_Payload.zip.
 #
 # WHAT THIS SCRIPT DOES
 #
@@ -14,15 +15,17 @@
 #      repair/update.
 #   4. Writes the payload manifest (manifest.json) with SHA-256 + size
 #      for every installed file.
-#   5. Compresses the payload and publishes a self-contained single-file
-#      Setup EXE that carries the payload as an embedded resource.
-#   6. Emits the distributable as PAX_Cookbook_Setup.exe.
+#   5. Compresses the payload into PAX_Cookbook_Payload.zip.
+#   6. Publishes a self-contained single-file Setup EXE that downloads
+#      the payload from GitHub at runtime (no embedded payload).
+#   7. Verifies artifact sizes are within expected bounds.
 #
 # OUTPUTS (all under gitignored folders)
 #
 #   artifacts\setup\payload\                  staged payload + manifest
 #   artifacts\setup\PAXCookbookSetup.exe      built single-file installer
-#   dist\setup\PAX_Cookbook_Setup.exe         distributable / Release asset
+#   dist\setup\PAX_Cookbook_Setup.exe         distributable Setup (bootstrapper)
+#   dist\setup\PAX_Cookbook_Payload.zip       distributable payload (Release asset)
 #   artifacts\setup\build.log                 full build log
 #
 # HARD RULES
@@ -33,6 +36,8 @@
 #   * No network calls. No git operations. No signing.
 #   * The installed App is framework-dependent (.NET 8 Desktop Runtime
 #     required at runtime), matching the proven production install.
+#   * Setup EXE must be < 80 MiB (self-contained, no trimming for WinForms).
+#   * Payload ZIP must be < 25 MiB (framework-dependent App).
 # =====================================================================
 
 [CmdletBinding()]
@@ -187,20 +192,16 @@ Invoke-Step '[4/7] publish Setup stage-1 (self-contained, no payload)' {
 $stage1Exe = Join-Path $pubSetupStage 'PAXCookbookSetup.exe'
 if (-not (Test-Path -LiteralPath $stage1Exe)) { throw "stage-1 Setup EXE missing: $stage1Exe" }
 
-# Setup\* (installed repair/update runtime) + root copy (manifest target).
-$setupDest = Join-Path $payload 'Setup'
-New-Item -ItemType Directory -Force -Path $setupDest | Out-Null
-Copy-Item (Join-Path $pubSetupStage '*') $setupDest -Recurse -Force
-Copy-Item $stage1Exe (Join-Path $payload 'PAXCookbookSetup.exe') -Force
+# In bootstrapper model, the payload contains ONLY the App. The Setup EXE
+# is downloaded separately when needed for repair/update. This keeps the
+# payload small (~20 MiB instead of ~80 MiB).
 
 # ---------------------------------------------------------------------
 # [5/7] Write manifest.json
 # ---------------------------------------------------------------------
 Invoke-Step '[5/7] write manifest.json' {
-    $appExeStaged   = Join-Path $payload 'App\bin\PAX Cookbook.exe'
-    $setupExeStaged = Join-Path $payload 'PAXCookbookSetup.exe'
-    if (-not (Test-Path -LiteralPath $appExeStaged))   { throw "missing staged App exe:   $appExeStaged" }
-    if (-not (Test-Path -LiteralPath $setupExeStaged)) { throw "missing staged Setup exe: $setupExeStaged" }
+    $appExeStaged = Join-Path $payload 'App\bin\PAX Cookbook.exe'
+    if (-not (Test-Path -LiteralPath $appExeStaged)) { throw "missing staged App exe: $appExeStaged" }
 
     $requiredRuntime = @(
         'App\bin\PAX Cookbook.exe'
@@ -236,15 +237,8 @@ Invoke-Step '[5/7] write manifest.json' {
             sizeBytes = $_.Length
         })
     }
-    # Setup\* subtree entries.
-    Get-ChildItem (Join-Path $payload 'Setup') -File -Recurse | ForEach-Object {
-        $rel = $_.FullName.Substring($payload.Length).TrimStart('\','/')
-        $files.Add([ordered]@{
-            relativeInstallPath = $rel
-            sha256 = HashOf $_.FullName
-            sizeBytes = $_.Length
-        })
-    }
+    # Note: Setup EXE is not included in payload in bootstrapper model.
+    # Repair/update downloads it separately.
 
     $build = if ([string]::IsNullOrWhiteSpace($BuildId)) {
         'setup-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
@@ -271,8 +265,9 @@ Invoke-Step '[5/7] write manifest.json' {
         payload = [ordered]@{
             setupExe = [ordered]@{
                 name = 'PAXCookbookSetup.exe'
-                sha256 = HashOf $setupExeStaged
-                sizeBytes = SizeOf $setupExeStaged
+                sha256 = HashOf $stage1Exe
+                sizeBytes = SizeOf $stage1Exe
+                note = 'Not included in payload; downloaded separately for repair/update'
             }
             appExe = [ordered]@{
                 name = 'PAX Cookbook.exe'
@@ -288,9 +283,9 @@ Invoke-Step '[5/7] write manifest.json' {
 }
 
 # ---------------------------------------------------------------------
-# [6/7] Zip the payload
+# [6/8] Zip the payload
 # ---------------------------------------------------------------------
-Invoke-Step '[6/7] zip payload tree' {
+Invoke-Step '[6/8] zip payload tree' {
     if (Test-Path $payloadZip) { Remove-Item $payloadZip -Force }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip,
@@ -299,14 +294,17 @@ Invoke-Step '[6/7] zip payload tree' {
 }
 
 # ---------------------------------------------------------------------
-# [7/7] Publish final Setup with embedded payload
+# [7/8] Publish lightweight Setup (no embedded payload)
 # ---------------------------------------------------------------------
-Invoke-Step '[7/7] publish Setup (self-contained single-file + embedded payload)' {
+# The bootstrapper Setup downloads the payload from GitHub at runtime.
+# Note: WinForms does not support IL trimming, so we keep it self-contained
+# but unembedded. The major size reduction comes from the framework-dependent
+# App payload.
+Invoke-Step '[7/8] publish Setup (self-contained, no payload)' {
     dotnet publish (Join-Path $root 'src\PAXCookbookSetup\PAXCookbookSetup.csproj') `
         -c $Configuration -r win-x64 --self-contained true `
         -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:EnableCompressionInSingleFile=true -p:DebugType=embedded `
-        "-p:EmbeddedPayloadZip=$payloadZip" `
         -o $pubSetupFinal --nologo 2>&1 |
         Tee-Object -Append -FilePath $logFile | Out-Null
 }
@@ -316,21 +314,53 @@ if (-not (Test-Path -LiteralPath $finalSrc)) { throw "final Setup EXE missing: $
 $builtExe = Join-Path $out 'PAXCookbookSetup.exe'
 Copy-Item $finalSrc $builtExe -Force
 
-# Distributable name (user-facing download / GitHub Release asset).
+# Distributable names (user-facing downloads / GitHub Release assets).
 $distExe = Join-Path $distDir 'PAX_Cookbook_Setup.exe'
+$distPayload = Join-Path $distDir 'PAX_Cookbook_Payload.zip'
 Copy-Item $finalSrc $distExe -Force
+Copy-Item $payloadZip $distPayload -Force
 
 $finalSize = (Get-Item $distExe).Length
 $finalHash = HashOf $distExe
+$payloadSize = (Get-Item $distPayload).Length
+$payloadHash = HashOf $distPayload
+
 Log ''
-Log "ARTIFACT (built)        : $builtExe"
-Log "ARTIFACT (distributable): $distExe"
+Log "ARTIFACT (Setup)   : $distExe"
 Log ("  size  : {0:N1} MiB ({1} bytes)" -f ($finalSize/1MB), $finalSize)
 Log "  sha256: $finalHash"
 Log ''
-Log 'Build complete.'
+Log "ARTIFACT (Payload) : $distPayload"
+Log ("  size  : {0:N1} MiB ({1} bytes)" -f ($payloadSize/1MB), $payloadSize)
+Log "  sha256: $payloadHash"
+
+# ---------------------------------------------------------------------
+# [8/8] Size verification gates
+# ---------------------------------------------------------------------
+Invoke-Step '[8/8] verify artifact sizes' {
+    $maxSetupBytes = 80 * 1024 * 1024   # 80 MiB max for self-contained Setup (no trimming, WinForms)
+    $maxPayloadBytes = 25 * 1024 * 1024 # 25 MiB max for framework-dependent payload
+    
+    if ($finalSize -gt $maxSetupBytes) {
+        throw "Setup EXE too large: {0:N1} MiB > 80 MiB limit. Payload may be embedded or build issue." -f ($finalSize/1MB)
+    }
+    if ($payloadSize -gt $maxPayloadBytes) {
+        throw "Payload ZIP too large: {0:N1} MiB > 25 MiB limit. Self-contained runtime may have leaked in." -f ($payloadSize/1MB)
+    }
+    Log ("  Setup  : {0:N1} MiB (< 80 MiB limit) PASS" -f ($finalSize/1MB))
+    Log ("  Payload: {0:N1} MiB (< 25 MiB limit) PASS" -f ($payloadSize/1MB))
+}
+
+Log ''
+Log 'Build complete. TWO artifacts produced:'
+Log "  1. $distExe (bootstrapper, downloads payload at runtime)"
+Log "  2. $distPayload (uploaded to GitHub Release)"
 
 Write-Host ''
-Write-Host "DISTRIBUTABLE: $distExe"
-Write-Host ("SIZE: {0:N1} MiB" -f ($finalSize/1MB))
-Write-Host "SHA256: $finalHash"
+Write-Host "DISTRIBUTABLE (Setup)  : $distExe"
+Write-Host ("  SIZE: {0:N1} MiB" -f ($finalSize/1MB))
+Write-Host "  SHA256: $finalHash"
+Write-Host ''
+Write-Host "DISTRIBUTABLE (Payload): $distPayload"
+Write-Host ("  SIZE: {0:N1} MiB" -f ($payloadSize/1MB))
+Write-Host "  SHA256: $payloadHash"

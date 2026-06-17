@@ -14,6 +14,7 @@
     <Product>PAX Cookbook</Product>
     <AssemblyTitle>PAX Cookbook</AssemblyTitle>
     <Company>PAX Cookbook</Company>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>
