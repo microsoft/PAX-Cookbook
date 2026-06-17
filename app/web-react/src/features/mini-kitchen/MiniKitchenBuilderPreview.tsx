@@ -665,6 +665,7 @@ export function MiniKitchenBuilderPreview({
 
   function describeBrokerFailure(
     error: string | null,
+    message: string | null,
     validationErrors: unknown[] | null,
     networkError: string | null,
     status: number,
@@ -701,7 +702,13 @@ export function MiniKitchenBuilderPreview({
     if (error === 'not_found') {
       return 'That saved recipe no longer exists. Use Save to store it again as a new recipe.';
     }
-    return 'PAX Cookbook could not save the recipe. Finish the highlighted items above and try again.';
+    // Unmapped failure. Surface the broker's own error code and message so a
+    // save rejection can be diagnosed from the screen instead of another
+    // screenshot-only loop; the friendly mapped messages above already cover
+    // the known cases.
+    const codeLabel = error ?? (status > 0 ? `HTTP ${status}` : 'unknown error');
+    const detailSuffix = message ? ` \u2014 ${message}` : '';
+    return `Save failed: ${codeLabel}${detailSuffix}`;
   }
 
   // Reset the schedule card to a disabled default. Used whenever a fresh,
@@ -843,6 +850,7 @@ export function MiniKitchenBuilderPreview({
             kind: 'error',
             text: describeBrokerFailure(
               result.error,
+              result.message,
               result.validationErrors,
               result.networkError,
               result.status,
@@ -872,6 +880,7 @@ export function MiniKitchenBuilderPreview({
             kind: 'error',
             text: describeBrokerFailure(
               result.error,
+              result.message,
               result.validationErrors,
               result.networkError,
               result.status,

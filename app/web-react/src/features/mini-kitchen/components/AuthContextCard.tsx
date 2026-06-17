@@ -182,7 +182,9 @@ export function AuthContextCard({ value, onChange }: AuthContextCardProps) {
               value={boundId}
               onChange={e => {
                 setKeyClearedNote(false);
-                onChange(applyAuthChefKeyChange(value, e.target.value));
+                const selectedKey =
+                  matchingKeys.find(k => k.id === e.target.value) ?? null;
+                onChange(applyAuthChefKeyChange(value, e.target.value, selectedKey));
               }}
             >
               <option value="">

@@ -290,6 +290,14 @@ internal static class Program
         string workspacePath = ResolveWorkspacePath(args);
         string runtimeDir = Path.Combine(workspacePath, "Runtime");
         Directory.CreateDirectory(runtimeDir);
+
+        // Ensure the workspace index database exists with the full schema before
+        // any route can serve a write. The oracle created cookbook.sqlite on
+        // first launch; the native broker must do the same or the first recipe
+        // save on a fresh install fails with persist_failed (the read routes
+        // tolerate a missing database, the write routes do not).
+        WorkspaceDatabase.EnsureInitialized(workspacePath);
+
         string tokenFile = Path.Combine(runtimeDir, "broker.token");
         string importHandoffDir = ImportHandoffQueue.ResolveDir(workspacePath);
 
@@ -2056,6 +2064,13 @@ internal static class Program
             Console.WriteLine("X7_SCHEDULED_RUN=refused token=approot_unresolved");
             return 4;
         }
+
+        // A scheduled run can fire before the daemon has ever opened this
+        // workspace. Ensure the index database exists with the full schema so
+        // the read below sees a real (possibly empty) recipes table rather than
+        // a missing file. Idempotent on an already-initialized workspace.
+        WorkspaceDatabase.EnsureInitialized(workspacePath);
+
         VersionInfo versionInfo = LoadVersionInfo(Path.Combine(appRoot, "VERSION.json"));
         string engineLocalAppDataBase = EngineAcquisition.ResolveLocalAppDataBase(
             ResolveEngineLocalAppDataOverride(args));

@@ -46,6 +46,7 @@ internal static class RecipeReadinessModel
                 status: "needs-setup",
                 summary: "This recipe needs a little more setup before it can run.",
                 canPreview: false,
+                canRun: false,
                 reqs: setupReqs,
                 warnings: new List<string>(),
                 errors: new List<string> { "Some required recipe details still need to be filled in." },
@@ -91,7 +92,7 @@ internal static class RecipeReadinessModel
         if (allReady)
         {
             status = "ready";
-            summary = "This recipe is ready to preview. Running bakes is not enabled in this build yet.";
+            summary = "This recipe is ready to run.";
         }
         else if (!engineReady)
         {
@@ -124,6 +125,7 @@ internal static class RecipeReadinessModel
             status: status,
             summary: summary,
             canPreview: true,
+            canRun: allReady,
             reqs: reqs,
             warnings: warnings,
             errors: new List<string>(),
@@ -140,7 +142,7 @@ internal static class RecipeReadinessModel
     private sealed record Req(string Id, string Label, bool Met, string Detail);
 
     private static object BuildBody(
-        bool ok, string status, string summary, bool canPreview,
+        bool ok, string status, string summary, bool canPreview, bool canRun,
         List<Req> reqs, List<string> warnings, List<string> errors,
         EngineAcquisitionResult engine, object? auth, object? destination,
         string? recipeId, PaxAdapter.InvocationPlan? plan, object? details)
@@ -151,9 +153,10 @@ internal static class RecipeReadinessModel
             status,
             summary,
             canPreview,
-            // Bake / Taste / Schedule are not wired in this build; readiness is
-            // informational only and never authorizes a run.
-            canRun = false,
+            // Whether the recipe is ready to run now: the approved engine is
+            // acquired, sign-in / Chef's Key is satisfied, and the output
+            // destination is set (the same allReady signal the summary uses).
+            canRun,
             requirements = reqs.Select(r => new
             {
                 id = r.Id,

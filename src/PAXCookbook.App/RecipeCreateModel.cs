@@ -48,6 +48,8 @@ internal static class RecipeCreateModel
         // Oracle: $body = Read-RequestJson; $null -> 400 invalid_json.
         if (body is not Dictionary<string, object?> recipe)
         {
+            Console.WriteLine(
+                "[RECIPE-SAVE-DIAG] Rejected: invalid_json \u2014 request body was not a JSON object.");
             return (400, new { error = "invalid_json" });
         }
 
@@ -67,6 +69,8 @@ internal static class RecipeCreateModel
         (bool ok, List<object> errors) = RecipeValidationModel.ValidateAll(recipe);
         if (!ok)
         {
+            Console.WriteLine(
+                $"[RECIPE-SAVE-DIAG] Rejected: validation_failed \u2014 {errors.Count} validation error(s).");
             return (400, new { error = "validation_failed", errors });
         }
 
@@ -79,6 +83,8 @@ internal static class RecipeCreateModel
         // route-handler-level check owns the credential-store lookup.
         if (ChefKeyModel.TryGetRecipeModeMismatch(recipe, out string mismatchMode, out string mismatchType))
         {
+            Console.WriteLine(
+                $"[RECIPE-SAVE-DIAG] Rejected: chef_key_mode_mismatch \u2014 recipe mode {mismatchMode} vs Chef's Key type {mismatchType}.");
             return (400, new
             {
                 error = "chef_key_mode_mismatch",
@@ -115,6 +121,8 @@ internal static class RecipeCreateModel
             {
                 try { File.Delete(finalPath); } catch { /* best-effort cleanup */ }
             }
+            Console.WriteLine(
+                $"[RECIPE-SAVE-DIAG] Rejected: persist_failed \u2014 {ex.Message}");
             return (500, new
             {
                 error = "persist_failed",

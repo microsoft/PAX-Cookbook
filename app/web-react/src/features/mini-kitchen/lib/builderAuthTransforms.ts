@@ -10,6 +10,7 @@
  */
 
 import type { AuthMode, LiteRecipeAuth } from '../types';
+import type { ChefKeyItem } from '../../../host/chefKeys';
 
 /**
  * Recipe `auth.mode` -> Chef's Key `authType` (CK-1). The Authentication card
@@ -37,13 +38,22 @@ export function applyAuthModeChange(value: LiteRecipeAuth, mode: AuthMode): Lite
 
 /**
  * Chef's Key `<select>` `onChange`. An empty selection unbinds the key; any
- * other value binds it. Mode and tenant id are preserved.
+ * other value binds it. When a key is bound and it carries a stored tenant id,
+ * the recipe tenant id is auto-filled from the key so the operator never has to
+ * re-enter a value the key already holds (the client id and any secret stay in
+ * the key / Windows Credential Manager and are resolved at run time). Unbinding,
+ * or binding a key with no stored tenant id, leaves the existing tenant id and
+ * mode untouched.
  */
 export function applyAuthChefKeyChange(
   value: LiteRecipeAuth,
   rawSelectValue: string,
+  selectedKey?: ChefKeyItem | null,
 ): LiteRecipeAuth {
-  return { ...value, chefKeyId: rawSelectValue === '' ? undefined : rawSelectValue };
+  const chefKeyId = rawSelectValue === '' ? undefined : rawSelectValue;
+  const tenantId =
+    selectedKey && selectedKey.tenantId ? selectedKey.tenantId : value.tenantId;
+  return { ...value, chefKeyId, tenantId };
 }
 
 /**

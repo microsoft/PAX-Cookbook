@@ -98,6 +98,8 @@ export interface BrokerResponse<T> {
   data: T | null;
   /** Broker error code (e.g. `validation_failed`, `not_found`) when present. */
   error: string | null;
+  /** Human-readable broker message accompanying an error code, when present. */
+  message: string | null;
   /** Structured validation errors returned with a `validation_failed` response. */
   validationErrors: unknown[] | null;
   /** Raw response text, for surfacing in the UI when JSON parsing was not possible. */
@@ -287,6 +289,7 @@ async function request<T>(
       status: 0,
       data: null,
       error: null,
+      message: null,
       validationErrors: null,
       rawText: '',
       networkError: aborted ? 'cancelled' : describeError(err),
@@ -297,6 +300,7 @@ async function request<T>(
   const rawText = await safeText(response);
   let data: T | null = null;
   let errorCode: string | null = null;
+  let errorMessage: string | null = null;
   let validationErrors: unknown[] | null = null;
 
   const contentType = response.headers.get('Content-Type') ?? '';
@@ -308,6 +312,9 @@ async function request<T>(
         const bag = parsed as Record<string, unknown>;
         if (typeof bag.error === 'string') {
           errorCode = bag.error;
+        }
+        if (typeof bag.message === 'string') {
+          errorMessage = bag.message;
         }
         if (Array.isArray(bag.errors)) {
           validationErrors = bag.errors as unknown[];
@@ -323,6 +330,7 @@ async function request<T>(
     status: response.status,
     data: response.ok ? data : null,
     error: errorCode,
+    message: errorMessage,
     validationErrors,
     rawText,
     networkError: null,
