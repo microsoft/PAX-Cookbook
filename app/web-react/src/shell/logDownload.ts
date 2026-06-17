@@ -36,62 +36,73 @@ export function buildBakeLogFilename(
   return `PAX_Cookbook_Bake${middle}_${date}_${time}.log`;
 }
 
-// Trigger a browser download of `text` as a file named `filename`.
-// The File System Access API (showSaveFilePicker) is not in the standard TS DOM
-// lib; declare the minimal surface this module uses and access it via a cast so
-// it never conflicts with another module's own declaration. It is present in
+// Native "Save As" support. window.showSaveFilePicker is the File System Access
+// API; its type comes from the global declaration in PantryWorkspace.tsx, so
+// this module calls window.showSaveFilePicker DIRECTLY — exactly like the Pantry
+// "Save As" flow that works — rather than through a cast. It is present in
 // WebView2 / Chromium; the blob + anchor fallback covers anywhere it is missing.
-interface SaveFileWritable {
-  write(data: Blob | BufferSource | string): Promise<void>;
-  close(): Promise<void>;
-}
-interface SaveFileHandle {
-  createWritable(): Promise<SaveFileWritable>;
-}
-interface SaveFilePickerOptions {
-  suggestedName?: string;
-  types?: Array<{ description?: string; accept: Record<string, string[]> }>;
-}
-type ShowSaveFilePicker = (options?: SaveFilePickerOptions) => Promise<SaveFileHandle>;
 
-function getShowSaveFilePicker(): ShowSaveFilePicker | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
+// Return the file extension (with leading dot, lowercased) or null.
+function fileExtWithDot(name: string): string | null {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0 || dot === name.length - 1) {
+    return null;
   }
-  const fn = (window as unknown as { showSaveFilePicker?: ShowSaveFilePicker })
-    .showSaveFilePicker;
-  return typeof fn === 'function' ? fn : undefined;
+  return name.slice(dot).toLowerCase();
 }
 
-// Save text to disk. Prefers the native Windows "Save As" dialog
-// (showSaveFilePicker) so the user chooses the folder and filename; a cancelled
-// dialog (AbortError) is silently ignored. Falls back to a blob + anchor
-// download to the default folder when the File System Access API is unavailable
-// or fails for a non-cancel reason.
-async function saveTextToFile(text: string, suggestedName: string): Promise<void> {
-  const picker = getShowSaveFilePicker();
-  if (picker) {
-    try {
-      const handle = await picker({
-        suggestedName,
-        types: [
-          { description: 'Log files', accept: { 'text/plain': ['.log', '.txt'] } },
-        ],
-      });
-      const writable = await handle.createWritable();
-      await writable.write(text);
-      await writable.close();
-      return;
-    } catch (err) {
-      // The user cancelled the Save As dialog: do nothing (no download).
-      const name = (err as { name?: unknown } | null)?.name;
-      if (name === 'AbortError') {
-        return;
-      }
-      // Any other failure falls through to the blob download below.
+// Show the native Save As dialog and return the chosen file handle. Returns
+// 'cancelled' when the user dismisses the dialog, or null when the picker is
+// unavailable or fails for another reason (the caller then blob-downloads).
+//
+// The picker MUST be invoked while the click's user gesture is still active, so
+// callers open it BEFORE any slow work (e.g. fetching the log) — mirroring the
+// Pantry Save As flow, which opens the picker before downloading any bytes.
+async function openSaveDialog(suggestedName: string) {
+  const picker = typeof window !== 'undefined' ? window.showSaveFilePicker : undefined;
+  if (typeof picker !== 'function') {
+    return null;
+  }
+  const options: {
+    suggestedName: string;
+    types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+  } = { suggestedName };
+  const ext = fileExtWithDot(suggestedName);
+  if (ext) {
+    options.types = [
+      {
+        description: ext.slice(1).toUpperCase() + ' file',
+        accept: { 'application/octet-stream': [ext] },
+      },
+    ];
+  }
+  try {
+    return await picker(options);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      return 'cancelled' as const;
     }
+    // Surface the real reason in DevTools, then fall back to a blob download.
+    console.error('[logDownload] showSaveFilePicker failed; falling back to download', e);
+    return null;
   }
-  blobDownloadFallback(text, suggestedName);
+}
+
+// Write text to a previously chosen file handle. Returns false (and logs) when
+// the write fails, so the caller can fall back to a blob download.
+async function writeTextToHandle(
+  handle: { createWritable(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }> },
+  text: string,
+): Promise<boolean> {
+  try {
+    const writable = await handle.createWritable();
+    await writable.write(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    await writable.close();
+    return true;
+  } catch (e) {
+    console.error('[logDownload] failed writing the chosen file; falling back to download', e);
+    return false;
+  }
 }
 
 // Legacy auto-download (blob + anchor) to the browser's default folder. Used
@@ -120,19 +131,34 @@ export async function downloadBakeLogText(
   if (!logText) {
     return;
   }
-  await saveTextToFile(logText, buildBakeLogFilename(recipeName, whenIso));
+  const filename = buildBakeLogFilename(recipeName, whenIso);
+  const handle = await openSaveDialog(filename);
+  if (handle === 'cancelled') {
+    return;
+  }
+  if (handle && (await writeTextToHandle(handle, logText))) {
+    return;
+  }
+  blobDownloadFallback(logText, filename);
 }
 
 export type LogDownloadResult = { ok: true } | { ok: false; reason: 'empty' | 'locked' | 'error' };
 
 // Fetch a bake's managed cook.log by cookId and save it via the Save As dialog.
 // Used where the log text is not already loaded (Home "Last Bake" and "Recent
-// Outputs"). Read-only: getCookLog never starts, mutates, or deletes anything.
+// Outputs"). The Save As dialog opens FIRST — while the click gesture is still
+// active — and only then is the log fetched and written, mirroring the Pantry
+// Save As flow. Read-only: getCookLog never starts, mutates, or deletes anything.
 export async function downloadBakeLogByCookId(
   cookId: string,
   recipeName: string | null | undefined,
   whenIso: string | null | undefined,
 ): Promise<LogDownloadResult> {
+  const filename = buildBakeLogFilename(recipeName, whenIso);
+  const handle = await openSaveDialog(filename);
+  if (handle === 'cancelled') {
+    return { ok: true };
+  }
   const res = await getCookLog(cookId);
   if (res.locked) {
     return { ok: false, reason: 'locked' };
@@ -143,6 +169,9 @@ export async function downloadBakeLogByCookId(
   if (!res.available || !res.text) {
     return { ok: false, reason: 'empty' };
   }
-  await saveTextToFile(res.text, buildBakeLogFilename(recipeName, whenIso));
+  if (handle && (await writeTextToHandle(handle, res.text))) {
+    return { ok: true };
+  }
+  blobDownloadFallback(res.text, filename);
   return { ok: true };
 }
