@@ -288,7 +288,13 @@ public sealed class PayloadDownloader
                 ["size"] = new FileInfo(destPath).Length,
                 ["attempts"] = attempt
             });
-        
+
+        // Strip the Mark of the Web from the verified zip before it is extracted
+        // so the internet-zone mark cannot propagate to the extracted payload
+        // files. The installed tree is stripped again after copy as defence in
+        // depth (see InstallVerb).
+        MarkOfTheWeb.StripFile(destPath);
+
         return new DownloadResult(true, destPath, null);
     }
 

@@ -145,6 +145,27 @@ public static class InstallVerb
             return SetupExitCodes.InstallFailed;
         }
 
+        // Strip the Mark of the Web (Zone.Identifier alternate data stream) from
+        // every installed file. The Setup EXE and payload come from an internet
+        // download, so the self-installed Setup copy (File.Copy preserves the
+        // ADS) and any MOTW-tainted payload files can carry the internet-zone
+        // mark; enterprise security policy then blocks the unsigned, internet-
+        // sourced PAX Cookbook.exe on launch. Stripping the whole tree (App +
+        // Setup + PayloadCache) before the app is ever launched prevents that
+        // block. Best-effort: the Zone.Identifier ADS does not affect file
+        // content/SHA, so a failure here never fails the install.
+        try
+        {
+            var stripped = MarkOfTheWeb.StripTree(installRoot);
+            log.Write("install-motw-stripped",
+                fields: new Dictionary<string, object?> { ["filesVisited"] = stripped });
+        }
+        catch (Exception ex)
+        {
+            log.Write("install-motw-strip-failed", "warn",
+                new Dictionary<string, object?> { ["detail"] = ex.Message });
+        }
+
         var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
         var state = new InstallState
         {

@@ -252,6 +252,134 @@ public class WizardDetectionTests
     }
 
     // -----------------------------------------------------------------
+    // .NET 8 Desktop Runtime — multi-strategy detection
+    // (registry / `dotnet --list-runtimes` / well-known shared-framework folder)
+    // -----------------------------------------------------------------
+    private const string DotNetRegRoot =
+        @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App";
+    private const string DotNetSharedRoot =
+        @"C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App";
+
+    [Fact]
+    public void DotNet8_FoundInRegistry_IsSatisfied()
+    {
+        var f = new FakeProbe();
+        f.HklmSubKeys[DotNetRegRoot] = new[] { "8.0.11" };
+
+        var s = new PrerequisiteDetector(f).DetectDotNet8DesktopRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.11", s.DetectedVersion);
+        Assert.Equal("Registry", s.DetectionSource);
+    }
+
+    [Fact]
+    public void DotNet8_Registry_PicksHighest8x_NotStringSort()
+    {
+        var f = new FakeProbe();
+        // String ordering would wrongly rank "8.0.9" above "8.0.11";
+        // version comparison must select 8.0.11.
+        f.HklmSubKeys[DotNetRegRoot] = new[] { "8.0.9", "8.0.11", "6.0.30" };
+
+        var s = new PrerequisiteDetector(f).DetectDotNet8DesktopRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.11", s.DetectedVersion);
+        Assert.Equal("Registry", s.DetectionSource);
+    }
+
+    [Fact]
+    public void DotNet8_NotInRegistry_FoundViaListRuntimes_IsSatisfied()
+    {
+        var f = new FakeProbe();
+        // Registry empty (winget / Visual Studio / SDK install).
+        // `dotnet --list-runtimes` reports the WindowsDesktop runtime.
+        f.Versions["dotnet"] =
+            "Microsoft.AspNetCore.App 8.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\n" +
+            "Microsoft.NETCore.App 8.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\n" +
+            "Microsoft.WindowsDesktop.App 8.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]";
+
+        var s = new PrerequisiteDetector(f).DetectDotNet8DesktopRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.11", s.DetectedVersion);
+        Assert.Equal("dotnet --list-runtimes", s.DetectionSource);
+    }
+
+    [Fact]
+    public void DotNet8_ListRuntimes_IgnoresNon8_PicksHighestDesktop()
+    {
+        var f = new FakeProbe();
+        f.Versions["dotnet"] =
+            "Microsoft.WindowsDesktop.App 6.0.30 [C:\\x]\n" +
+            "Microsoft.WindowsDesktop.App 8.0.8 [C:\\x]\n" +
+            "Microsoft.WindowsDesktop.App 8.0.28 [C:\\x]\n" +
+            "Microsoft.NETCore.App 9.0.0 [C:\\x]";
+
+        var s = new PrerequisiteDetector(f).DetectDotNet8DesktopRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.28", s.DetectedVersion);
+        Assert.Equal("dotnet --list-runtimes", s.DetectionSource);
+    }
+
+    [Fact]
+    public void DotNet8_ListRuntimes_OnlyNonDesktop8_IsMissing()
+    {
+        var f = new FakeProbe();
+        // 8.x present, but not the WindowsDesktop runtime PAX Cookbook needs.
+        f.Versions["dotnet"] =
+            "Microsoft.NETCore.App 8.0.11 [C:\\x]\n" +
+            "Microsoft.AspNetCore.App 8.0.11 [C:\\x]";
+
+        var s = new PrerequisiteDetector(f).DetectDotNet8DesktopRuntime();
+
+        Assert.False(s.Satisfied);
+        Assert.Equal("not-found", s.DetectionSource);
+    }
+
+    [Fact]
+    public void DotNet8_FoundViaWellKnownFolder_IsSatisfied()
+    {
+        var f = new FakeProbe();
+        f.Env["ProgramFiles"] = @"C:\Program Files";
+        f.Dirs[(DotNetSharedRoot, "8.*")] = new[]
+        {
+            DotNetSharedRoot + @"\8.0.11",
+            DotNetSharedRoot + @"\8.0.28",
+        };
+
+        var s = new PrerequisiteDetector(f).DetectDotNet8DesktopRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.28", s.DetectedVersion);
+        Assert.Equal("ProgramFiles", s.DetectionSource);
+    }
+
+    [Fact]
+    public void DotNet8_RegistryPreferredOverListRuntimes()
+    {
+        var f = new FakeProbe();
+        f.HklmSubKeys[DotNetRegRoot] = new[] { "8.0.11" };
+        f.Versions["dotnet"] = "Microsoft.WindowsDesktop.App 8.0.28 [C:\\x]";
+
+        var s = new PrerequisiteDetector(f).DetectDotNet8DesktopRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("Registry", s.DetectionSource); // strategy 1 short-circuits
+        Assert.Equal("8.0.11", s.DetectedVersion);
+    }
+
+    [Fact]
+    public void DotNet8_NotFoundAnywhere_IsMissing()
+    {
+        var s = new PrerequisiteDetector(new FakeProbe()).DetectDotNet8DesktopRuntime();
+        Assert.False(s.Satisfied);
+        Assert.Null(s.DetectedVersion);
+        Assert.Equal("not-found", s.DetectionSource);
+    }
+
+    // -----------------------------------------------------------------
     // Display lines
     // -----------------------------------------------------------------
     [Fact]

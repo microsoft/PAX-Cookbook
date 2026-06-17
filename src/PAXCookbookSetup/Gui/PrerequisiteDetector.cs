@@ -29,32 +29,76 @@ public sealed class PrerequisiteDetector
     public PrerequisiteStatus DetectPython()
         => Evaluate(PrerequisiteKind.Python, "Python", MinPython, PythonCandidates());
 
-    // Check the registry for .NET 8 Desktop Runtime. The WindowsDesktop app
-    // framework is installed in HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App
-    // with subkeys named after versions (e.g. "8.0.11"). We look for any 8.0.x version.
+    // Detect the .NET 8 Desktop Runtime with three independent strategies, in
+    // cost order, returning satisfied as soon as any finds a >= 8.0 runtime.
+    // A single method (the registry alone) false-negatives when .NET 8 was
+    // installed via winget / Visual Studio / the SDK, which do not write the
+    // sharedfx registry key — so the fallbacks confirm those installs too.
+    //   1. Registry — HKLM\...\sharedfx\Microsoft.WindowsDesktop.App subkeys
+    //      (fast, no process spawn; written by the standalone runtime installer).
+    //   2. `dotnet --list-runtimes` — parses "Microsoft.WindowsDesktop.App 8.x.y".
+    //   3. Well-known shared-framework folder —
+    //      %ProgramFiles%\dotnet\shared\Microsoft.WindowsDesktop.App\8.*.
     private PrerequisiteStatus EvaluateDotNet8()
     {
+        // Strategy 1: registry.
         const string root = @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App";
-        var versions = _probe.EnumerateHklmSubKeyNames(root).ToList();
-        if (!versions.Any())
-            return PrerequisiteStatus.Missing(PrerequisiteKind.DotNet8DesktopRuntime, ".NET 8 Desktop Runtime");
+        var fromRegistry = HighestDotNet8(_probe.EnumerateHklmSubKeyNames(root));
+        if (fromRegistry is not null)
+            return DotNet8Found(fromRegistry, "Registry");
 
-        foreach (var verStr in versions.OrderByDescending(v => v))
+        // Strategy 2: `dotnet --list-runtimes` (lines like
+        // "Microsoft.WindowsDesktop.App 8.0.11 [C:\Program Files\dotnet\shared\...]").
+        var listed = _probe.RunVersion("dotnet", "--list-runtimes");
+        if (!string.IsNullOrWhiteSpace(listed))
         {
-            if (TryParseVersion(verStr, out var version) && version >= MinDotNet8 && version.Major == 8)
+            Version? best = null;
+            foreach (Match mm in Regex.Matches(listed, @"Microsoft\.WindowsDesktop\.App\s+(\d+\.\d+\.\d+)"))
             {
-                return new PrerequisiteStatus(
-                    PrerequisiteKind.DotNet8DesktopRuntime,
-                    ".NET 8 Desktop Runtime",
-                    true,
-                    FormatVersion(version),
-                    null,
-                    "Registry");
+                if (TryParseVersion(mm.Groups[1].Value, out var v) && v.Major == 8 && v >= MinDotNet8
+                    && (best is null || v > best))
+                    best = v;
             }
+            if (best is not null)
+                return DotNet8Found(best, "dotnet --list-runtimes");
+        }
+
+        // Strategy 3: well-known shared-framework folder (dotnet not on PATH).
+        var programFiles = _probe.GetEnvPath("ProgramFiles");
+        if (!string.IsNullOrEmpty(programFiles))
+        {
+            var sharedRoot = Path.Combine(programFiles, "dotnet", "shared", "Microsoft.WindowsDesktop.App");
+            var fromDisk = HighestDotNet8(
+                _probe.EnumerateDirectories(sharedRoot, "8.*").Select(d => Path.GetFileName(d)));
+            if (fromDisk is not null)
+                return DotNet8Found(fromDisk, "ProgramFiles");
         }
 
         return PrerequisiteStatus.Missing(PrerequisiteKind.DotNet8DesktopRuntime, ".NET 8 Desktop Runtime");
     }
+
+    // Highest 8.x.y version (>= MinDotNet8) among the supplied version strings,
+    // or null when none qualify. Non-8.x and unparseable entries are ignored.
+    private static Version? HighestDotNet8(IEnumerable<string?> versionStrings)
+    {
+        Version? best = null;
+        foreach (var s in versionStrings)
+        {
+            if (TryParseVersion(s, out var v) && v.Major == 8 && v >= MinDotNet8
+                && (best is null || v > best))
+                best = v;
+        }
+        return best;
+    }
+
+    private static PrerequisiteStatus DotNet8Found(Version version, string source)
+        => new PrerequisiteStatus(
+            PrerequisiteKind.DotNet8DesktopRuntime,
+            ".NET 8 Desktop Runtime",
+            true,
+            FormatVersion(version),
+            null,
+            source);
 
     // -----------------------------------------------------------------
     // Search-order candidate generators (lazy — probing stops as soon as
