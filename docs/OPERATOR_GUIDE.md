@@ -16,17 +16,20 @@ PAX Cookbook is a **local-first, Windows-only, zero-admin operational shell** ar
 
 Cookbook is:
 
-- a PowerShell-based broker that runs locally on the chef's machine,
-- a single-page browser UI the launcher opens at `http://localhost:<port>` (the broker itself binds loopback only),
-- a thin orchestration layer over PAX.
+- a **native Windows broker** (`PAX Cookbook.exe`, a C#/.NET application) that runs locally on the chef's machine,
+- a single-page browser UI hosted in an embedded WebView2 window the broker serves on loopback only,
+- a thin orchestration layer over PAX,
+- optionally, a windowless **background broker daemon** (system-tray, started at login via a per-user `Run` key) so scheduled bakes can run while no window is open.
 
 Cookbook is **not**:
 
-- a service or daemon (no `New-Service`, no `Register-ScheduledTask`),
+- a Windows **service** (the optional background broker is a per-user tray process, not a service),
 - a cloud product,
 - an Electron / PWA / Tauri application,
 - a replacement for PAX (PAX remains authoritative and standalone),
-- something that requires administrator rights at any point.
+- something that requires administrator rights for normal use. (The installed app needs no elevation; only the setup wizard's *optional* PowerShell 7 install requests a one-time, declinable administrator/UAC prompt.)
+
+Cookbook writes only per-user (HKCU) registry entries — file associations, the `paxcookbook:` protocol, an Add/Remove Programs entry, and an optional Start-at-login `Run` value — and, when you schedule a recipe, registers a **per-user** Windows Task Scheduler task (no elevation). It never writes machine-wide (HKLM) keys and installs no Windows service.
 
 PAX is the authoritative data-collection engine. Cookbook orchestrates it.
 
@@ -52,6 +55,8 @@ You may inspect the bundled PAX script at any time; it is a plain `.ps1` file on
 
 ## 3. First install
 
+> **Recommended: the setup wizard.** Download **`PAX_Cookbook_Setup.exe`** from the [latest Release](https://github.com/microsoft/PAX-Cookbook/releases/latest) and double-click it. The wizard checks for the PowerShell 7 and Python prerequisites and offers to install them for you, then installs Cookbook per-user. The rest of this section documents the **ZIP + script** install path used by distributors, advanced users, and unattended/scripted deployments; it remains fully supported, and the prerequisite and install-tree details below apply to both paths.
+
 ### 3.1 Prerequisites
 
 **Cookbook itself** requires only:
@@ -59,12 +64,12 @@ You may inspect the bundled PAX script at any time; it is a plain `.ps1` file on
 | Requirement | Why |
 | --- | --- |
 | Windows 10 / 11 (64-bit) | The appliance is Windows-only. |
-| PowerShell 7.4 or newer | The launcher hard-gates this. Install from <https://aka.ms/PSWindows>. |
+| PowerShell 7.4 or newer | The launcher hard-gates this. The setup wizard installs it for you (a one-time administrator/UAC prompt you can decline); for the ZIP path, install it yourself from <https://aka.ms/PSWindows>. |
 | A local folder you can write to | This is the **workspace**. See §5. |
 
-No administrator rights are needed at any point. Installing and launching Cookbook does not exercise any runtime other than PowerShell.
+The installed application needs **no administrator rights** for normal use. Only the setup wizard's *optional* PowerShell 7 install requests a one-time administrator (UAC) approval — you can decline it and install PowerShell 7 yourself. Installing and launching Cookbook does not exercise any runtime other than PowerShell.
 
-**Bundled-recipe prerequisite — PAX rollup workflows.** Certain bundled recipes (notably the **M365 Usage Analytics Dashboard** and **AI-in-One Dashboard** templates) invoke PAX in `Rollup` or `RollupPlusRaw` mode. PAX's rollup post-processor is implemented in Python (3.10 or newer). When such a recipe runs:
+**Bundled-recipe prerequisite — PAX rollup workflows.** Certain bundled recipes (notably the **M365 Usage Analytics Dashboard** and **AI-in-One Dashboard** templates) invoke PAX in `Rollup` or `RollupPlusRaw` mode. PAX's rollup post-processor is implemented in Python (3.10 or newer). The setup wizard can install Python for you per-user up front; if it was not pre-installed, PAX handles it at run time:
 
 - **PAX** — not Cookbook — detects whether a compatible Python interpreter is on `PATH`.
 - **PAX** — not Cookbook — performs a per-user silent install (`winget Python.Python.3.13` → python.org installer fallback) if no compatible interpreter is found.

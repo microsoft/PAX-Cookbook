@@ -57,9 +57,61 @@ public sealed class AutoStartRegistrar
 
     public bool IsRegistered()
         => !string.IsNullOrEmpty(_registry.GetString(RootSubKey, ValueName));
+
+    // Removes OUR auto-start Run value, but only by positive identification:
+    // the value is deleted only when its launch command's executable still
+    // resolves under <installRoot>. A value pointing at a different install
+    // (or another product) is left untouched. The shared Run KEY is never
+    // created or deleted — only our single named value. Mirrors the
+    // positive-ID discipline in ShellRemover so the wizard's "Start at login"
+    // off path is symmetric with Register and uninstall.
+    public AutoStartUnregistrationResult Unregister(string installRoot)
+    {
+        var current = _registry.GetString(RootSubKey, ValueName);
+        if (string.IsNullOrEmpty(current))
+            return new AutoStartUnregistrationResult(Removed: false, Skipped: false);
+
+        if (!CommandPointsUnderInstallRoot(current!, installRoot))
+            return new AutoStartUnregistrationResult(Removed: false, Skipped: true);
+
+        bool removed = _registry.DeleteValue(RootSubKey, ValueName);
+        return new AutoStartUnregistrationResult(Removed: removed, Skipped: false);
+    }
+
+    // True when the first (quoted or bare) token of the Run command is an
+    // executable path that resolves under installRoot.
+    private static bool CommandPointsUnderInstallRoot(string command, string installRoot)
+    {
+        try
+        {
+            var t = command.Trim();
+            string exePath;
+            if (t.StartsWith("\"", StringComparison.Ordinal))
+            {
+                int end = t.IndexOf('"', 1);
+                if (end < 0) return false;
+                exePath = t.Substring(1, end - 1);
+            }
+            else
+            {
+                int sp = t.IndexOf(' ');
+                exePath = sp < 0 ? t : t.Substring(0, sp);
+            }
+            var exeFull = Path.GetFullPath(exePath);
+            var rootFull = Path.GetFullPath(installRoot)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            return exeFull.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
 }
 
 public sealed record AutoStartRegistrationResult(
     string SubKey,
     string ValueName,
     string CommandLine);
+
+public sealed record AutoStartUnregistrationResult(
+    bool Removed,
+    bool Skipped);

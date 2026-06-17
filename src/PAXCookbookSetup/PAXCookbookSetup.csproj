@@ -1,14 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!--
+      WinExe (Windows subsystem) so a double-click launches the GUI wizard
+      with no console-window flash. The CLI verb path reattaches to the
+      parent terminal via NativeConsole.AttachToParent so scripted/interactive
+      verb output still prints. UseWindowsForms enables the wizard UI.
+    -->
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <RootNamespace>PAXCookbookSetup</RootNamespace>
     <AssemblyName>PAXCookbookSetup</AssemblyName>
-    <UseWindowsForms>false</UseWindowsForms>
+    <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>false</UseWPF>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PAXCookbook.Shared\PAXCookbook.Shared.csproj" />
+  </ItemGroup>
+  <!--
+    Wizard branding embedded so the single-file Setup EXE is self-contained.
+    Loaded at runtime by PAXCookbookSetup.Gui.WizardAssets via these exact
+    logical resource names.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\logo-horizontal.png" LogicalName="PAXCookbookSetup.Assets.logo-horizontal.png" />
+    <EmbeddedResource Include="Assets\app-icon.png" LogicalName="PAXCookbookSetup.Assets.app-icon.png" />
+    <EmbeddedResource Include="Assets\microsoft-open-source-logo.png" LogicalName="PAXCookbookSetup.Assets.microsoft-open-source-logo.png" />
   </ItemGroup>
   <!--
     Phase 11 single-EXE payload bundle.

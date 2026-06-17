@@ -15,7 +15,9 @@ public sealed record ParsedArgs(
     bool DryRun,
     bool RemoveUserData,
     bool ConfirmRemoveUserData,
-    List<string> Errors)
+    List<string> Errors,
+    bool Quiet = false,
+    bool GuiUninstall = false)
 {
     public bool IsSameVersionRepair => Force || ReinstallSameVersion;
 }
@@ -34,6 +36,7 @@ public static class ArgParser
         string? handoffFolder = null;
         bool force = false, reinstall = false, allowDown = false, handoffFromInstalled = false, dryRun = false;
         bool removeUserData = false, confirmRemoveUserData = false;
+        bool quiet = false, guiUninstall = false;
 
         for (int i = 0; i < argv.Length; i++)
         {
@@ -58,6 +61,9 @@ public static class ArgParser
                 case "--dry-run":                     dryRun = true; break;
                 case "--remove-user-data":            removeUserData = true; break;
                 case "--confirm-remove-user-data":    confirmRemoveUserData = true; break;
+                case "--quiet":                       quiet = true; break;
+                case "--silent":                      quiet = true; break;
+                case "--gui-uninstall":               guiUninstall = true; break;
                 default:
                     errors.Add($"unknown argument: {a}"); break;
             }
@@ -72,7 +78,7 @@ public static class ArgParser
 
         return new ParsedArgs(verb, installRoot, payloadRoot, force, reinstall, allowDown,
             handoffFromInstalled, handoffFolder, dryRun,
-            removeUserData, confirmRemoveUserData, errors);
+            removeUserData, confirmRemoveUserData, errors, quiet, guiUninstall);
     }
 
     private static string? NextValue(string[] argv, ref int i, string name, List<string> errors)

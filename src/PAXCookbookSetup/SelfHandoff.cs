@@ -82,6 +82,7 @@ public static class SelfHandoff
         if (original.DryRun) args.Add("--dry-run");
         if (original.RemoveUserData) args.Add("--remove-user-data");
         if (original.ConfirmRemoveUserData) args.Add("--confirm-remove-user-data");
+        if (original.GuiUninstall) args.Add("--gui-uninstall");
         args.Add("--handoff-from-installed");
         args.Add("--handoff-folder"); args.Add(tempFolder);
         return args;

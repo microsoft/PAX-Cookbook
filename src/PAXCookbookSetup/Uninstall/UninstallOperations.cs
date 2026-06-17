@@ -44,18 +44,22 @@ public sealed class UninstallOperations
         _taskbarCleaner = taskbarCleaner;
     }
 
-    public UninstallResult RunStandard(string installRoot, UninstallOptions? options = null)
-        => Run(installRoot, full: false, options ?? UninstallOptions.Defaults);
+    public UninstallResult RunStandard(string installRoot, UninstallOptions? options = null,
+                                       Action<string>? progress = null)
+        => Run(installRoot, full: false, options ?? UninstallOptions.Defaults, progress);
 
-    public UninstallResult RunFull(string installRoot, UninstallOptions? options = null)
-        => Run(installRoot, full: true, options ?? UninstallOptions.Defaults);
+    public UninstallResult RunFull(string installRoot, UninstallOptions? options = null,
+                                   Action<string>? progress = null)
+        => Run(installRoot, full: true, options ?? UninstallOptions.Defaults, progress);
 
-    private UninstallResult Run(string installRoot, bool full, UninstallOptions opt)
+    private UninstallResult Run(string installRoot, bool full, UninstallOptions opt,
+                               Action<string>? progress = null)
     {
         var steps = new List<string>();
         var skipped = new List<string>();
 
         // ---- 1. Stop running app ------------------------------------
+        progress?.Invoke("Stopping PAX Cookbook\u2026");
         var stop = _stopper.TryStop(installRoot, opt.StopTimeoutMs);
         steps.Add($"stop: invoked={stop.Invoked} exeFound={stop.ExeFound} exited={stop.Exited}");
 
@@ -100,6 +104,7 @@ public sealed class UninstallOperations
         string? workspacePath = state?.WorkspaceFolderPath;
 
         // ---- 3. Shell removal (shortcuts + protocol + ARP) ----------
+        progress?.Invoke("Removing shortcuts and registry entries\u2026");
         var shell = _shellRemover.Remove(installRoot);
         steps.Add($"shell: shortcutsRemoved={shell.ShortcutsRemoved.Count} " +
                   $"shortcutsSkipped={shell.ShortcutsSkipped.Count} " +
@@ -113,6 +118,7 @@ public sealed class UninstallOperations
                   $"candidates={taskbar.Candidates.Count} removed={taskbar.Removed.Count}");
 
         // ---- 5. File payload removal --------------------------------
+        progress?.Invoke("Removing application files\u2026");
         var fileResults = new List<RemoveResult>();
         foreach (var sub in StandardRemovableSubdirs())
         {

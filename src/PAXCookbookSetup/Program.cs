@@ -5,10 +5,20 @@ using PAXCookbook.Shared.Contracts;
 using PAXCookbook.Shared.ExitCodes;
 using PAXCookbook.Shared.Paths;
 using PAXCookbookSetup;
+using PAXCookbookSetup.Gui;
 using PAXCookbookSetup.Payload;
 using PAXCookbookSetup.Shell;
 using PAXCookbookSetup.Verbs;
 
+// Double-click with NO arguments -> the GUI installer wizard. Any argument
+// (a verb or flag) -> the verb-based CLI used by scripted/silent installs.
+// Because this is a WinExe, the CLI path first reattaches stdout/stderr to
+// the launching terminal so interactive verb output stays visible.
+if (args.Length == 0)
+{
+    return WizardLauncher.Run();
+}
+NativeConsole.AttachToParent();
 return Run(args);
 
 static int Run(string[] argv)
@@ -65,6 +75,25 @@ static int Run(string[] argv)
                     return SetupExitCodes.UsageError;
                 }
 
+                // Interactive uninstall (Add/Remove Programs or the Start Menu
+                // shortcut) shows a confirmation + progress GUI. A scripted
+                // uninstall (--quiet/--silent), a non-interactive session, a
+                // full uninstall (--remove-user-data, an advanced/scripted op),
+                // or the test/E2E harness (PAXCOOKBOOK_TEST_NO_SHELL=1) keeps
+                // the console CLI. The marker is set BEFORE handoff so
+                // BuildHandoffArgs forwards it to the temp child that actually
+                // performs (and displays) the uninstall.
+                if (parsed.Verb == "uninstall"
+                    && !parsed.HandoffFromInstalled
+                    && !parsed.GuiUninstall
+                    && !parsed.Quiet
+                    && !parsed.RemoveUserData
+                    && Environment.UserInteractive
+                    && !TestShellGate.IsActive())
+                {
+                    parsed = parsed with { GuiUninstall = true };
+                }
+
                 // Live self-handoff: if we are running from the installed
                 // Setup path AND the caller did not already pass the
                 // handoff markers, copy ourselves to %TEMP% and spawn the
@@ -93,9 +122,17 @@ static int Run(string[] argv)
                     log.Write("handoff-marker-accepted");
                 }
 
-                int rc = parsed.Verb == "uninstall"
-                    ? UninstallVerb.Run(installRoot, parsed, log, Console.Out)
-                    : RunPayloadVerb(parsed, installRoot, log);
+                int rc;
+                if (parsed.Verb == "uninstall")
+                {
+                    rc = parsed.GuiUninstall
+                        ? UninstallGuiHost.Run(installRoot, parsed, log)
+                        : UninstallVerb.Run(installRoot, parsed, log, Console.Out);
+                }
+                else
+                {
+                    rc = RunPayloadVerb(parsed, installRoot, log);
+                }
 
                 // If we ran as the temp handoff copy, schedule cleanup of
                 // our own temp folder. Best-effort delete; MoveFileEx
@@ -250,21 +287,8 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
 
 // Builds the production ShellOperations using Win32 shortcut + HKCU
 // registry writers. Returns a fresh instance each call so per-verb
-// state is isolated.
-static IShellOperations BuildShellOperations()
-{
-    IRegistryWriter registry = TestShellGate.IsActive()
-        ? new NoOpRegistryWriter() : new HkcuRegistryWriter();
-    IShortcutWriter writer = TestShellGate.IsActive()
-        ? new NoOpShortcutWriter() : new Win32ShortcutWriter();
-    var manifestStore = new ShortcutManifestStore();
-    var shellRegistrar = new ShellRegistrar(writer, manifestStore);
-    var protocolRegistrar = new ProtocolRegistrar(registry);
-    var fileAssociationRegistrar = new FileAssociationRegistrar(registry);
-    var uninstallRegistrar = new UninstallRegistrar(registry);
-    var autoStartRegistrar = new AutoStartRegistrar(registry);
-    return new ShellOperations(shellRegistrar, protocolRegistrar, uninstallRegistrar, manifestStore, fileAssociationRegistrar, autoStartRegistrar);
-}
+// state is isolated. Shared with the GUI wizard via ShellOperationsFactory.
+static IShellOperations BuildShellOperations() => ShellOperationsFactory.Build();
 
 static int PrintHelp(int code)
 {
@@ -275,6 +299,8 @@ static int PrintHelp(int code)
     Console.WriteLine("                                  (--payload-root optional when Setup ships with an embedded payload)");
     Console.WriteLine("  status    [--install-root <dir>]");
     Console.WriteLine("  uninstall [--install-root <dir>]");
+    Console.WriteLine("                                  (interactive: shows a confirmation dialog;");
+    Console.WriteLine("                                   add --quiet for a scripted/silent uninstall)");
     Console.WriteLine("                                  (preserves Workspace + Logs by default)");
     Console.WriteLine("  uninstall --remove-user-data --confirm-remove-user-data");
     Console.WriteLine("                                  (full uninstall: also removes Workspace + per-user data)");
@@ -283,7 +309,7 @@ static int PrintHelp(int code)
     Console.WriteLine("flags:");
     Console.WriteLine("  --force, --reinstall-same-version, --allow-downgrade,");
     Console.WriteLine("  --handoff-from-installed, --handoff-folder <dir>, --dry-run,");
-    Console.WriteLine("  --remove-user-data, --confirm-remove-user-data");
+    Console.WriteLine("  --remove-user-data, --confirm-remove-user-data, --quiet");
     return code;
 }
 

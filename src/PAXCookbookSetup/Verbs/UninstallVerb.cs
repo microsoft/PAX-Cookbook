@@ -33,7 +33,8 @@ public static class UninstallVerb
         ParsedArgs args,
         SetupLogger log,
         TextWriter @out,
-        UninstallOperations? operations = null)
+        UninstallOperations? operations = null,
+        Action<string>? progress = null)
     {
         // Validate opt-in flag pair before doing anything destructive.
         if (args.RemoveUserData && !args.ConfirmRemoveUserData)
@@ -88,8 +89,8 @@ public static class UninstallVerb
         try
         {
             result = full
-                ? operations.RunFull(installRoot, opt)
-                : operations.RunStandard(installRoot, opt);
+                ? operations.RunFull(installRoot, opt, progress)
+                : operations.RunStandard(installRoot, opt, progress);
         }
         catch (Exception ex)
         {
