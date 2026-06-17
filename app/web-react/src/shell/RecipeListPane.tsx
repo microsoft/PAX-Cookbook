@@ -30,6 +30,7 @@ interface RecipeListPaneProps {
   onPickPreset: (presetId: PresetId) => void;
   onResume: () => void;
   onImportCommand: () => void;
+  onImportFromFile: () => void;
 }
 
 function recipeName(recipe: RecipeSummary): string {
@@ -71,6 +72,7 @@ export function RecipeListPane({
   onPickPreset,
   onResume,
   onImportCommand,
+  onImportFromFile,
 }: RecipeListPaneProps) {
   const query = search.trim().toLowerCase();
   const visible =
@@ -173,8 +175,13 @@ export function RecipeListPane({
         </h3>
         <ul className="dvw-tpl-grid" aria-label="Recipe starting points">
           {START_CARDS.map(card => {
+            const isImportPreset =
+              card.kind === 'preset' &&
+              (card.presetId === 'importPaxRecipeJson' ||
+                card.presetId === 'importLiteRecipeJson');
             const onClick =
-              card.kind === 'preset' ? () => onPickPreset(card.presetId)
+              isImportPreset ? onImportFromFile
+              : card.kind === 'preset' ? () => onPickPreset(card.presetId)
               : card.kind === 'resume' ? onResume
               : onImportCommand;
             const repoUrl =

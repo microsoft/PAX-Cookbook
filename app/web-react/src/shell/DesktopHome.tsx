@@ -36,7 +36,7 @@ import {
   IconCheckCircle,
   IconRefresh,
 } from './CookbookIllustrations';
-import { createRecipeFromPreset } from '../features/mini-kitchen/lib/defaultRecipe';
+import { pickAndParseRecipeFile } from '../features/mini-kitchen/lib/recipeFileImport';
 
 type ListPhase = 'idle' | 'loading' | 'loaded' | 'error';
 
@@ -337,6 +337,7 @@ export function DesktopHome() {
   const [cooksPhase, setCooksPhase] = useState<ListPhase>('idle');
   const [chefKeyCount, setChefKeyCount] = useState<number | null>(null);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -546,18 +547,25 @@ export function DesktopHome() {
   }
   const attentionCount = alerts.length;
 
-  function startImport(kind: 'paxlite' | 'pax') {
+  // Open a native file-browse dialog, parse the chosen .pax/.paxlite file, and
+  // open the recipe builder pre-populated with its settings. Shared by the
+  // Import Recipe menu and the "Open recipe from file" link.
+  async function startImport() {
     setImportMenuOpen(false);
-    const presetId =
-      kind === 'paxlite' ? 'importLiteRecipeJson' : 'importPaxRecipeJson';
+    setImportError(null);
+    const outcome = await pickAndParseRecipeFile();
+    if (!outcome.ok) {
+      if (outcome.cancelled) {
+        return;
+      }
+      setImportError(outcome.error);
+      return;
+    }
     rememberPendingDraft({
-      templateId: presetId,
-      templateName: 'Import recipe',
-      note:
-        kind === 'paxlite'
-          ? 'Pick your Mini-Kitchen .paxlite file from the highlighted import card in Step 1.'
-          : 'Pick your PAX Cookbook .pax file from the highlighted import card in Step 1.',
-      state: createRecipeFromPreset(presetId),
+      templateId: 'importedRecipeFile',
+      templateName: 'Imported recipe',
+      note: `Imported from ${outcome.fileName}. Review the settings, then Save when it is ready.`,
+      state: outcome.state,
     });
     requestShellSection('recipes');
   }
@@ -607,7 +615,7 @@ export function DesktopHome() {
                 type="button"
                 role="menuitem"
                 className="dvw-import-menu__item"
-                onClick={() => startImport('pax')}
+                onClick={() => { void startImport(); }}
               >
                 Import PAX Cookbook .pax Recipe
               </button>
@@ -615,7 +623,7 @@ export function DesktopHome() {
                 type="button"
                 role="menuitem"
                 className="dvw-import-menu__item"
-                onClick={() => startImport('paxlite')}
+                onClick={() => { void startImport(); }}
               >
                 Import Mini-Kitchen .paxlite Recipe
               </button>
@@ -635,6 +643,15 @@ export function DesktopHome() {
           ) : null}
         </div>
       </div>
+
+      {importError ? (
+        <p
+          role="alert"
+          style={{ color: '#b42318', margin: '8px 0 0', fontSize: '0.875rem' }}
+        >
+          {importError}
+        </p>
+      ) : null}
 
       <LastBakePanel
         phase={cooksPhase}
@@ -658,6 +675,7 @@ export function DesktopHome() {
             recipeDashboard={recipeDashboard}
             onOpen={openRecipe}
             onViewAll={() => requestShellSection('recipes')}
+            onOpenFromFile={() => { void startImport(); }}
           />
           <AttentionPanel phase={phase} alerts={alerts} />
         </div>
@@ -885,6 +903,7 @@ function RecentRecipesPanel({
   recipeDashboard,
   onOpen,
   onViewAll,
+  onOpenFromFile,
 }: {
   phase: ListPhase;
   recipes: readonly RecipeSummary[];
@@ -892,6 +911,7 @@ function RecentRecipesPanel({
   recipeDashboard: Record<string, string>;
   onOpen: (recipe: RecipeSummary) => void;
   onViewAll: () => void;
+  onOpenFromFile: () => void;
 }) {
   return (
     <section className="dvw-card dvw-recent" aria-labelledby="dvw-recent-h">
@@ -958,7 +978,7 @@ function RecentRecipesPanel({
       ) : null}
 
       <footer className="dvw-card__foot">
-        <button type="button" className="dvw-link" onClick={onViewAll}>
+        <button type="button" className="dvw-link" onClick={onOpenFromFile}>
           Open recipe from file…
         </button>
       </footer>

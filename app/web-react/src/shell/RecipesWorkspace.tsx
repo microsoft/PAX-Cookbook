@@ -49,6 +49,7 @@ import { fullRecipeToState } from '../features/mini-kitchen/lib/fullRecipeToStat
 import { resolvePermissions } from '../features/mini-kitchen/lib/permissionsResolver';
 import { renderPaxCommand } from '../features/mini-kitchen/lib/commandRenderer';
 import { createRecipeFromPreset } from '../features/mini-kitchen/lib/defaultRecipe';
+import { pickAndParseRecipeFile } from '../features/mini-kitchen/lib/recipeFileImport';
 import {
   buildFullPaxRecipeExport,
   buildFullPaxRecipeFileName,
@@ -195,6 +196,7 @@ export function RecipesWorkspace() {
 
   // Import Recipe dropdown (command bar) open state + outside/Escape close.
   const [importMenuOpen, setImportMenuOpen] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Saved recipe list.
@@ -927,6 +929,31 @@ export function RecipesWorkspace() {
     });
   }
 
+  // Open a native file-browse dialog, parse the chosen .pax/.paxlite file, and
+  // open the builder pre-populated with its settings as a fresh, unsaved draft.
+  async function importRecipeFromFile() {
+    setImportMenuOpen(false);
+    setImportError(null);
+    const outcome = await pickAndParseRecipeFile();
+    if (!outcome.ok) {
+      if (outcome.cancelled) {
+        return;
+      }
+      setImportError(outcome.error);
+      return;
+    }
+    setMode({
+      kind: 'editor',
+      recipeId: null,
+      draft: {
+        templateId: 'importedRecipeFile',
+        templateName: 'Imported recipe',
+        note: `Imported from ${outcome.fileName}. Review the settings, then Save when it is ready.`,
+        state: outcome.state,
+      },
+    });
+  }
+
   // Duplicate the selected recipe into a NEW unsaved editor draft. This is a
   // pure client-side copy: it projects the saved recipe back into builder state
   // (the projection never restores a client secret or certificate thumbprint —
@@ -1165,7 +1192,7 @@ export function RecipesWorkspace() {
                 type="button"
                 role="menuitem"
                 className="dvw-import-menu__item"
-                onClick={() => openEditorFromPreset('importPaxRecipeJson')}
+                onClick={() => { void importRecipeFromFile(); }}
               >
                 Import PAX Cookbook .pax Recipe
               </button>
@@ -1173,7 +1200,7 @@ export function RecipesWorkspace() {
                 type="button"
                 role="menuitem"
                 className="dvw-import-menu__item"
-                onClick={() => openEditorFromPreset('importLiteRecipeJson')}
+                onClick={() => { void importRecipeFromFile(); }}
               >
                 Import Mini-Kitchen .paxlite Recipe
               </button>
@@ -1201,6 +1228,15 @@ export function RecipesWorkspace() {
         </button>
       </div>
 
+      {importError ? (
+        <p
+          role="alert"
+          style={{ color: '#b42318', margin: '8px 0 0', fontSize: '0.875rem' }}
+        >
+          {importError}
+        </p>
+      ) : null}
+
       <div className="dvw-recipes__layout">
         <div className="dvw-recipes__cols">
           <RecipeListPane
@@ -1214,6 +1250,7 @@ export function RecipesWorkspace() {
             onPickPreset={openEditorFromPreset}
             onResume={handleResumeClick}
             onImportCommand={() => setImportOpen(true)}
+            onImportFromFile={() => { void importRecipeFromFile(); }}
           />
           <RecipeDetailPane
             phase={detailPhase}

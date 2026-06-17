@@ -1123,6 +1123,15 @@ export function MiniKitchenBuilderPreview({
     if (busy) {
       return;
     }
+    // If the user has unsaved edits in the current draft, confirm before the
+    // imported file replaces them.
+    const hasUnsavedEdits = baselineSnapshotRef.current !== JSON.stringify(state);
+    if (
+      hasUnsavedEdits &&
+      !window.confirm('Importing will replace your current settings. Continue?')
+    ) {
+      return;
+    }
     importInputRef.current?.click();
   }
 
