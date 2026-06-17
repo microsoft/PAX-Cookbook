@@ -27,6 +27,7 @@
 import { REMOVED_OR_UNSUPPORTED_SWITCHES } from '../data/pax-switch-catalog';
 import type {
   AuthMode,
+  DashboardTarget,
   DateRangeMode,
   ExecutionMode,
   MiniKitchenRecipeState,
@@ -125,7 +126,7 @@ export interface FullCookbookRecipeCandidate {
   identity: { name: string };
   ingredients: FullCookbookIngredients;
   query: FullCookbookQuery;
-  processing: { rollup?: FullRollupMode };
+  processing: { rollup?: FullRollupMode; dashboard?: DashboardTarget };
   destinations: {
     fact?: FullCookbookDestination;
     userInfo?: FullCookbookDestination;
@@ -424,8 +425,8 @@ export function translateLiteRecipeToFullRecipe(
     }
   }
 
-  // ---- Processing (rollup) ----
-  const processing: { rollup?: FullRollupMode } = {};
+  // ---- Processing (rollup + dashboard target) ----
+  const processing: { rollup?: FullRollupMode; dashboard?: DashboardTarget } = {};
   if (!isUserInfoOnly) {
     const rollup = state.processing.rollup;
     if (rollup === 'rollup') {
@@ -442,6 +443,14 @@ export function translateLiteRecipeToFullRecipe(
       notesForUi.push(
         'No rollup mode selected. The audit recipe will pull raw audit data without -Rollup / -RollupPlusRaw; rollup is optional.',
       );
+    }
+
+    // Carry the dashboard column target (AI-in-One vs AI Business Value) so the
+    // saved recipe and every cook snapshot record which Power BI dashboard the
+    // rollup targets. Only 'aio'/'aibv' are valid; anything else is left absent
+    // (PAX defaults to AI-in-One and -Dashboard is omitted at runtime).
+    if (state.processing.dashboard === 'aio' || state.processing.dashboard === 'aibv') {
+      processing.dashboard = state.processing.dashboard;
     }
 
     // The lite outputCombineMode has no field in the full schema. PAX

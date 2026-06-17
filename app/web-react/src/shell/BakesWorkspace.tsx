@@ -42,7 +42,7 @@ import {
   IconList,
   IconRefresh,
 } from './CookbookIllustrations';
-import { downloadBakeLogText } from './logDownload';
+import { downloadBakeLogByCookId, downloadBakeLogText } from './logDownload';
 import {
   formatModified,
   takePendingBakeSelect,
@@ -971,6 +971,20 @@ export function BakesWorkspace() {
                         title="Open this bake's log file in your default app"
                       >
                         Open log
+                      </button>
+                      <button
+                        type="button"
+                        className="bk-output__open"
+                        onClick={() =>
+                          void downloadBakeLogByCookId(
+                            detail.cookId,
+                            detail.recipe?.name ?? null,
+                            detail.startedAt ?? detail.createdAt ?? null,
+                          )
+                        }
+                        title="Download this bake's log file"
+                      >
+                        Download log
                       </button>
                     </li>
                   </ul>

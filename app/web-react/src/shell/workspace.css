@@ -785,14 +785,30 @@
 
 .dvw-outputs__row {
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
   padding: var(--sp-2);
   border-radius: var(--r-md);
 }
 
 .dvw-outputs__row:hover {
   background: var(--c-elev-1, var(--c-page));
+}
+
+.dvw-outputs__main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.dvw-outputs__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding-left: calc(1.1rem + var(--sp-3));
 }
 
 .dvw-outputs__icon {

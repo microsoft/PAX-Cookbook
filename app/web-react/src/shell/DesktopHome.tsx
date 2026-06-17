@@ -226,6 +226,34 @@ function primaryOutput(
   return present ?? outputs[0];
 }
 
+/** Choose the folder to reveal for a bake's outputs in File Explorer: prefer
+ *  the Purview audit ("fact") CSV's folder, then the Entra user-info CSV's
+ *  folder, then any existing output's folder, then the first output that has a
+ *  path. Returns null when no output path is known. */
+function bakeOutputFolder(
+  outputs: readonly CookOutputSummary[] | null | undefined,
+): string | null {
+  if (!outputs || outputs.length === 0) {
+    return null;
+  }
+  const byRole = (role: string) =>
+    outputs.find(o => (o.role ?? '').toLowerCase() === role && o.exists && !!o.path);
+  const fact = byRole('fact');
+  if (fact) {
+    return folderOf(fact.path);
+  }
+  const userInfo = byRole('userinfo');
+  if (userInfo) {
+    return folderOf(userInfo.path);
+  }
+  const present = outputs.find(o => o.exists && !!o.path);
+  if (present) {
+    return folderOf(present.path);
+  }
+  const anyPath = outputs.find(o => !!o.path);
+  return anyPath ? folderOf(anyPath.path) : null;
+}
+
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -254,6 +282,7 @@ interface RecentOutput {
   date: string | null;
   dashboard: string | null;
   folder: string | null;
+  logPath: string | null;
   cookId: string;
   recipeName: string | null;
   when: string | null;
@@ -273,6 +302,10 @@ function buildRecentOutputs(
     }
     const dash = dashboardLabel(detail.recipe?.dashboard ?? null);
     const date = formatBakeDateShort(cook.startedAt ?? cook.createdAt);
+    // One folder per bake (Purview → Entra → any) and the bake's log path, shared
+    // by every output row of this cook so "Open folder"/"Open log" are consistent.
+    const cookFolder = bakeOutputFolder(detail.outputs.outputs);
+    const cookLogPath = detail.logPath ?? null;
     for (const o of detail.outputs.outputs) {
       if (!o.exists || !o.path) {
         continue;
@@ -287,7 +320,8 @@ function buildRecentOutputs(
         size: formatBakeBytes(o.sizeBytes ?? null),
         date,
         dashboard: dash,
-        folder: folderOf(o.path),
+        folder: cookFolder,
+        logPath: cookLogPath,
         cookId: cook.cookId,
         recipeName: cook.recipeName,
         when: cook.startedAt ?? cook.createdAt,
@@ -687,7 +721,13 @@ export function DesktopHome() {
           />
           <AttentionPanel phase={phase} alerts={alerts} />
         </div>
-        <RecentOutputsPanel phase={cooksPhase} outputs={recentOutputs} />
+        <RecentOutputsPanel
+          phase={cooksPhase}
+          outputs={recentOutputs}
+          onOpenFolder={openOutputFolder}
+          onOpenLog={openLogFile}
+          onViewInBakes={viewInBakes}
+        />
       </div>
     </div>
   );
@@ -783,7 +823,7 @@ function LastBakePanel({
   const out = primaryOutput(detail?.outputs?.outputs);
   const outName = baseName(out?.path);
   const outSize = formatBakeBytes(out?.sizeBytes ?? null);
-  const outFolder = folderOf(out?.path);
+  const outFolder = bakeOutputFolder(detail?.outputs?.outputs);
 
   return (
     <section className="dvw-card dvw-lastbake" aria-labelledby="dvw-lastbake-h">
@@ -1073,9 +1113,15 @@ function AttentionPanel({
 function RecentOutputsPanel({
   phase,
   outputs,
+  onOpenFolder,
+  onOpenLog,
+  onViewInBakes,
 }: {
   phase: ListPhase;
   outputs: readonly RecentOutput[];
+  onOpenFolder: (path: string) => void;
+  onOpenLog: (path: string) => void;
+  onViewInBakes: (cookId: string) => void;
 }) {
   return (
     <section className="dvw-card dvw-outputs" aria-labelledby="dvw-outputs-h">
@@ -1107,33 +1153,61 @@ function RecentOutputsPanel({
         <ul className="dvw-outputs__list">
           {outputs.map(output => (
             <li key={output.key} className="dvw-outputs__row">
-              <span className="dvw-outputs__icon" aria-hidden="true">
-                <IconFolder />
-              </span>
-              <span className="dvw-outputs__text">
-                <span className="dvw-outputs__name">{output.name}</span>
-                <span className="dvw-outputs__meta">
-                  {[output.size, output.date].filter(Boolean).join(' · ')}
+              <div className="dvw-outputs__main">
+                <span className="dvw-outputs__icon" aria-hidden="true">
+                  <IconFolder />
                 </span>
-              </span>
-              {output.dashboard ? (
-                <span className="dvw-dash-pill">{output.dashboard}</span>
-              ) : null}
-              <button
-                type="button"
-                className="dvw-link dvw-link--icon dvw-outputs__log"
-                onClick={() =>
-                  void downloadBakeLogByCookId(
-                    output.cookId,
-                    output.recipeName,
-                    output.when,
-                  )
-                }
-                title="Download this bake's log file"
-              >
-                <IconDownload className="dvw-link__icon" />
-                <span>Download log</span>
-              </button>
+                <span className="dvw-outputs__text">
+                  <span className="dvw-outputs__name">{output.name}</span>
+                  <span className="dvw-outputs__meta">
+                    {[output.size, output.date].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+                {output.dashboard ? (
+                  <span className="dvw-dash-pill">{output.dashboard}</span>
+                ) : null}
+              </div>
+              <div className="dvw-outputs__actions">
+                {output.folder ? (
+                  <button
+                    type="button"
+                    className="dvw-link dvw-link--icon"
+                    onClick={() => onOpenFolder(output.folder as string)}
+                    title="Open the folder that contains this bake's output files"
+                  >
+                    <IconFolder className="dvw-link__icon" />
+                    <span>Open folder</span>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="dvw-link dvw-link--icon"
+                  onClick={() =>
+                    output.logPath
+                      ? onOpenLog(output.logPath)
+                      : onViewInBakes(output.cookId)
+                  }
+                  title="Open this bake's log file in your default app"
+                >
+                  <IconBook className="dvw-link__icon" />
+                  <span>Open log</span>
+                </button>
+                <button
+                  type="button"
+                  className="dvw-link dvw-link--icon dvw-outputs__log"
+                  onClick={() =>
+                    void downloadBakeLogByCookId(
+                      output.cookId,
+                      output.recipeName,
+                      output.when,
+                    )
+                  }
+                  title="Download this bake's log file"
+                >
+                  <IconDownload className="dvw-link__icon" />
+                  <span>Download log</span>
+                </button>
+              </div>
             </li>
           ))}
         </ul>
