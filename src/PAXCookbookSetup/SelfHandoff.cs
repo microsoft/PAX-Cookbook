@@ -14,6 +14,11 @@ public static class SelfHandoff
                                      bool handoffFromInstalled)
     {
         if (handoffFromInstalled) return false;
+        // A self-contained single-file bootstrapper has no on-disk managed
+        // assembly (Assembly.Location is empty), and is never run from under the
+        // install root, so there is nothing to hand off. The installed
+        // framework-dependent Setup DLL, by contrast, lives under installRoot.
+        if (string.IsNullOrWhiteSpace(runningExePath)) return false;
         var runningFull = Path.GetFullPath(runningExePath);
         var rootFull = Path.GetFullPath(installRoot)
                          .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -36,26 +41,29 @@ public static class SelfHandoff
         throw new IOException("could not create unique temp handoff folder after 5 attempts");
     }
 
-    public static TempCopy CopySelfToTemp(string runningExePath, string baseTemp)
+    public static TempCopy CopySelfToTemp(string runningPath, string baseTemp)
     {
         var temp = CreateTempFolder(baseTemp);
-        var dst = Path.Combine(temp, ProductConstants.SetupExeName);
-        File.Copy(runningExePath, dst, overwrite: false);
-        var srcSha = Sha256Hash.OfFile(runningExePath);
+        // Preserve the primary file's own name (PAXCookbookSetup.dll for the
+        // installed framework-dependent Setup) so dotnet.exe can run the temp
+        // copy with the same assembly name.
+        var primaryName = Path.GetFileName(runningPath);
+        var dst = Path.Combine(temp, primaryName);
+        File.Copy(runningPath, dst, overwrite: false);
+        var srcSha = Sha256Hash.OfFile(runningPath);
         var dstSha = Sha256Hash.OfFile(dst);
         if (!Sha256Hash.Equal(srcSha, dstSha))
             throw new IOException($"hash mismatch after copy: src={srcSha} dst={dstSha}");
 
-        // Framework-dependent .NET apps need their .dll/.runtimeconfig.json
-        // /.deps.json siblings to boot. Copy every adjacent file in the
-        // source directory so the temp copy is a self-sufficient runner.
-        // Excludes log files and previously-staged install-state.
-        var srcDir = Path.GetDirectoryName(runningExePath)!;
+        // Framework-dependent .NET apps need their .runtimeconfig.json /
+        // .deps.json / referenced-DLL siblings to boot. Copy every OTHER file in
+        // the source directory so the temp copy is a self-sufficient runner.
+        // Excludes the primary (already copied) and any log files.
+        var srcDir = Path.GetDirectoryName(runningPath)!;
         foreach (var f in Directory.EnumerateFiles(srcDir))
         {
             var name = Path.GetFileName(f);
-            if (string.Equals(name, ProductConstants.SetupExeName,
-                              StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(name, primaryName, StringComparison.OrdinalIgnoreCase)) continue;
             if (name.EndsWith(".log", StringComparison.OrdinalIgnoreCase)) continue;
             var to = Path.Combine(temp, name);
             try { File.Copy(f, to, overwrite: false); } catch { /* best effort */ }
@@ -156,11 +164,18 @@ public static class HandoffRunner
         var args = SelfHandoff.BuildHandoffArgs(original, copy.TempFolder, installRoot);
         try
         {
-            launcher.Start(copy.TempExePath, args);
+            // WDAC-safe relaunch: run the temp Setup DLL through the signed
+            // dotnet.exe host (dotnet.exe "<temp>\PAXCookbookSetup.dll" <args>),
+            // never the unsigned apphost.
+            var dotnet = DotNetLaunch.DotNetExePath();
+            var launchArgs = new List<string> { copy.TempExePath };
+            launchArgs.AddRange(args);
+            launcher.Start(dotnet, launchArgs);
             log.Write("handoff-launched", fields: new Dictionary<string, object?>
             {
-                ["tempExe"] = copy.TempExePath,
-                ["args"] = string.Join(" ", args)
+                ["dotnet"] = dotnet,
+                ["tempDll"] = copy.TempExePath,
+                ["args"] = string.Join(" ", launchArgs)
             });
             return new HandoffResult(SetupExitCodes.Ok, copy.TempFolder, copy.TempExePath, copy.Sha256);
         }

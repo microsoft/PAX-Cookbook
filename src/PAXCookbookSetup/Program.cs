@@ -40,10 +40,18 @@ static int Run(string[] argv)
     using var log = new SetupLogger(logsDir);
     var runningExe = Process.GetCurrentProcess().MainModule?.FileName
                      ?? typeof(Program).Assembly.Location;
+    // The handoff decision keys off the MANAGED assembly location, not the
+    // process EXE: the installed Setup runs as the signed dotnet.exe host (its
+    // MainModule is dotnet.exe, OUTSIDE the install root) with this DLL as its
+    // argument. Assembly.Location is <installRoot>\Setup\PAXCookbookSetup.dll for
+    // the installed copy, and empty for the self-contained single-file
+    // bootstrapper (which is never run from under the install root).
+    var runningManaged = typeof(Program).Assembly.Location;
     log.Write("setup-start", fields: new Dictionary<string, object?>
     {
         ["verb"] = parsed.Verb, ["installRoot"] = installRoot,
         ["pid"] = Environment.ProcessId, ["runningExe"] = runningExe,
+        ["runningManaged"] = runningManaged,
         ["handoffFromInstalled"] = parsed.HandoffFromInstalled
     });
 
@@ -101,9 +109,9 @@ static int Run(string[] argv)
                 // also go through handoff because the installed Setup EXE
                 // is one of the files being removed (uninstall-contract
                 // §3.1 + setup-self-handoff-contract §10).
-                if (SelfHandoff.ShouldHandOff(runningExe, installRoot, parsed.HandoffFromInstalled))
+                if (SelfHandoff.ShouldHandOff(runningManaged, installRoot, parsed.HandoffFromInstalled))
                 {
-                    var result = HandoffRunner.Run(parsed, runningExe, installRoot,
+                    var result = HandoffRunner.Run(parsed, runningManaged, installRoot,
                                                    Path.GetTempPath(),
                                                    new RealProcessLauncher(), log);
                     return result.ExitCode;
@@ -112,7 +120,7 @@ static int Run(string[] argv)
                 // If we ARE the handed-off temp copy, enforce marker validity.
                 if (parsed.HandoffFromInstalled)
                 {
-                    var mv = SelfHandoff.ValidateMarkers(runningExe, parsed, Path.GetTempPath());
+                    var mv = SelfHandoff.ValidateMarkers(runningManaged, parsed, Path.GetTempPath());
                     if (!mv.Ok)
                     {
                         log.Write("handoff-marker-rejected", "error",

@@ -123,37 +123,14 @@ public static class InstallVerb
                 new Dictionary<string, object?> { ["detail"] = ex.Message });
         }
 
-        // Bootstrapper model: the Setup EXE is not shipped in the payload, so
-        // self-install the running Setup EXE into <installRoot>\Setup. This is
-        // what Add/Remove Programs uninstall, the Start-Menu Repair/Uninstall
-        // shortcuts, and in-place repair/update (which run that installed Setup
-        // against the local PayloadCache written below) resolve to. Skipped when
-        // a build embedded the Setup EXE in the payload (already copied above).
-        try
-        {
-            var installedSetup = Path.Combine(installRoot, "Setup", m.Payload.SetupExe.Name);
-            if (!File.Exists(installedSetup))
-            {
-                var runningSetup = Environment.ProcessPath;
-                if (string.IsNullOrEmpty(runningSetup) || !File.Exists(runningSetup))
-                    throw new IOException(
-                        $"running Setup EXE path unavailable: '{runningSetup}'");
-                Directory.CreateDirectory(Path.GetDirectoryName(installedSetup)!);
-                File.Copy(runningSetup, installedSetup, overwrite: true);
-                log.Write("install-setup-self-installed",
-                    fields: new Dictionary<string, object?>
-                    {
-                        ["source"] = runningSetup,
-                        ["dest"] = installedSetup
-                    });
-            }
-        }
-        catch (Exception ex)
-        {
-            log.Write("install-setup-self-copy-failed", "error",
-                new Dictionary<string, object?> { ["detail"] = ex.Message });
-            return SetupExitCodes.InstallFailed;
-        }
+        // The framework-dependent Setup runtime (Setup\PAXCookbookSetup.dll +
+        // its .runtimeconfig.json / .deps.json / PAXCookbook.Shared.dll) ships in
+        // the payload and is copied + hash-verified by PayloadCopier above. The
+        // unsigned Setup apphost EXE is NO LONGER self-copied into the install
+        // tree: Add/Remove Programs, repair, and upgrade all run the DLL through
+        // the Microsoft-signed dotnet.exe host, which is WDAC-safe (the same
+        // launch model as the app). Running the unsigned EXE was blocked by WDAC,
+        // which is why uninstall did nothing on locked-down machines.
 
         // Phase 12 (Mode B failure repair): write the payload to a
         // verified local cache under <installRoot>\PayloadCache so the

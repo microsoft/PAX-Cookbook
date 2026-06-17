@@ -13,6 +13,11 @@ public static class ProductConstants
     // only as the shortcut icon source (reading an icon is allowed).
     public const string AppDllName = "PAX Cookbook.dll";
     public const string SetupExeName = "PAXCookbookSetup.exe";
+    // Framework-dependent Setup assembly. Like the app, the installed Setup is
+    // run by the Microsoft-signed dotnet.exe host (dotnet.exe <SetupDllName>) so
+    // uninstall/repair/upgrade work under corporate WDAC, which blocks the
+    // unsigned apphost. The Setup EXE is never executed from the install tree.
+    public const string SetupDllName = "PAXCookbookSetup.dll";
 
     // From webview2-host-contract.md + install-state.schema.json (const).
     public const string Aumid = "PAXCookbook.App.v1";

@@ -458,7 +458,12 @@ public class SelfHandoffTests
             var r = HandoffRunner.Run(orig, src, srcDir, Path.GetTempPath(), rec, log);
             Assert.Equal(SetupExitCodes.Ok, r.ExitCode);
             Assert.NotNull(rec.Last);
-            Assert.Equal(r.TempExePath, rec.Last!.FileName);
+            // WDAC-safe relaunch: the temp Setup copy is run through the signed
+            // dotnet.exe host (dotnet.exe "<temp>\PAXCookbookSetup.*" <args>), so
+            // the launched process is dotnet.exe and the first argument is the
+            // temp copy, not the temp file itself.
+            Assert.EndsWith("dotnet.exe", rec.Last!.FileName, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(r.TempExePath, rec.Last.Arguments[0]);
             Assert.Contains("--handoff-from-installed", rec.Last.Arguments);
             Assert.Contains("--handoff-folder", rec.Last.Arguments);
             Assert.True(File.Exists(r.TempExePath));

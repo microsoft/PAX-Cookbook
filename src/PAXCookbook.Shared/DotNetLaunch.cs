@@ -45,6 +45,26 @@ public static class DotNetLaunch
         => Path.Combine(installRoot, ProductConstants.AppRootFolderName,
                         ProductConstants.BinRootFolderName, ProductConstants.AppExeName);
 
+    // <installRoot>\Setup\PAXCookbookSetup.dll — the framework-dependent Setup
+    // assembly run by the signed dotnet.exe for uninstall/repair/upgrade under
+    // WDAC (the same launch model as the app). The unsigned Setup apphost is not
+    // shipped into the install tree.
+    public static string SetupDllPath(string installRoot)
+        => Path.Combine(installRoot, "Setup", ProductConstants.SetupDllName);
+
+    // A full WDAC-safe shell command line that runs an installed Setup verb via
+    // the signed dotnet.exe host:
+    //   "<dotnet.exe>" "<installRoot>\Setup\PAXCookbookSetup.dll" <argTail>
+    // Used for the Add/Remove Programs Uninstall/QuietUninstall strings.
+    public static string SetupDllCommand(string installRoot, string argTail)
+    {
+        var dotnet = DotNetExePath();
+        var dll = SetupDllPath(installRoot);
+        return string.IsNullOrEmpty(argTail)
+            ? $"\"{dotnet}\" \"{dll}\""
+            : $"\"{dotnet}\" \"{dll}\" {argTail}";
+    }
+
     // dotnet.exe is a CONSOLE app, so launching it from a shortcut / Run key /
     // protocol / file-association would flash a blank terminal window. The
     // shell-invoked launches instead run the Microsoft-signed wscript.exe on the

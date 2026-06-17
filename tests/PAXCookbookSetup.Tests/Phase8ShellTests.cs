@@ -245,7 +245,8 @@ public class Phase8ShellTests
         var rg = new InMemoryRegistryWriter();
         var u = new UninstallRegistrar(rg);
         var r = u.Register(FakeInstallRoot, AppVersion);
-        Assert.EndsWith(@"Setup\PAXCookbookSetup.exe"" uninstall", r.UninstallString);
+        // WDAC-safe: dotnet.exe runs the framework-dependent Setup DLL.
+        Assert.EndsWith(@"Setup\PAXCookbookSetup.dll"" uninstall", r.UninstallString);
         Assert.StartsWith("\"", r.UninstallString);
     }
 
@@ -420,7 +421,7 @@ public class Phase8ShellTests
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         Assert.True(h.Registry.SubKeyExists(UninstallRegistrar.RootSubKey));
         var us = h.Registry.GetString(UninstallRegistrar.RootSubKey, "UninstallString")!;
-        Assert.EndsWith("PAXCookbookSetup.exe\" uninstall", us);
+        Assert.EndsWith("PAXCookbookSetup.dll\" uninstall", us);
         Assert.Contains(h.InstallRoot, us);
     }
 

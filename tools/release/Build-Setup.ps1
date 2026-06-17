@@ -99,10 +99,11 @@ function SizeOf([string]$p) { (Get-Item -LiteralPath $p).Length }
 
 $pubApp        = Join-Path $out 'publish\App'
 $pubSetupStage = Join-Path $out 'publish\Setup-stage1'
+$pubSetupFd    = Join-Path $out 'publish\Setup-fd'
 $pubSetupFinal = Join-Path $out 'publish\Setup'
 $payload       = Join-Path $out 'payload'
 $payloadZip    = Join-Path $out 'PAXCookbookPayload.zip'
-New-Item -ItemType Directory -Force -Path $pubApp,$pubSetupStage,$pubSetupFinal,$payload | Out-Null
+New-Item -ItemType Directory -Force -Path $pubApp,$pubSetupStage,$pubSetupFd,$pubSetupFinal,$payload | Out-Null
 
 Log "PAX Cookbook single-file Setup build"
 Log "  repo            : $root"
@@ -196,9 +197,46 @@ Invoke-Step '[4/7] publish Setup stage-1 (self-contained, no payload)' {
 $stage1Exe = Join-Path $pubSetupStage 'PAXCookbookSetup.exe'
 if (-not (Test-Path -LiteralPath $stage1Exe)) { throw "stage-1 Setup EXE missing: $stage1Exe" }
 
-# In bootstrapper model, the payload contains ONLY the App. The Setup EXE
-# is downloaded separately when needed for repair/update. This keeps the
-# payload small (~20 MiB instead of ~80 MiB).
+# ---------------------------------------------------------------------
+# [4b/8] Publish framework-dependent Setup runtime into payload\Setup
+# ---------------------------------------------------------------------
+# The installed Setup is run by the Microsoft-signed dotnet.exe host
+# (dotnet.exe "<installRoot>\Setup\PAXCookbookSetup.dll" <verb>), which is
+# WDAC-safe. The unsigned single-file Setup apphost is BLOCKED by WDAC, so
+# Add/Remove Programs uninstall (and repair/upgrade) must run the DLL through
+# dotnet.exe — the same proven launch model as the app itself. We publish
+# framework-dependent with UseAppHost=false (NO unsigned EXE emitted) and ship
+# only the managed runtime files; the WinForms / .NET 8 Desktop assemblies come
+# from the installed .NET 8 Desktop Runtime prerequisite.
+Invoke-Step '[4b/8] publish Setup framework-dependent (payload\Setup)' {
+    dotnet publish (Join-Path $root 'src\PAXCookbookSetup\PAXCookbookSetup.csproj') `
+        -c $Configuration --self-contained false `
+        -p:UseAppHost=false -p:DebugType=none -p:DebugSymbols=false `
+        -o $pubSetupFd --nologo 2>&1 |
+        Tee-Object -Append -FilePath $logFile | Out-Null
+}
+$setupDllPublished = Join-Path $pubSetupFd 'PAXCookbookSetup.dll'
+if (-not (Test-Path -LiteralPath $setupDllPublished)) {
+    throw "framework-dependent Setup publish did not produce PAXCookbookSetup.dll at: $setupDllPublished"
+}
+# Stage only the managed runtime files the installed Setup needs to boot under
+# dotnet.exe. No .pdb, no unsigned apphost.
+$setupStageDir = Join-Path $payload 'Setup'
+New-Item -ItemType Directory -Force -Path $setupStageDir | Out-Null
+$setupFdFiles = @(
+    'PAXCookbookSetup.dll'
+    'PAXCookbookSetup.runtimeconfig.json'
+    'PAXCookbookSetup.deps.json'
+    'PAXCookbook.Shared.dll'
+)
+foreach ($f in $setupFdFiles) {
+    $srcF = Join-Path $pubSetupFd $f
+    if (-not (Test-Path -LiteralPath $srcF)) {
+        throw "framework-dependent Setup publish missing required file: $f"
+    }
+    Copy-Item $srcF (Join-Path $setupStageDir $f) -Force
+}
+Log ("  staged framework-dependent Setup: {0} files into payload\Setup" -f $setupFdFiles.Count)
 
 # ---------------------------------------------------------------------
 # [5/7] Write manifest.json
@@ -243,8 +281,17 @@ Invoke-Step '[5/7] write manifest.json' {
             sizeBytes = $_.Length
         })
     }
-    # Note: Setup EXE is not included in payload in bootstrapper model.
-    # Repair/update downloads it separately.
+    # Framework-dependent Setup runtime under payload\Setup\ (installed and
+    # hash-verified like every other payload file). The installed Setup runs via
+    # the signed dotnet.exe host for WDAC-safe uninstall/repair/upgrade.
+    Get-ChildItem (Join-Path $payload 'Setup') -File -Recurse | ForEach-Object {
+        $rel = $_.FullName.Substring($payload.Length).TrimStart('\','/')
+        $files.Add([ordered]@{
+            relativeInstallPath = $rel
+            sha256 = HashOf $_.FullName
+            sizeBytes = $_.Length
+        })
+    }
 
     $build = if ([string]::IsNullOrWhiteSpace($BuildId)) {
         'setup-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
@@ -273,7 +320,7 @@ Invoke-Step '[5/7] write manifest.json' {
                 name = 'PAXCookbookSetup.exe'
                 sha256 = HashOf $stage1Exe
                 sizeBytes = SizeOf $stage1Exe
-                note = 'Not included in payload; downloaded separately for repair/update'
+                note = 'Bootstrapper apphost metadata; not installed. The installed Setup is the framework-dependent PAXCookbookSetup.dll under Setup\ (in files[]), run via dotnet.exe.'
             }
             appExe = [ordered]@{
                 name = 'PAX Cookbook.exe'

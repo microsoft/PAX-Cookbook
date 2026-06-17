@@ -393,7 +393,7 @@ public class Phase9UninstallTests
         var us = h.Registry.GetString(UninstallRegistrar.RootSubKey, "UninstallString")!;
         Assert.StartsWith("\"", us);
         Assert.Contains(h.InstallRoot, us);
-        Assert.EndsWith("PAXCookbookSetup.exe\" uninstall", us);
+        Assert.EndsWith("PAXCookbookSetup.dll\" uninstall", us);
     }
 
     // ---- 24. install-state.json is removed last in standard mode. ----
