@@ -5,106 +5,62 @@ using PAXCookbook.Shared;
 
 namespace PAXCookbookSetup.Shell;
 
-// Source-of-truth list of shortcut definitions Setup may create on the
-// current user's system. The list is deliberately small and explicit
-// per Phase 8 contract:
+// Source-of-truth for the SINGLE shortcut Setup creates on the current user's
+// system. Under corporate WDAC the unsigned apphost ("PAX Cookbook.exe") cannot
+// be executed, so the shortcut launches the Microsoft-signed dotnet.exe with
+// the app DLL as its argument; the apphost EXE is used ONLY as the icon source
+// (reading an icon is allowed, executing is not).
 //
-//   1. Primary       "PAX Cookbook"               -> PAX Cookbook.exe --workspace <ws> --approot <app>
-//   2. Desktop       "PAX Cookbook"               -> PAX Cookbook.exe --workspace <ws> --approot <app>
-//   3. Support Mode  "PAX Cookbook Support Mode"  -> PAX Cookbook.exe support
-//   4. Repair        "Repair PAX Cookbook"        -> PAXCookbookSetup.exe repair
-//   5. Uninstall     "Uninstall PAX Cookbook"     -> PAXCookbookSetup.exe uninstall
-//
-// Ordering:
-//   - Primary first (OrderHint = 0).
-//   - Uninstall last  (OrderHint = 100).
-//   - Other maintenance shortcuts in between (10..40).
-//
-// Recommended suppression (System.AppUserModel.ExcludeFromShowInNewInstall):
-//   - true for all maintenance shortcuts.
-//   - false for the primary "PAX Cookbook" shortcut.
+// Exactly ONE shortcut is created — the primary "PAX Cookbook" launcher placed
+// directly under Start Menu\Programs (NO product subfolder). The former Support
+// Mode / Repair / Uninstall shortcuts and the "PAX Cookbook" group folder are no
+// longer created; the installer and uninstaller clean up any left by a prior
+// version.
 public static class ShortcutCatalog
 {
     public const string PrimaryName       = "PAX Cookbook";
     public const string DesktopName       = "PAX Cookbook";
+
+    // Legacy names — no longer created. Retained so install/uninstall can
+    // recognize and remove shortcuts left by a prior version, and for
+    // back-compatible references.
     public const string SupportModeName   = "PAX Cookbook Support Mode";
     public const string RepairName        = "Repair PAX Cookbook";
     public const string UninstallName     = "Uninstall PAX Cookbook";
 
+    // Legacy Start Menu group folder name. No longer created.
     public const string StartMenuGroup    = "PAX Cookbook";
 
-    public static IReadOnlyList<ShortcutDefinition> StartMenuShortcuts(string installRoot, bool includeUninstall, bool includeSupport)
+    public static IReadOnlyList<ShortcutDefinition> StartMenuShortcuts(
+        string installRoot, bool includeUninstall, bool includeSupport)
     {
-        var appExe = AppExePath(installRoot);
-        var setupExe = SetupExePath(installRoot);
-        var appDir = Path.GetDirectoryName(appExe)!;
-        var setupDir = Path.GetDirectoryName(setupExe)!;
-        var aumid = ProductConstants.Aumid;
-        // The primary launch shortcut hands the native host the canonical
-        // production workspace and app root explicitly — byte-identical to the
-        // PowerShell installer's launch args — so the host never relies on its
-        // own default and the window keys on the production workspace. The EXE
-        // has no "open" verb dispatcher (it reads --workspace/--approot by name,
-        // order-independent), so the previously-inert "open" verb is dropped.
-        var workspacePath = Path.Combine(installRoot, ProductConstants.WorkspaceFolderName);
-        var appRootPath   = Path.Combine(installRoot, ProductConstants.AppRootFolderName);
-        var launchArgs    = $"--workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
-        // All shortcuts display the primary brand icon (PAX Cookbook), even
-        // when the target is the Setup EXE for maintenance verbs.
-        var primaryIcon = appExe + ",0";
-
-        var list = new List<ShortcutDefinition>
-        {
-            // 1. Primary — NOT suppressed from Recommended.
-            new(Kind: "start-menu", Name: PrimaryName, Target: appExe,
-                Arguments: launchArgs, WorkingDirectory: appDir,
-                Aumid: aumid, IconLocation: primaryIcon,
-                ExcludeFromRecommended: false, OrderHint: 0),
-
-            // 4. Repair — maintenance, suppressed.
-            new(Kind: "start-menu", Name: RepairName, Target: setupExe,
-                Arguments: "repair", WorkingDirectory: setupDir,
-                Aumid: aumid, IconLocation: primaryIcon,
-                ExcludeFromRecommended: true, OrderHint: 30),
-        };
-
-        if (includeSupport)
-        {
-            list.Insert(1, new ShortcutDefinition(
-                Kind: "start-menu", Name: SupportModeName, Target: appExe,
-                Arguments: "support", WorkingDirectory: appDir,
-                Aumid: aumid, IconLocation: primaryIcon,
-                ExcludeFromRecommended: true, OrderHint: 10));
-        }
-
-        if (includeUninstall)
-        {
-            // 5. Uninstall — maintenance, suppressed, LAST in folder.
-            list.Add(new ShortcutDefinition(
-                Kind: "start-menu", Name: UninstallName, Target: setupExe,
-                Arguments: "uninstall", WorkingDirectory: setupDir,
-                Aumid: aumid, IconLocation: primaryIcon,
-                ExcludeFromRecommended: true, OrderHint: 100));
-        }
-
-        list.Sort((a, b) => a.OrderHint.CompareTo(b.OrderHint));
-        return list;
+        // Exactly one shortcut. includeUninstall/includeSupport are accepted for
+        // signature compatibility but no maintenance shortcuts are created.
+        return new List<ShortcutDefinition> { PrimaryDefinition(installRoot) };
     }
 
-    public static ShortcutDefinition DesktopShortcut(string installRoot)
+    // The one canonical launch shortcut, shared by the Start Menu and Desktop.
+    // WDAC-safe: target the Microsoft-signed dotnet.exe host and pass the app
+    // DLL plus the canonical production workspace/app root as arguments. The
+    // icon still comes from the apphost EXE (icon reads are allowed).
+    private static ShortcutDefinition PrimaryDefinition(string installRoot, string kind = "start-menu")
     {
+        var dotnet = DotNetLaunch.DotNetExePath();
+        var appDll = DotNetLaunch.AppDllPath(installRoot);
         var appExe = AppExePath(installRoot);
         var appDir = Path.GetDirectoryName(appExe)!;
-        // Same explicit production launch args as the Start-Menu primary.
         var workspacePath = Path.Combine(installRoot, ProductConstants.WorkspaceFolderName);
         var appRootPath   = Path.Combine(installRoot, ProductConstants.AppRootFolderName);
-        var launchArgs    = $"--workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
+        var launchArgs = $"\"{appDll}\" --workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
         return new ShortcutDefinition(
-            Kind: "desktop", Name: DesktopName, Target: appExe,
+            Kind: kind, Name: kind == "desktop" ? DesktopName : PrimaryName, Target: dotnet,
             Arguments: launchArgs, WorkingDirectory: appDir,
             Aumid: ProductConstants.Aumid, IconLocation: appExe + ",0",
             ExcludeFromRecommended: false, OrderHint: 0);
     }
+
+    public static ShortcutDefinition DesktopShortcut(string installRoot)
+        => PrimaryDefinition(installRoot, kind: "desktop");
 
     public static string AppExePath(string installRoot)
         => Path.Combine(installRoot, "App", "bin", "PAX Cookbook.exe");

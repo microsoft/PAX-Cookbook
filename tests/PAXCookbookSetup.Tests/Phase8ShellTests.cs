@@ -51,14 +51,14 @@ public class Phase8ShellTests
         return new Harness(ops, sc, rg, ms, startFolder, installRoot);
     }
 
-    // ---- 1. ShortcutCatalog ordering: primary first, uninstall last. ----
+    // ---- 1. ShortcutCatalog emits exactly the single primary shortcut. ----
     [Fact]
-    public void Catalog_PrimaryShortcutFirst_UninstallLast()
+    public void Catalog_EmitsSinglePrimaryShortcut()
     {
         var defs = ShortcutCatalog.StartMenuShortcuts(FakeInstallRoot,
             includeUninstall: true, includeSupport: true);
+        Assert.Single(defs);
         Assert.Equal(ShortcutCatalog.PrimaryName, defs.First().Name);
-        Assert.Equal(ShortcutCatalog.UninstallName, defs.Last().Name);
     }
 
     // ---- 2. Recommended-list suppression: primary FALSE, maintenance TRUE. ----
@@ -81,46 +81,38 @@ public class Phase8ShellTests
         Assert.Equal("PAXCookbook.App.v1", ProductConstants.Aumid);
     }
 
-    // ---- 4. Targets and arguments are correct. ----
+    // ---- 4. Target is the signed dotnet host; args carry the DLL + paths. ----
     [Fact]
-    public void Catalog_TargetsAndArguments_AreCorrect()
+    public void Catalog_TargetIsDotNet_ArgsCarryDll()
     {
         var defs = ShortcutCatalog.StartMenuShortcuts(FakeInstallRoot, true, true);
         var primary = defs.First(d => d.Name == ShortcutCatalog.PrimaryName);
-        Assert.EndsWith(@"App\bin\PAX Cookbook.exe", primary.Target);
-        // The primary launch shortcut now carries explicit production launch
-        // args (no inert "open" verb) — identical to the PowerShell installer.
+        // WDAC-safe: the shortcut runs dotnet.exe, not the unsigned apphost.
+        Assert.EndsWith("dotnet.exe", primary.Target, System.StringComparison.OrdinalIgnoreCase);
+        var expectedDll = Path.Combine(FakeInstallRoot, "App", "bin", "PAX Cookbook.dll");
         var expectedWs  = Path.Combine(FakeInstallRoot, "Workspace");
         var expectedApp = Path.Combine(FakeInstallRoot, "App");
-        Assert.Equal($"--workspace \"{expectedWs}\" --approot \"{expectedApp}\"", primary.Arguments);
-
-        var repair = defs.First(d => d.Name == ShortcutCatalog.RepairName);
-        Assert.EndsWith(@"Setup\PAXCookbookSetup.exe", repair.Target);
-        Assert.Equal("repair", repair.Arguments);
-
-        var unin = defs.First(d => d.Name == ShortcutCatalog.UninstallName);
-        Assert.EndsWith(@"Setup\PAXCookbookSetup.exe", unin.Target);
-        Assert.Equal("uninstall", unin.Arguments);
-
-        // The desktop launch shortcut carries the same explicit launch args.
+        Assert.Equal($"\"{expectedDll}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", primary.Arguments);
+        // Icon still comes from the apphost EXE (icon reads are allowed).
+        Assert.EndsWith(@"App\bin\PAX Cookbook.exe,0", primary.IconLocation);
+        // The desktop shortcut shares the same dotnet launch.
         var desktop = ShortcutCatalog.DesktopShortcut(FakeInstallRoot);
-        Assert.EndsWith(@"App\bin\PAX Cookbook.exe", desktop.Target);
-        Assert.Equal($"--workspace \"{expectedWs}\" --approot \"{expectedApp}\"", desktop.Arguments);
+        Assert.EndsWith("dotnet.exe", desktop.Target, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Equal($"\"{expectedDll}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", desktop.Arguments);
     }
 
     // ---- 5. ShellOperations.Install creates expected shortcut count. ----
     // Phase 9 update: real uninstall exists, so the default flow now
     // surfaces the uninstall shortcut as well.
     [Fact]
-    public void Install_CreatesAllShortcuts_WithoutDesktop()
+    public void Install_CreatesSingleShortcut_WithoutDesktop()
     {
         var h = Build();
         var r = h.Ops.Install(h.InstallRoot, AppVersion, createDesktopShortcut: false);
-        // primary + support + repair + uninstall = 4 (no desktop)
-        Assert.Equal(4, r.ShortcutsCreated);
-        Assert.Equal(4, h.Shortcuts.Writes.Count);
-        Assert.Contains(h.Shortcuts.Writes,
-            w => w.Def.Name == ShortcutCatalog.UninstallName);
+        // Single primary shortcut (no folder, no maintenance shortcuts, no desktop).
+        Assert.Equal(1, r.ShortcutsCreated);
+        Assert.Single(h.Shortcuts.Writes);
+        Assert.Equal(ShortcutCatalog.PrimaryName, h.Shortcuts.Writes.First().Def.Name);
     }
 
     // ---- 6. Desktop shortcut included when requested. ----
@@ -129,7 +121,8 @@ public class Phase8ShellTests
     {
         var h = Build();
         var r = h.Ops.Install(h.InstallRoot, AppVersion, createDesktopShortcut: true);
-        Assert.Equal(5, r.ShortcutsCreated);
+        // Primary (start-menu) + desktop = 2.
+        Assert.Equal(2, r.ShortcutsCreated);
         Assert.Contains(h.Shortcuts.Writes, w => w.Def.Kind == "desktop");
     }
 
@@ -146,7 +139,7 @@ public class Phase8ShellTests
         Assert.Equal(AppVersion, m.AppVersion);
         Assert.Equal("PAXCookbook.App.v1", m.Aumid);
         Assert.Equal(h.InstallRoot, m.InstallRoot);
-        Assert.Equal(4, m.Shortcuts.Count);
+        Assert.Single(m.Shortcuts);
     }
 
     // ---- 8. Every manifest entry carries sha256 + aumid. ----
@@ -196,8 +189,8 @@ public class Phase8ShellTests
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         h.Shortcuts.Writes.Clear();
         var r = h.Ops.Repair(h.InstallRoot, AppVersion);
-        Assert.Equal(4, h.Shortcuts.Writes.Count);
-        Assert.Equal(4, r.ShortcutsCreated);
+        Assert.Single(h.Shortcuts.Writes);
+        Assert.Equal(1, r.ShortcutsCreated);
     }
 
     // ---- 12. ProtocolRegistrar.Register sets all 4 expected values. ----
@@ -286,7 +279,7 @@ public class Phase8ShellTests
         Assert.True(r.ProtocolRegistered);
         Assert.True(r.UninstallRegistered);
         Assert.False(string.IsNullOrEmpty(r.UninstallString));
-        Assert.True(r.ShortcutsCreated >= 4);
+        Assert.True(r.ShortcutsCreated >= 1);
     }
 
     // ---- 19. ShellOperations.Inspect reflects post-install state. ----
@@ -298,21 +291,17 @@ public class Phase8ShellTests
         var s = h.Ops.Inspect(h.InstallRoot);
         Assert.True(s.ProtocolRegistered);
         Assert.True(s.UninstallRegistered);
-        Assert.Equal(4, s.ShortcutsCount);
+        Assert.Equal(1, s.ShortcutsCount);
     }
 
-    // ---- 20. InMemoryShortcutWriter records exclude attempt/success per shortcut. ----
-    // Primary is NOT excluded; Repair (maintenance) is.
+    // ---- 20. The single primary shortcut is NOT excluded from Recommended. ----
     [Fact]
-    public void Writer_RecordsExcludeAttemptAndSuccess()
+    public void Writer_PrimaryNotExcludedFromRecommended()
     {
         var h = Build();
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         var primary = h.Shortcuts.Writes.First(w => w.Def.Name == ShortcutCatalog.PrimaryName);
         Assert.False(primary.Result.ExcludeAttempted);
-        var repair = h.Shortcuts.Writes.First(w => w.Def.Name == ShortcutCatalog.RepairName);
-        Assert.True(repair.Result.ExcludeAttempted);
-        Assert.True(repair.Result.ExcludeSucceeded);
     }
 
     // ---- 21. Force exclude failure does not crash install. ----
@@ -322,10 +311,9 @@ public class Phase8ShellTests
         var h = Build();
         h.Shortcuts.ForceExcludeFailure = true;
         var r = h.Ops.Install(h.InstallRoot, AppVersion, false);
-        Assert.Equal(4, r.ShortcutsCreated);
-        var repair = h.Shortcuts.Writes.First(w => w.Def.Name == ShortcutCatalog.RepairName);
-        Assert.True(repair.Result.ExcludeAttempted);
-        Assert.False(repair.Result.ExcludeSucceeded);
+        // The single primary shortcut is not excluded, so a forced exclude
+        // failure is a no-op; the install still succeeds with one shortcut.
+        Assert.Equal(1, r.ShortcutsCreated);
     }
 
     // ---- 22. .lnk paths land under provided Start Menu folder. ----
@@ -410,14 +398,15 @@ public class Phase8ShellTests
         Assert.True(opt.IncludeUninstallShortcut);
     }
 
-    // ---- 28. Default flow surfaces the Uninstall PAX Cookbook shortcut. ----
+    // ---- 28. Default flow surfaces exactly the single primary shortcut. ----
     [Fact]
-    public void DefaultShellFlow_SurfacesUninstallShortcut()
+    public void DefaultShellFlow_SurfacesSinglePrimaryShortcut()
     {
         var h = Build();
         h.Ops.Install(h.InstallRoot, AppVersion, false);
-        Assert.Contains(h.Shortcuts.Writes,
-            w => w.Def.Name == ShortcutCatalog.UninstallName);
+        var startMenu = h.Shortcuts.Writes.Where(w => w.Def.Kind == "start-menu").ToList();
+        Assert.Single(startMenu);
+        Assert.Equal(ShortcutCatalog.PrimaryName, startMenu[0].Def.Name);
     }
 
     // ---- 29. Default flow registers ARP and points UninstallString at
@@ -433,26 +422,28 @@ public class Phase8ShellTests
         Assert.Contains(h.InstallRoot, us);
     }
 
-    // ---- 30. Manifest produced by default flow contains the uninstall entry. ----
+    // ---- 30. Manifest produced by default flow contains the dotnet primary entry. ----
     [Fact]
-    public void Manifest_DefaultFlow_ContainsUninstallEntry()
+    public void Manifest_DefaultFlow_ContainsPrimaryDotNetEntry()
     {
         var h = Build();
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         var m = h.ManifestStore.TryLoad(h.InstallRoot)!;
         Assert.Contains(m.Shortcuts,
-            e => e.Target.EndsWith("PAXCookbookSetup.exe", System.StringComparison.OrdinalIgnoreCase)
-                 && e.Arguments == "uninstall");
+            e => e.Target.EndsWith("dotnet.exe", System.StringComparison.OrdinalIgnoreCase)
+                 && e.Arguments.Contains("PAX Cookbook.dll")
+                 && e.Arguments.Contains("--workspace"));
     }
 
-    // ---- 31. Catalog emits uninstall last when included. ----
+    // ---- 31. Catalog ignores include flags and always emits one shortcut. ----
     [Fact]
-    public void Catalog_WithExplicitInclude_UninstallIsLast()
+    public void Catalog_IgnoresIncludeFlags_AlwaysSinglePrimary()
     {
         var defs = ShortcutCatalog.StartMenuShortcuts(FakeInstallRoot,
             includeUninstall: true, includeSupport: true);
-        Assert.Contains(defs, d => d.Name == ShortcutCatalog.UninstallName);
-        Assert.Equal(ShortcutCatalog.UninstallName, defs.Last().Name);
+        Assert.Single(defs);
+        Assert.Equal(ShortcutCatalog.PrimaryName, defs.First().Name);
+        Assert.DoesNotContain(defs, d => d.Name == ShortcutCatalog.UninstallName);
     }
 
     // ---- 32. ShellOperations can opt OUT of ARP registration
@@ -476,6 +467,30 @@ public class Phase8ShellTests
         Assert.False(r.UninstallRegistered);
         Assert.Equal(string.Empty, r.UninstallString);
         Assert.False(rg.SubKeyExists(UninstallRegistrar.RootSubKey));
+    }
+
+    // ---- 33. Install removes a legacy "PAX Cookbook" group folder + stale
+    //          top-level lnk before writing the single shortcut (FIX 3). ----
+    [Fact]
+    public void Install_RemovesLegacyStartMenuGroupFolderAndStaleLnk()
+    {
+        var h = Build();
+        // Simulate a prior version's 4-shortcut group folder and a stale
+        // top-level "PAX Cookbook.lnk".
+        var legacyFolder = Path.Combine(h.StartFolder, ShortcutCatalog.StartMenuGroup);
+        Directory.CreateDirectory(legacyFolder);
+        File.WriteAllText(Path.Combine(legacyFolder, "PAX Cookbook.lnk"), "old");
+        File.WriteAllText(Path.Combine(legacyFolder, "Uninstall PAX Cookbook.lnk"), "old");
+        var staleLnk = Path.Combine(h.StartFolder, ShortcutCatalog.PrimaryName + ".lnk");
+        File.WriteAllText(staleLnk, "stale");
+
+        h.Ops.Install(h.InstallRoot, AppVersion, createDesktopShortcut: false);
+
+        // Legacy folder gone; stale top-level lnk deleted (the in-memory writer
+        // does not re-create a real file); exactly one shortcut written.
+        Assert.False(Directory.Exists(legacyFolder));
+        Assert.False(File.Exists(staleLnk));
+        Assert.Single(h.Shortcuts.Writes);
     }
 
     // Helper for test 24: builds an UninstallOperations that uses

@@ -33,12 +33,11 @@ public sealed class ShellRegistrar
         _nowUtcProvider = nowUtcProvider ?? (() => DateTime.UtcNow);
     }
 
-    // Per-user Start Menu folder for the product group.
+    // Per-user Start Menu Programs folder. The single product shortcut is
+    // written DIRECTLY here (no product subfolder) so it appears as one
+    // "PAX Cookbook" entry rather than a folder of shortcuts.
     public static string DefaultStartMenuFolder()
-    {
-        var programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
-        return Path.Combine(programs, ShortcutCatalog.StartMenuGroup);
-    }
+        => Environment.GetFolderPath(Environment.SpecialFolder.Programs);
 
     public ShellRegistrationOptions DefaultOptions(string installRoot, string appVersion)
         => new ShellRegistrationOptions(
@@ -72,6 +71,14 @@ public sealed class ShellRegistrar
     private ShellRegistrationResult Apply(ShellRegistrationOptions opt, bool deleteUnmanaged)
     {
         var start = _startMenuFolderProvider();
+
+        // Remove legacy shell artifacts before (re)writing the single shortcut:
+        // the old "PAX Cookbook" group folder (which held the Primary/Support/
+        // Repair/Uninstall .lnks) and any stale top-level "PAX Cookbook.lnk"
+        // from a prior install. Best-effort — a locked leftover never aborts the
+        // install; the fresh shortcut is written immediately after.
+        CleanupLegacyStartMenu(start);
+
         var entries = new List<ShortcutEntry>();
 
         var startDefs = ShortcutCatalog.StartMenuShortcuts(
@@ -104,6 +111,28 @@ public sealed class ShellRegistrar
             ShortcutsCreated: entries.Count,
             StartMenuFolder: start,
             Manifest: manifest);
+    }
+
+    // Deletes pre-existing shell artifacts the single-shortcut model replaces:
+    // the legacy product group folder and a stale top-level "PAX Cookbook.lnk".
+    // The new shortcut is written AFTER this runs.
+    private static void CleanupLegacyStartMenu(string startFolder)
+    {
+        try
+        {
+            var legacyGroup = Path.Combine(startFolder, ShortcutCatalog.StartMenuGroup);
+            if (Directory.Exists(legacyGroup))
+                Directory.Delete(legacyGroup, recursive: true);
+        }
+        catch { /* best-effort */ }
+
+        try
+        {
+            var staleLnk = Path.Combine(startFolder, ShortcutCatalog.PrimaryName + ".lnk");
+            if (File.Exists(staleLnk))
+                File.Delete(staleLnk);
+        }
+        catch { /* best-effort */ }
     }
 
     private ShortcutEntry ToEntry(ShortcutDefinition d, ShortcutWriteResult r) => new()

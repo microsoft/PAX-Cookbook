@@ -76,14 +76,20 @@ internal static class TrayIconHost
 
         void OpenUi()
         {
-            // Launch a windowed instance of this same executable with no args.
-            // It will detect this broker and attach a window to it.
+            // Launch a windowed instance with no app args; it detects this broker
+            // and attaches a window to it. WDAC-safe: run the Microsoft-signed
+            // dotnet.exe host with our DLL. (Environment.ProcessPath is dotnet.exe
+            // when we were launched that way, and relaunching it with no DLL would
+            // not start the app.)
             try
             {
-                string? exe = Environment.ProcessPath;
-                if (!string.IsNullOrEmpty(exe))
+                var dotnet = DotNetLaunch.DotNetExePath();
+                var dll = DotNetLaunch.OwnDllPath();
+                if (File.Exists(dll))
                 {
-                    Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false });
+                    var psi = new ProcessStartInfo(dotnet) { UseShellExecute = false };
+                    psi.ArgumentList.Add(dll);
+                    Process.Start(psi);
                 }
             }
             catch

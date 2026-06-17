@@ -9,8 +9,8 @@ namespace PAXCookbookSetup.Tests;
 //
 // Contract under test:
 //   - AutoStartRegistrar writes ONE named value "PAX Cookbook" under the
-//     SHARED Run key, carrying "<installRoot>\App\bin\PAX Cookbook.exe"
-//     --headless --workspace <ws> --approot <app>.
+//     SHARED Run key, carrying "<dotnet.exe>" "<installRoot>\App\bin\PAX
+//     Cookbook.dll" --headless --workspace <ws> --approot <app> (WDAC-safe).
 //   - ShellRemover removes that value ONLY when it points under installRoot
 //     (positive-ID); a value pointing elsewhere is left intact.
 //   - ShellOperations.Install wires the registrar through so the install
@@ -41,7 +41,11 @@ public class AutoStartTests
         Assert.NotNull(cmd);
         Assert.Equal(result.CommandLine, cmd);
         Assert.Contains("--headless", cmd);
-        Assert.Contains(@"App\bin\PAX Cookbook.exe", cmd);
+        // WDAC-safe: launches the signed dotnet.exe host with the app DLL,
+        // NOT the unsigned apphost EXE.
+        Assert.Contains("dotnet.exe", cmd);
+        Assert.Contains(@"App\bin\PAX Cookbook.dll", cmd);
+        Assert.DoesNotContain(@"App\bin\PAX Cookbook.exe", cmd);
         Assert.Contains(@"--workspace """ + Path.Combine(InstallRoot, "Workspace") + @"""", cmd);
         Assert.Contains(@"--approot """ + Path.Combine(InstallRoot, "App") + @"""", cmd);
         // The Run value name is the product brand (Task Manager Startup label).

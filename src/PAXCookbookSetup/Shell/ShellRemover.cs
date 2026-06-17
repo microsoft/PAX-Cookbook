@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using PAXCookbook.Shared;
 using PAXCookbook.Shared.Contracts;
 
 namespace PAXCookbookSetup.Shell;
@@ -58,10 +59,15 @@ public sealed class ShellRemover
                     shortcutsSkipped.Add(e.LnkPath ?? "<unknown>");
                     continue;
                 }
-                // Positive-ID: target must still resolve under installRoot.
-                bool ownedTarget = !string.IsNullOrEmpty(e.Target) &&
-                    Path.GetFullPath(e.Target).StartsWith(
-                        rootFull, StringComparison.OrdinalIgnoreCase);
+                // Positive-ID: the shortcut must still resolve under installRoot.
+                // With the dotnet launch model the Target is the shared signed
+                // dotnet.exe (OUTSIDE installRoot), so identify OUR shortcut by
+                // its working directory (App\bin), the app DLL in its arguments,
+                // or a legacy in-root Target.
+                bool ownedTarget =
+                    PathUnderRoot(e.Target, rootFull) ||
+                    PathUnderRoot(e.WorkingDirectory, rootFull) ||
+                    DotNetLaunch.CommandReferencesInstallRoot(e.Arguments, installRoot);
                 if (!ownedTarget)
                 {
                     shortcutsSkipped.Add(e.LnkPath);
@@ -200,31 +206,23 @@ public sealed class ShellRemover
             AutoStartSkipped: autoStartSkipped);
     }
 
-    // Extracts the first quoted path from a command line and tests
-    // whether it lies under installRoot. A protocol command of shape
-    // `"<installRoot>\App\bin\PAX Cookbook.exe" protocol "%1"` and an
-    // ARP UninstallString of shape `"<installRoot>\Setup\Setup.exe" uninstall`
-    // both have the EXE in the first quoted segment.
+    // True when a registry command references a path under installRoot. With the
+    // dotnet launch model the first token is the shared signed dotnet.exe
+    // (outside installRoot), so the match is on the app DLL / --workspace /
+    // --approot arguments. The ARP UninstallString still quotes the Setup EXE
+    // under installRoot, so it matches too.
     private static bool CommandPointsUnderInstallRoot(string? cmd, string installRoot)
+        => DotNetLaunch.CommandReferencesInstallRoot(cmd, installRoot);
+
+    // True when a single path string resolves under rootFull (already normalized
+    // with a trailing separator).
+    private static bool PathUnderRoot(string? path, string rootFull)
     {
-        if (string.IsNullOrEmpty(cmd)) return false;
-        var path = cmd!;
-        if (path.StartsWith("\""))
-        {
-            var end = path.IndexOf('"', 1);
-            if (end > 1) path = path.Substring(1, end - 1);
-        }
-        else
-        {
-            var sp = path.IndexOf(' ');
-            if (sp > 0) path = path.Substring(0, sp);
-        }
+        if (string.IsNullOrEmpty(path)) return false;
         try
         {
-            var pathFull = Path.GetFullPath(path);
-            var rootFull = Path.GetFullPath(installRoot)
-                .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            return pathFull.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase);
+            return Path.GetFullPath(path)
+                .StartsWith(rootFull, StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }

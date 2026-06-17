@@ -123,7 +123,7 @@ internal static class AutoStartSettingsModel
 
     // ---------------------------------------------------------------------
     // POST /api/v1/settings/autostart   body { enabled: bool }
-    // true  -> write the Run value = "<exe>" --headless --workspace <ws> --approot <app>
+    // true  -> write the Run value = "<dotnet>" "<dll>" --headless --workspace <ws> --approot <app>
     // false -> remove ONLY our value (never the shared Run key)
     // ---------------------------------------------------------------------
     public static (int Status, object Body) Set(object? body, string workspacePath, string appRoot)
@@ -177,18 +177,18 @@ internal static class AutoStartSettingsModel
     }
 
     // Build the SAME launch command the installer's AutoStartRegistrar writes:
-    //   "<exe>" --headless --workspace "<ws>" --approot "<approot>"
-    // so toggling off then on reproduces the installer's key byte-for-byte. The
-    // exe path is the running executable (Environment.ProcessPath); the
-    // workspace / approot are the values THIS broker was launched with (the
-    // canonical production paths in an installed app), normalized to absolute.
+    //   "<dotnet>" "<dll>" --headless --workspace "<ws>" --approot "<approot>"
+    // so toggling off then on reproduces the installer's key. Under corporate
+    // WDAC the unsigned apphost cannot be executed, so the command runs the
+    // Microsoft-signed dotnet.exe host with the app DLL (in <appRoot>\bin). The
+    // workspace / approot are the values THIS broker was launched with.
     private static string BuildCommand(string workspacePath, string appRoot)
     {
-        string exe = Environment.ProcessPath ?? string.Empty;
-        string exeFull = SafeFullPath(exe);
+        string dotnet = DotNetLaunch.DotNetExePath();
+        string dllFull = SafeFullPath(Path.Combine(appRoot, "bin", "PAX Cookbook.dll"));
         string wsFull = SafeFullPath(workspacePath);
         string appFull = SafeFullPath(appRoot);
-        return $"\"{exeFull}\" --headless --workspace \"{wsFull}\" --approot \"{appFull}\"";
+        return $"\"{dotnet}\" \"{dllFull}\" --headless --workspace \"{wsFull}\" --approot \"{appFull}\"";
     }
 
     private static string SafeFullPath(string p)

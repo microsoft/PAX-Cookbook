@@ -155,7 +155,7 @@ public class Phase9UninstallTests
     {
         var h = BuildPopulated();
         var r = h.Ops.RunStandard(h.InstallRoot);
-        Assert.True(r.ShortcutsRemoved >= 4); // primary+support+repair+uninstall
+        Assert.True(r.ShortcutsRemoved >= 1); // single primary shortcut
         Assert.NotEmpty(h.Shortcuts.Deleted);
         Assert.All(h.Shortcuts.Deleted,
             p => Assert.StartsWith(h.StartFolder, p));

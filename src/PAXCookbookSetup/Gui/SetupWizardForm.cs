@@ -702,11 +702,15 @@ internal sealed class SetupWizardForm : Form
     {
         try
         {
-            var appExe = ShortcutCatalog.AppExePath(_installRoot);
-            if (!File.Exists(appExe)) return;
+            // WDAC-safe launch: run the Microsoft-signed dotnet.exe host with the
+            // app DLL (the unsigned apphost EXE cannot be executed).
+            var appDll = DotNetLaunch.AppDllPath(_installRoot);
+            if (!File.Exists(appDll)) return;
+            var dotnet = DotNetLaunch.DotNetExePath();
             var ws = Path.Combine(_installRoot, ProductConstants.WorkspaceFolderName);
             var ar = Path.Combine(_installRoot, ProductConstants.AppRootFolderName);
-            var psi = new ProcessStartInfo { FileName = appExe, UseShellExecute = true };
+            var psi = new ProcessStartInfo { FileName = dotnet, UseShellExecute = true };
+            psi.ArgumentList.Add(appDll);
             psi.ArgumentList.Add("--workspace"); psi.ArgumentList.Add(ws);
             psi.ArgumentList.Add("--approot"); psi.ArgumentList.Add(ar);
             Process.Start(psi);

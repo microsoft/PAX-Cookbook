@@ -45,15 +45,18 @@ public class FileAssociationTests
                 ProductConstants.PaxFullFileExtension), null));
     }
 
-    // ---- 2. open command is quoted exe + quoted %1. ----
+    // ---- 2. open command runs the dotnet host + app DLL + quoted %1. ----
     [Fact]
-    public void Register_OpenCommandHasQuotedExeAndPercent1()
+    public void Register_OpenCommandRunsDotNetWithDllAndPercent1()
     {
         var rg = new InMemoryRegistryWriter();
         new FileAssociationRegistrar(rg).Register(InstallRoot);
 
         var cmd = rg.GetString(LiteProgKey + @"\shell\open\command", null);
-        Assert.Equal($"\"{ExpectedExe}\" \"%1\"", cmd);
+        var expectedDll = DotNetLaunch.AppDllPath(InstallRoot);
+        Assert.NotNull(cmd);
+        Assert.EndsWith($"\"{expectedDll}\" \"%1\"", cmd);
+        Assert.Contains("dotnet.exe", cmd);
     }
 
     // ---- 3. DefaultIcon points at the app exe, index 0. ----

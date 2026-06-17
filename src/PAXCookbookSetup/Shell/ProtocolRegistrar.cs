@@ -21,7 +21,11 @@ public sealed class ProtocolRegistrar
     public ProtocolRegistrationResult Register(string installRoot)
     {
         var appExe = ShortcutCatalog.AppExePath(installRoot);
-        var command = $"\"{appExe}\" protocol \"%1\"";
+        var dotnet = DotNetLaunch.DotNetExePath();
+        var appDll = DotNetLaunch.AppDllPath(installRoot);
+        // WDAC-safe: launch the Microsoft-signed dotnet.exe host with the app
+        // DLL. DefaultIcon still points at the apphost EXE (icon reads allowed).
+        var command = $"\"{dotnet}\" \"{appDll}\" protocol \"%1\"";
 
         _registry.SetString(RootSubKey, null, "URL:PAX Cookbook Protocol");
         _registry.SetString(RootSubKey, "URL Protocol", "");

@@ -40,12 +40,16 @@ public sealed class AutoStartRegistrar
     public AutoStartRegistrationResult Register(string installRoot)
     {
         var installRootFull = Path.GetFullPath(installRoot);
-        var appExe = Path.GetFullPath(ShortcutCatalog.AppExePath(installRootFull));
+        var dotnet = DotNetLaunch.DotNetExePath();
+        var appDll = Path.GetFullPath(DotNetLaunch.AppDllPath(installRootFull));
         var workspacePath = Path.Combine(installRootFull, ProductConstants.WorkspaceFolderName);
         var appRootPath = Path.Combine(installRootFull, ProductConstants.AppRootFolderName);
 
+        // WDAC-safe headless auto-start: run the Microsoft-signed dotnet.exe host
+        // with the app DLL (the unsigned apphost cannot be executed). Same
+        // --headless/--workspace/--approot contract as before.
         var command =
-            $"\"{appExe}\" --headless --workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
+            $"\"{dotnet}\" \"{appDll}\" --headless --workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
 
         _registry.SetString(RootSubKey, ValueName, command);
 
@@ -78,33 +82,12 @@ public sealed class AutoStartRegistrar
         return new AutoStartUnregistrationResult(Removed: removed, Skipped: false);
     }
 
-    // True when the first (quoted or bare) token of the Run command is an
-    // executable path that resolves under installRoot.
+    // True when the Run command references a path under installRoot. With the
+    // dotnet launch model the first token is the shared signed dotnet.exe
+    // (outside installRoot), so the positive-ID matches the app DLL /
+    // --workspace / --approot arguments instead.
     private static bool CommandPointsUnderInstallRoot(string command, string installRoot)
-    {
-        try
-        {
-            var t = command.Trim();
-            string exePath;
-            if (t.StartsWith("\"", StringComparison.Ordinal))
-            {
-                int end = t.IndexOf('"', 1);
-                if (end < 0) return false;
-                exePath = t.Substring(1, end - 1);
-            }
-            else
-            {
-                int sp = t.IndexOf(' ');
-                exePath = sp < 0 ? t : t.Substring(0, sp);
-            }
-            var exeFull = Path.GetFullPath(exePath);
-            var rootFull = Path.GetFullPath(installRoot)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                + Path.DirectorySeparatorChar;
-            return exeFull.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase);
-        }
-        catch { return false; }
-    }
+        => DotNetLaunch.CommandReferencesInstallRoot(command, installRoot);
 }
 
 public sealed record AutoStartRegistrationResult(

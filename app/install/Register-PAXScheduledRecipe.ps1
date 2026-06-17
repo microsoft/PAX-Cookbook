@@ -260,6 +260,29 @@ function Resolve-ExePath {
     return (Join-Path -Path $appDir -ChildPath (Join-Path 'bin' 'PAX Cookbook.exe'))
 }
 
+function Resolve-DllPath {
+    # The managed entry assembly dotnet.exe runs at fire time:
+    #   <App>\bin\PAX Cookbook.dll
+    $installDir = Split-Path -Parent $PSCommandPath
+    $appDir     = Split-Path -Parent $installDir
+    return (Join-Path -Path $appDir -ChildPath (Join-Path 'bin' 'PAX Cookbook.dll'))
+}
+
+function Resolve-DotNetPath {
+    # Microsoft-signed dotnet.exe host. Corporate WDAC blocks the unsigned
+    # apphost (PAX Cookbook.exe), so the scheduled task runs dotnet.exe with the
+    # app DLL as its argument. Prefer the standard per-machine install; fall
+    # back to PATH.
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramW6432}, ${env:ProgramFiles(x86)})) {
+        if ([string]::IsNullOrEmpty($base)) { continue }
+        $cand = Join-Path -Path $base -ChildPath (Join-Path 'dotnet' 'dotnet.exe')
+        if (Test-Path -LiteralPath $cand -PathType Leaf) { return $cand }
+    }
+    $cmd = Get-Command dotnet.exe -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) { return $cmd.Source }
+    return 'dotnet.exe'
+}
+
 function Invoke-Register {
     param(
         [string]$WorkspaceFull,
@@ -284,29 +307,33 @@ function Invoke-Register {
     }
     $rec = $verdict.recurrence
 
-    $exePath = Resolve-ExePath
-    if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
-        Write-RegistrarLine ('exe_missing: ' + $exePath) 'stderr'
+    $dllPath = Resolve-DllPath
+    if (-not (Test-Path -LiteralPath $dllPath -PathType Leaf)) {
+        Write-RegistrarLine ('dll_missing: ' + $dllPath) 'stderr'
         exit 3
     }
-    $exeDir = Split-Path -Parent $exePath
-    $appDir = Split-Path -Parent $exeDir
+    $dotnetPath = Resolve-DotNetPath
+    $binDir = Split-Path -Parent $dllPath
+    $appDir = Split-Path -Parent $binDir
 
     # Build the OS-side action. New-ScheduledTaskAction accepts a SINGLE
-    # -Argument string, so the headless one-shot flags are assembled here.
-    # The native runtime exe is the SINGLE sanctioned execution entrypoint
-    # (constraint 8): at fire time "PAX Cookbook.exe --run-scheduled-recipe
-    # <id> --workspace <ws> --approot <app>" runs exactly ONE scheduled cook
-    # through the same cook pipeline a manual bake uses. Paths that may
-    # contain spaces (workspace, app root) are double-quoted; the RecipeId is
-    # a ULID with no spaces or quotes. The argv carries NO secret -- the exe
-    # reads the bound Chef's Key from Windows Credential Manager at fire time.
-    $argString = '--run-scheduled-recipe ' + $RecipeIdArg + ' --workspace "' + $WorkspaceFull + '" --approot "' + $appDir + '"'
+    # -Argument string. Under corporate WDAC the unsigned apphost cannot be
+    # executed, so the task runs the Microsoft-signed dotnet.exe host with the
+    # app DLL as the FIRST argument token, followed by the headless one-shot
+    # flags. At fire time:
+    #   dotnet.exe "<App>\bin\PAX Cookbook.dll" --run-scheduled-recipe <id>
+    #              --workspace <ws> --approot <app>
+    # runs exactly ONE scheduled cook through the same cook pipeline a manual
+    # bake uses (constraint 8). Paths that may contain spaces (the DLL,
+    # workspace, app root) are double-quoted; the RecipeId is a ULID with no
+    # spaces or quotes. The argv carries NO secret -- the bound Chef's Key is
+    # read from Windows Credential Manager at fire time.
+    $argString = '"' + $dllPath + '" --run-scheduled-recipe ' + $RecipeIdArg + ' --workspace "' + $WorkspaceFull + '" --approot "' + $appDir + '"'
 
     $taskName = Get-WindowsTaskNameForRecipe -RecipeIdArg $RecipeIdArg
 
     try {
-        $action = New-ScheduledTaskAction -Execute $exePath -Argument $argString -WorkingDirectory $exeDir
+        $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $argString -WorkingDirectory $binDir
         $trigger = New-RecurrenceTrigger -Recurrence $rec
         $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive
         # Doctrine knobs:

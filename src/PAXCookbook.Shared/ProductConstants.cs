@@ -7,6 +7,11 @@ public static class ProductConstants
 {
     public const string ProductName = "PAX Cookbook";
     public const string AppExeName = "PAX Cookbook.exe";
+    // Managed entry assembly. Under corporate WDAC the unsigned apphost
+    // (AppExeName) cannot be executed, so every launch runs the Microsoft-
+    // signed dotnet.exe host with this DLL as its argument. The EXE remains
+    // only as the shortcut icon source (reading an icon is allowed).
+    public const string AppDllName = "PAX Cookbook.dll";
     public const string SetupExeName = "PAXCookbookSetup.exe";
 
     // From webview2-host-contract.md + install-state.schema.json (const).
