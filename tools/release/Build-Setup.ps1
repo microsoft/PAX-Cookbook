@@ -18,7 +18,10 @@
 #   5. Compresses the payload into PAX_Cookbook_Payload.zip.
 #   6. Publishes a self-contained single-file Setup EXE that downloads
 #      the payload from GitHub at runtime (no embedded payload).
-#   7. Verifies artifact sizes are within expected bounds.
+#   7. Updates versions.json (repo root) with the payload SHA-256 + size
+#      so the signed Setup verifies the payload at runtime without being
+#      rebuilt for routine payload updates.
+#   8. Verifies artifact sizes are within expected bounds.
 #
 # OUTPUTS (all under gitignored folders)
 #
@@ -32,7 +35,8 @@
 #
 #   * The PAX engine script bytes are immutable. This script only READS
 #     and COPIES resources/pax/*.ps1; it asserts the SHA-256 is unchanged.
-#   * Output goes ONLY under artifacts\ and dist\. Never to repo root.
+#   * Build outputs go under artifacts\ and dist\. The ONLY repo-root file
+#     written is versions.json (the payload SHA manifest Setup verifies).
 #   * No network calls. No git operations. No signing.
 #   * The installed App is framework-dependent (.NET 8 Desktop Runtime
 #     required at runtime), matching the proven production install.
@@ -333,6 +337,47 @@ Log ''
 Log "ARTIFACT (Payload) : $distPayload"
 Log ("  size  : {0:N1} MiB ({1} bytes)" -f ($payloadSize/1MB), $payloadSize)
 Log "  sha256: $payloadHash"
+
+# ---------------------------------------------------------------------
+# Update versions.json (repo root) — the payload SHA manifest.
+#
+# Decouples the signed Setup EXE from the payload: Setup downloads this
+# file at runtime and verifies the payload zip against the sha256/size
+# below, so a payload update only requires committing this manifest — the
+# Setup EXE never needs rebuilding/re-signing for routine payload updates.
+# minimumSetupVersion is preserved from the existing file (only bumped
+# deliberately when a payload genuinely requires a newer Setup).
+# ---------------------------------------------------------------------
+Invoke-Step 'update versions.json manifest' {
+    $versionsPath = Join-Path $root 'versions.json'
+    $minSetup = '1.0.0'
+    if (Test-Path -LiteralPath $versionsPath) {
+        try {
+            $existing = Get-Content -LiteralPath $versionsPath -Raw | ConvertFrom-Json
+            if ($existing.current -and $existing.current.minimumSetupVersion) {
+                $minSetup = [string]$existing.current.minimumSetupVersion
+            }
+        } catch { }
+    }
+    $vm = [ordered]@{
+        schemaVersion = 1
+        current = [ordered]@{
+            version = $AppVersion
+            payload = [ordered]@{
+                filename = 'PAX_Cookbook_Payload.zip'
+                sha256   = $payloadHash
+                size     = $payloadSize
+            }
+            engine = [ordered]@{
+                version = $versionInfo.paxScript.version
+                sha256  = $expectedEngineSha.ToLowerInvariant()
+            }
+            minimumSetupVersion = $minSetup
+        }
+    }
+    $vm | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $versionsPath -Encoding UTF8
+    Log "  versions.json updated: payload sha=$payloadHash size=$payloadSize engine=$($versionInfo.paxScript.version)"
+}
 
 # ---------------------------------------------------------------------
 # [8/8] Size verification gates

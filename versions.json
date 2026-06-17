@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "current": {
+    "version": "1.0.0",
+    "payload": {
+      "filename": "PAX_Cookbook_Payload.zip",
+      "sha256": "3fe1f73eed197eb4bb3d11365bd2a5d928bae750943cdef6635aec995e6d634b",
+      "size": 19996515
+    },
+    "engine": {
+      "version": "1.11.6",
+      "sha256": "0dd230734715abd15cf4c0a76013672bf9ad6713c3f82520a6333b0dcdaad361"
+    },
+    "minimumSetupVersion": "1.0.0"
+  }
+}

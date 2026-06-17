@@ -9,7 +9,11 @@ public sealed class PayloadDownloader
 {
     public const string PayloadUrl =
         "https://github.com/microsoft/PAX-Cookbook/releases/latest/download/PAX_Cookbook_Payload.zip";
-    
+
+    // Shown to the user when an integrity check fails after every retry.
+    public const string ManualDownloadUrl =
+        "https://github.com/microsoft/PAX-Cookbook/releases";
+
     private const int MaxRetries = 3;
     private const int BufferSize = 81920;  // 80KB chunks for progress reporting
     
@@ -36,15 +40,27 @@ public sealed class PayloadDownloader
             try { File.Delete(destPath); }
             catch { /* best-effort */ }
         }
-        
+
+        // Fetch the versions manifest once up front. If it can't be reached or
+        // parsed, we degrade to zip-integrity-only checking (offline / proxy /
+        // air-gapped scenarios still install) rather than blocking the install.
+        var expectation = await new ManifestVerifier(_log).TryFetchAsync(cancel);
+        if (expectation is null)
+        {
+            _progress("Version manifest unavailable — verifying download integrity only.");
+            _log.Write("payload-sha-skipped-no-manifest", "warning");
+        }
+
+        string? lastError = null;
         for (int attempt = 1; attempt <= MaxRetries; attempt++)
         {
             try
             {
-                var result = await TryDownloadAsync(destPath, attempt, cancel);
+                var result = await TryDownloadAsync(destPath, attempt, expectation, cancel);
                 if (result.Success)
                     return result;
-                    
+
+                lastError = result.Error;
                 // Log the failure but continue to retry
                 _log.Write("payload-download-attempt-failed", "warning",
                     new Dictionary<string, object?>
@@ -65,6 +81,7 @@ public sealed class PayloadDownloader
             }
             catch (Exception ex)
             {
+                lastError = ex.Message;
                 _log.Write("payload-download-exception", "error",
                     new Dictionary<string, object?>
                     {
@@ -73,19 +90,26 @@ public sealed class PayloadDownloader
                         ["message"] = ex.Message
                     });
                     
-                if (attempt >= MaxRetries)
+                if (attempt < MaxRetries)
                 {
-                    return new DownloadResult(false, null,
-                        $"Download failed after {MaxRetries} attempts: {ex.Message}");
+                    _progress($"Download attempt {attempt} failed, retrying...");
+                    try { await Task.Delay(1000 * attempt, cancel); }
+                    catch (OperationCanceledException) { throw; }
                 }
             }
         }
-        
-        return new DownloadResult(false, null, $"Download failed after {MaxRetries} attempts.");
+
+        // Every attempt failed: surface the last error plus the manual-download
+        // fallback so the user is never stranded.
+        var finalMsg = string.IsNullOrEmpty(lastError)
+            ? $"Download failed after {MaxRetries} attempts. You can download the files manually from {ManualDownloadUrl}"
+            : $"{lastError} You can download the files manually from {ManualDownloadUrl}";
+        return new DownloadResult(false, null, finalMsg);
     }
     
     private async Task<DownloadResult> TryDownloadAsync(
-        string destPath, int attempt, CancellationToken cancel)
+        string destPath, int attempt, ManifestVerifier.PayloadExpectation? expectation,
+        CancellationToken cancel)
     {
         // Validate the URL is allowed
         if (!PrereqDownloadHosts.IsAllowed(PayloadUrl))
@@ -186,7 +210,53 @@ public sealed class PayloadDownloader
             break;
         }
         
-        // Verify the downloaded zip is valid
+        // Integrity verification against the versions manifest (when available).
+        // Order: cheap size sanity check first, then the SHA-256 comparison.
+        if (expectation?.Size is long expectedSize)
+        {
+            var actualSize = new FileInfo(destPath).Length;
+            if (actualSize != expectedSize)
+            {
+                _log.Write("payload-size-mismatch", "warning",
+                    new Dictionary<string, object?>
+                    {
+                        ["expected"] = expectedSize,
+                        ["actual"] = actualSize
+                    });
+                TryDelete(destPath);
+                return new DownloadResult(false, null,
+                    $"The downloaded file is the wrong size (expected {expectedSize:N0} bytes, " +
+                    $"got {actualSize:N0}). The file may be incomplete or corrupted. Please try again.");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(expectation?.Sha256))
+        {
+            _progress("Verifying download integrity (SHA-256)...");
+            var actualSha = ManifestVerifier.ComputeSha256(destPath);
+            if (!string.Equals(actualSha, expectation!.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                _log.Write("payload-sha-mismatch", "error",
+                    new Dictionary<string, object?>
+                    {
+                        ["expected"] = expectation.Sha256,
+                        ["actual"] = actualSha
+                    });
+                TryDelete(destPath);
+                return new DownloadResult(false, null,
+                    "The downloaded file failed integrity verification (SHA-256 mismatch). " +
+                    "The file may be corrupted or tampered with. Please try again.");
+            }
+            _log.Write("payload-sha-verified", "info",
+                new Dictionary<string, object?> { ["sha256"] = actualSha });
+        }
+        else
+        {
+            _log.Write("payload-sha-skipped", "warning");
+        }
+
+        // Structural fallback check: confirm it is a valid PAX Cookbook zip.
+        // This is the sole integrity gate when the manifest was unavailable.
         _progress("Verifying download...");
         try
         {
@@ -220,6 +290,12 @@ public sealed class PayloadDownloader
             });
         
         return new DownloadResult(true, destPath, null);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch { /* best-effort */ }
     }
     
     // Cleanup the downloaded zip after extraction
