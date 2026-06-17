@@ -24,9 +24,12 @@ public static class ManifestValidator
         if (m.TargetOs != "windows") errors.Add("targetOs must be windows");
         if (m.TargetArch != "x64") errors.Add("targetArch must be x64");
 
-        // SetupExe under payloadRoot/<name>
-        CheckEntry(payloadRoot, m.Payload.SetupExe.Name, m.Payload.SetupExe.Sha256,
-                   m.Payload.SetupExe.SizeBytes, "payload.setupExe", errors);
+        // SetupExe under payloadRoot/<name>. Metadata only in the bootstrapper
+        // model (downloaded separately, NOT shipped in the payload), so validate
+        // it ONLY when a build actually embeds it in the payload.
+        if (File.Exists(Path.Combine(payloadRoot, m.Payload.SetupExe.Name)))
+            CheckEntry(payloadRoot, m.Payload.SetupExe.Name, m.Payload.SetupExe.Sha256,
+                       m.Payload.SetupExe.SizeBytes, "payload.setupExe", errors);
         // AppExe at relativeInstallPath relative to payloadRoot too
         if (!SafePath.IsSafeRelative(m.Payload.AppExe.RelativeInstallPath))
             errors.Add($"payload.appExe.relativeInstallPath unsafe: {m.Payload.AppExe.RelativeInstallPath}");

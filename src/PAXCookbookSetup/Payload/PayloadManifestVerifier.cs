@@ -8,7 +8,10 @@ namespace PAXCookbookSetup.Payload;
 // Verifies the staged payload folder against its manifest.json:
 //   * every Payload.Files[].relativeInstallPath exists under root.
 //   * sha256 + sizeBytes match.
-//   * SetupExe + AppExe files exist + match their declared hash/size.
+//   * AppExe exists + matches its declared hash/size.
+//   * SetupExe is metadata only — in the bootstrapper model it is NOT shipped
+//     inside the payload (it is downloaded separately for repair/update), so it
+//     is verified ONLY when a build actually embeds it in the payload.
 //
 // Used by EmbeddedPayloadSourceResolver consumers BEFORE handing the
 // extracted folder to InstallVerb/UpdateVerb/RepairVerb. The existing
@@ -24,8 +27,11 @@ public static class PayloadManifestVerifier
         var errors = new List<string>();
         CheckFile(payloadRoot, m.Payload.AppExe.RelativeInstallPath,
                   m.Payload.AppExe.Sha256, m.Payload.AppExe.SizeBytes, errors);
-        CheckFile(payloadRoot, m.Payload.SetupExe.Name,
-                  m.Payload.SetupExe.Sha256, m.Payload.SetupExe.SizeBytes, errors);
+        // SetupExe is metadata only in the bootstrapper model (not shipped in the
+        // payload). Verify it ONLY when a build actually embeds it in the payload.
+        if (File.Exists(Path.Combine(payloadRoot, m.Payload.SetupExe.Name)))
+            CheckFile(payloadRoot, m.Payload.SetupExe.Name,
+                      m.Payload.SetupExe.Sha256, m.Payload.SetupExe.SizeBytes, errors);
         foreach (var f in m.Payload.Files)
             CheckFile(payloadRoot, f.RelativeInstallPath, f.Sha256, f.SizeBytes, errors);
         return new VerifyResult(errors.Count == 0, errors);

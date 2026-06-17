@@ -213,8 +213,10 @@ public class Phase11PayloadResolverTests
             Assert.False(v3.Ok);
             Assert.Contains(v3.Errors, e => e.Contains("size"));
 
-            // Missing file:
-            File.Delete(Path.Combine(d, "PAXCookbookSetup.exe"));
+            // Missing required file: the App EXE is always required. (The Setup
+            // EXE is metadata only and is not shipped in the payload, so deleting
+            // it would NOT be an error in the bootstrapper model.)
+            File.Delete(Path.Combine(d, "App", "bin", "PAXCookbook.exe"));
             var v4 = PayloadManifestVerifier.Verify(d, ok);
             Assert.False(v4.Ok);
             Assert.Contains(v4.Errors, e => e.Contains("missing"));

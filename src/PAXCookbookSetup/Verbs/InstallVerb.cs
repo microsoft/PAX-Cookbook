@@ -48,6 +48,38 @@ public static class InstallVerb
             return SetupExitCodes.InstallFailed;
         }
 
+        // Bootstrapper model: the Setup EXE is not shipped in the payload, so
+        // self-install the running Setup EXE into <installRoot>\Setup. This is
+        // what Add/Remove Programs uninstall, the Start-Menu Repair/Uninstall
+        // shortcuts, and in-place repair/update (which run that installed Setup
+        // against the local PayloadCache written below) resolve to. Skipped when
+        // a build embedded the Setup EXE in the payload (already copied above).
+        try
+        {
+            var installedSetup = Path.Combine(installRoot, "Setup", m.Payload.SetupExe.Name);
+            if (!File.Exists(installedSetup))
+            {
+                var runningSetup = Environment.ProcessPath;
+                if (string.IsNullOrEmpty(runningSetup) || !File.Exists(runningSetup))
+                    throw new IOException(
+                        $"running Setup EXE path unavailable: '{runningSetup}'");
+                Directory.CreateDirectory(Path.GetDirectoryName(installedSetup)!);
+                File.Copy(runningSetup, installedSetup, overwrite: true);
+                log.Write("install-setup-self-installed",
+                    fields: new Dictionary<string, object?>
+                    {
+                        ["source"] = runningSetup,
+                        ["dest"] = installedSetup
+                    });
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Write("install-setup-self-copy-failed", "error",
+                new Dictionary<string, object?> { ["detail"] = ex.Message });
+            return SetupExitCodes.InstallFailed;
+        }
+
         // Phase 12 (Mode B failure repair): write the payload to a
         // verified local cache under <installRoot>\PayloadCache so the
         // installed PAXCookbookSetup.exe (which carries no embedded

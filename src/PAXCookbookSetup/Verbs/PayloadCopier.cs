@@ -18,12 +18,17 @@ public static class PayloadCopier
             Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
             File.Copy(src, dst, overwrite: true);
         }
-        // SetupExe → installRoot\Setup\<name>
+        // SetupExe → installRoot\Setup\<name>, ONLY when the build embedded it in
+        // the payload. In the bootstrapper model the Setup EXE is NOT shipped in
+        // the payload (it is downloaded separately for repair/update), so skip it.
         var setupSrc = SafePath.CombineUnderRoot(payloadRoot, m.Payload.SetupExe.Name);
-        var setupDst = SafePath.CombineUnderRoot(installRoot,
-            Path.Combine("Setup", m.Payload.SetupExe.Name));
-        Directory.CreateDirectory(Path.GetDirectoryName(setupDst)!);
-        File.Copy(setupSrc, setupDst, overwrite: true);
+        if (File.Exists(setupSrc))
+        {
+            var setupDst = SafePath.CombineUnderRoot(installRoot,
+                Path.Combine("Setup", m.Payload.SetupExe.Name));
+            Directory.CreateDirectory(Path.GetDirectoryName(setupDst)!);
+            File.Copy(setupSrc, setupDst, overwrite: true);
+        }
         // AppExe last.
         var appSrc = SafePath.CombineUnderRoot(payloadRoot, m.Payload.AppExe.RelativeInstallPath);
         var appDst = SafePath.CombineUnderRoot(installRoot, m.Payload.AppExe.RelativeInstallPath);
@@ -35,8 +40,11 @@ public static class PayloadCopier
     {
         VerifyOne(installRoot, m.Payload.AppExe.RelativeInstallPath,
                   m.Payload.AppExe.Sha256, m.Payload.AppExe.SizeBytes);
-        VerifyOne(installRoot, Path.Combine("Setup", m.Payload.SetupExe.Name),
-                  m.Payload.SetupExe.Sha256, m.Payload.SetupExe.SizeBytes);
+        // The installed Setup EXE is NOT verified here: in the bootstrapper model
+        // it is the self-installed Setup runtime (a different build than the
+        // manifest's setupExe metadata, which describes the downloadable Setup),
+        // not a payload artifact. The App EXE + payload files are the integrity
+        // surface for an install.
         foreach (var f in m.Payload.Files)
             VerifyOne(installRoot, f.RelativeInstallPath, f.Sha256, f.SizeBytes);
     }
