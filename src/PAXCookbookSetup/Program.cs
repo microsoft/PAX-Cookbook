@@ -178,8 +178,22 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
     // at on-disk locations that we do not own at this layer; we never
     // delete them here.
     string? tempExtractRoot = null;
+    string? downloadedZip = null;
     try
     {
+        // A CLI `install` mirrors the GUI wizard: when bootstrapping (no
+        // --payload-root) it checks for and installs the required prerequisites
+        // (.NET 8 Desktop Runtime, PowerShell 7, Python) before installing.
+        // --quiet skips this (scripted installs manage prerequisites
+        // separately); an explicit --payload-root is a dev/test/scripted path
+        // whose caller already manages the environment.
+        if (parsed.Verb == "install" && !parsed.Quiet && string.IsNullOrEmpty(parsed.PayloadRoot))
+        {
+            int prereqRc = CliPrerequisites.Ensure(log);
+            if (prereqRc != SetupExitCodes.Ok)
+                return prereqRc;
+        }
+
         IPayloadSourceResolver resolver;
         if (!string.IsNullOrEmpty(parsed.PayloadRoot))
         {
@@ -195,17 +209,27 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
         }
         else
         {
-            Console.Error.WriteLine(
-                "no payload available: pass --payload-root <dir>, use a Setup EXE built with an embedded payload, " +
-                $"or run repair/update on an install that has a payload cache at {LocalCachePayloadSourceResolver.CachePath(installRoot)}");
-            log.Write("payload-unavailable", "error",
-                new Dictionary<string, object?>
-                {
-                    ["installRoot"] = installRoot,
-                    ["cacheChecked"] = LocalCachePayloadSourceResolver.CachePath(installRoot),
-                    ["cachePresent"] = LocalCachePayloadSourceResolver.HasCache(installRoot)
-                });
-            return SetupExitCodes.UsageError;
+            // Final fallback: download the payload zip from the GitHub Release
+            // and verify its SHA-256 against versions.json — the same path the
+            // GUI wizard uses (PayloadDownloader). --quiet suppresses progress.
+            Action<string> dlProgress = parsed.Quiet ? (_ => { }) : ConsoleDownloadProgress;
+            var downloader = new PayloadDownloader(log, dlProgress);
+            var dl = downloader.DownloadAsync().GetAwaiter().GetResult();
+            if (!parsed.Quiet) Console.WriteLine();
+            if (!dl.Success || string.IsNullOrEmpty(dl.ZipPath))
+            {
+                Console.Error.WriteLine("unable to download PAX Cookbook: " +
+                    (dl.Error ?? "unknown error"));
+                log.Write("payload-download-failed", "error",
+                    new Dictionary<string, object?>
+                    {
+                        ["installRoot"] = installRoot,
+                        ["detail"] = dl.Error
+                    });
+                return SetupExitCodes.InstallFailed;
+            }
+            downloadedZip = dl.ZipPath;
+            resolver = new DownloadedPayloadSourceResolver(downloadedZip);
         }
 
         var src = resolver.Resolve();
@@ -217,7 +241,8 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
                 new Dictionary<string, object?> { ["origin"] = src.Origin, ["detail"] = src.Error });
             return SetupExitCodes.InstallFailed;
         }
-        if (string.Equals(src.Origin, "embedded", StringComparison.Ordinal))
+        if (string.Equals(src.Origin, "embedded", StringComparison.Ordinal) ||
+            string.Equals(src.Origin, "downloaded", StringComparison.Ordinal))
             tempExtractRoot = src.TempExtractionRoot;
         var payloadRoot = src.PayloadRoot!;
         log.Write("payload-resolved", fields: new Dictionary<string, object?>
@@ -240,13 +265,14 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
             return SetupExitCodes.InstallFailed;
         }
 
-        // For embedded extraction and local-cache resolution, verify the
-        // staged files match the manifest before we proceed (defence-in-
-        // depth on top of the existing ManifestValidator invoked inside
-        // each verb). Directory mode is trusted because the caller
+        // For embedded extraction, local-cache, and downloaded resolution,
+        // verify the staged files match the manifest before we proceed
+        // (defence-in-depth on top of the existing ManifestValidator invoked
+        // inside each verb). Directory mode is trusted because the caller
         // explicitly pointed us at a payload root.
         if (string.Equals(src.Origin, "embedded", StringComparison.Ordinal) ||
-            string.Equals(src.Origin, "local-cache", StringComparison.Ordinal))
+            string.Equals(src.Origin, "local-cache", StringComparison.Ordinal) ||
+            string.Equals(src.Origin, "downloaded", StringComparison.Ordinal))
         {
             var v = PayloadManifestVerifier.Verify(payloadRoot, m);
             if (!v.Ok)
@@ -275,15 +301,23 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
     {
         if (!string.IsNullOrEmpty(tempExtractRoot))
         {
-            var ok = EmbeddedPayloadSourceResolver.TryCleanup(tempExtractRoot);
-            log.Write("embedded-payload-cleanup",
+            EmbeddedPayloadSourceResolver.TryCleanup(tempExtractRoot);
+            DownloadedPayloadSourceResolver.TryCleanup(tempExtractRoot);
+            log.Write("payload-temp-cleanup",
                 fields: new Dictionary<string, object?>
                 {
-                    ["path"] = tempExtractRoot, ["deleted"] = ok
+                    ["path"] = tempExtractRoot,
+                    ["deleted"] = !Directory.Exists(tempExtractRoot)
                 });
         }
+        PayloadDownloader.Cleanup(downloadedZip);
     }
 }
+
+// Renders PayloadDownloader progress on a single console line for a CLI
+// install (carriage-return overwrite, padded to clear the previous line).
+static void ConsoleDownloadProgress(string message)
+    => Console.Write("\r" + message.PadRight(64));
 
 // Builds the production ShellOperations using Win32 shortcut + HKCU
 // registry writers. Returns a fresh instance each call so per-verb
@@ -293,7 +327,9 @@ static IShellOperations BuildShellOperations() => ShellOperationsFactory.Build()
 static int PrintHelp(int code)
 {
     Console.WriteLine($"{ProductConstants.SetupExeName} verbs:");
-    Console.WriteLine("  install   [--payload-root <dir>] [--install-root <dir>]");
+    Console.WriteLine("  install   [--payload-root <dir>] [--install-root <dir>] [--quiet]");
+    Console.WriteLine("                                  (without --payload-root: downloads the payload from GitHub and");
+    Console.WriteLine("                                   installs prerequisites; --quiet suppresses output + prereqs)");
     Console.WriteLine("  update    [--payload-root <dir>] [--install-root <dir>] [--allow-downgrade]");
     Console.WriteLine("  repair    [--payload-root <dir>] [--install-root <dir>] [--force]");
     Console.WriteLine("                                  (--payload-root optional when Setup ships with an embedded payload)");
