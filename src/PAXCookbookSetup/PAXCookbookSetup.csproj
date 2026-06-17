@@ -12,6 +12,10 @@
     <AssemblyName>PAXCookbookSetup</AssemblyName>
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>false</UseWPF>
+    <!-- Same PAX Cookbook chef's-hat icon as the main app exe; embedded into the
+         Setup EXE's Win32 resources so File Explorer and the wizard title bar
+         show the product icon. -->
+    <ApplicationIcon>..\..\app\web\images\pax-cookbook-app-icon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PAXCookbook.Shared\PAXCookbook.Shared.csproj" />
