@@ -822,6 +822,11 @@
   color: var(--c-muted);
 }
 
+.dvw-outputs__log {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 /* Attention panel */
 .dvw-attention__clear {
   display: flex;

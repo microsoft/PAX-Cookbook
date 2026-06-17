@@ -34,9 +34,11 @@ import {
   IconChevronDown,
   IconAlertCircle,
   IconCheckCircle,
+  IconDownload,
   IconRefresh,
 } from './CookbookIllustrations';
 import { pickAndParseRecipeFile } from '../features/mini-kitchen/lib/recipeFileImport';
+import { downloadBakeLogByCookId } from './logDownload';
 
 type ListPhase = 'idle' | 'loading' | 'loaded' | 'error';
 
@@ -252,6 +254,9 @@ interface RecentOutput {
   date: string | null;
   dashboard: string | null;
   folder: string | null;
+  cookId: string;
+  recipeName: string | null;
+  when: string | null;
 }
 
 /** Flatten the most recent cooks' existing output files into display rows
@@ -283,6 +288,9 @@ function buildRecentOutputs(
         date,
         dashboard: dash,
         folder: folderOf(o.path),
+        cookId: cook.cookId,
+        recipeName: cook.recipeName,
+        when: cook.startedAt ?? cook.createdAt,
       });
       if (rows.length >= 6) {
         return rows;
@@ -864,6 +872,21 @@ function LastBakePanel({
             <span>Open log</span>
           </button>
         )}
+        <button
+          type="button"
+          className="dvw-link dvw-link--icon"
+          onClick={() =>
+            void downloadBakeLogByCookId(
+              cook.cookId,
+              cook.recipeName,
+              cook.startedAt ?? cook.createdAt,
+            )
+          }
+          title="Download this bake's log file"
+        >
+          <IconDownload className="dvw-link__icon" />
+          <span>Download log</span>
+        </button>
       </div>
     </section>
   );
@@ -1096,6 +1119,21 @@ function RecentOutputsPanel({
               {output.dashboard ? (
                 <span className="dvw-dash-pill">{output.dashboard}</span>
               ) : null}
+              <button
+                type="button"
+                className="dvw-link dvw-link--icon dvw-outputs__log"
+                onClick={() =>
+                  void downloadBakeLogByCookId(
+                    output.cookId,
+                    output.recipeName,
+                    output.when,
+                  )
+                }
+                title="Download this bake's log file"
+              >
+                <IconDownload className="dvw-link__icon" />
+                <span>Download log</span>
+              </button>
             </li>
           ))}
         </ul>

@@ -38,9 +38,11 @@ import {
   IconClock,
   IconCode,
   IconCopy,
+  IconDownload,
   IconList,
   IconRefresh,
 } from './CookbookIllustrations';
+import { downloadBakeLogText } from './logDownload';
 import {
   formatModified,
   takePendingBakeSelect,
@@ -1176,6 +1178,20 @@ export function BakesWorkspace() {
                       >
                         <IconCopy className="dvw-btn__icon" />
                         <span>{logCopied ? 'Copied' : 'Copy log'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="dvw-btn dvw-btn--ghost"
+                        onClick={() =>
+                          downloadBakeLogText(
+                            logText,
+                            detail?.recipe?.name ?? null,
+                            detail?.startedAt ?? detail?.createdAt ?? null,
+                          )
+                        }
+                      >
+                        <IconDownload className="dvw-btn__icon" />
+                        <span>Download log</span>
                       </button>
                     </div>
                   ) : null}
