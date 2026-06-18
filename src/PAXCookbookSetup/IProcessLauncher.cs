@@ -24,7 +24,11 @@ public sealed class RealProcessLauncher : IProcessLauncher
         {
             FileName = fileName,
             UseShellExecute = false,
-            CreateNoWindow = false
+            // The self-handoff relaunches the framework-dependent Setup via the
+            // console host dotnet.exe. CreateNoWindow=true suppresses its blank
+            // console window so uninstall/repair/upgrade run silently; a WinForms
+            // uninstall dialog (shown by the child) is unaffected.
+            CreateNoWindow = true
         };
         foreach (var a in arguments) psi.ArgumentList.Add(a);
         Last = new LaunchRecord(fileName, arguments.ToList());

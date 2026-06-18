@@ -52,10 +52,11 @@ public static class DotNetLaunch
     public static string SetupDllPath(string installRoot)
         => Path.Combine(installRoot, "Setup", ProductConstants.SetupDllName);
 
-    // A full WDAC-safe shell command line that runs an installed Setup verb via
-    // the signed dotnet.exe host:
+    // The direct dotnet.exe command for an installed Setup verb:
     //   "<dotnet.exe>" "<installRoot>\Setup\PAXCookbookSetup.dll" <argTail>
-    // Used for the Add/Remove Programs Uninstall/QuietUninstall strings.
+    // This is the canonical underlying invocation. The Add/Remove Programs
+    // Uninstall strings wrap it in the windowless wscript launcher
+    // (SetupUninstallVbsCommand) so no console window flashes during uninstall.
     public static string SetupDllCommand(string installRoot, string argTail)
     {
         var dotnet = DotNetExePath();
@@ -110,6 +111,30 @@ public static class DotNetLaunch
     // launch.vbs (for HKCU Run / protocol / file-association registry commands).
     public static string VbsLauncherCommand(string installRoot, string argTail)
         => $"\"{WScriptExePath()}\" {VbsLauncherArguments(installRoot, argTail)}";
+
+    // <installRoot>\Setup\uninstall.vbs — the hidden uninstaller launcher (ships
+    // in the payload next to PAXCookbookSetup.dll; resolves dotnet + the DLL
+    // relative to itself and runs `dotnet "...PAXCookbookSetup.dll" uninstall`
+    // with window style 0, so no console window flashes during uninstall).
+    public const string SetupUninstallVbsName = "uninstall.vbs";
+
+    public static string SetupUninstallVbsPath(string installRoot)
+        => Path.Combine(installRoot, "Setup", SetupUninstallVbsName);
+
+    // A full WDAC-safe, WINDOWLESS shell command line that runs the installed
+    // Setup uninstall via the Microsoft-signed wscript.exe on the shipped
+    // uninstall.vbs (which launches dotnet.exe hidden — no console flash):
+    //   "<wscript.exe>" "<installRoot>\Setup\uninstall.vbs" <argTail>
+    // argTail forwards extra flags AFTER the uninstall verb (e.g. --force for the
+    // QuietUninstallString). Used for the Add/Remove Programs Uninstall strings.
+    public static string SetupUninstallVbsCommand(string installRoot, string argTail)
+    {
+        var wscript = WScriptExePath();
+        var vbs = SetupUninstallVbsPath(installRoot);
+        return string.IsNullOrEmpty(argTail)
+            ? $"\"{wscript}\" \"{vbs}\""
+            : $"\"{wscript}\" \"{vbs}\" {argTail}";
+    }
 
     // True when ANY whitespace-delimited, quote-aware token of a command line is
     // a filesystem path that resolves under installRoot. Used for positive-ID of

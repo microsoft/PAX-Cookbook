@@ -245,8 +245,8 @@ public class Phase8ShellTests
         var rg = new InMemoryRegistryWriter();
         var u = new UninstallRegistrar(rg);
         var r = u.Register(FakeInstallRoot, AppVersion);
-        // WDAC-safe: dotnet.exe runs the framework-dependent Setup DLL.
-        Assert.EndsWith(@"Setup\PAXCookbookSetup.dll"" uninstall", r.UninstallString);
+        // Windowless + WDAC-safe: wscript.exe runs the hidden uninstall.vbs.
+        Assert.EndsWith(@"Setup\uninstall.vbs""", r.UninstallString);
         Assert.StartsWith("\"", r.UninstallString);
     }
 
@@ -413,7 +413,7 @@ public class Phase8ShellTests
     }
 
     // ---- 29. Default flow registers ARP and points UninstallString at
-    //          the installed Setup uninstall verb.
+    //          the windowless installed-Setup uninstall launcher.
     [Fact]
     public void DefaultShellFlow_RegistersArp_WithUninstallStringPointingAtInstalledSetup()
     {
@@ -421,7 +421,7 @@ public class Phase8ShellTests
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         Assert.True(h.Registry.SubKeyExists(UninstallRegistrar.RootSubKey));
         var us = h.Registry.GetString(UninstallRegistrar.RootSubKey, "UninstallString")!;
-        Assert.EndsWith("PAXCookbookSetup.dll\" uninstall", us);
+        Assert.EndsWith("uninstall.vbs\"", us);
         Assert.Contains(h.InstallRoot, us);
     }
 

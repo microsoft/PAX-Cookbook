@@ -385,7 +385,7 @@ public class Phase9UninstallTests
         Assert.DoesNotContain("not implemented yet", sw.ToString());
     }
 
-    // ---- 23. ARP UninstallString points at installed Setup uninstall. ----
+    // ---- 23. ARP UninstallString points at the windowless uninstall launcher. ----
     [Fact]
     public void Arp_UninstallString_PointsAtInstalledSetupUninstall()
     {
@@ -393,7 +393,7 @@ public class Phase9UninstallTests
         var us = h.Registry.GetString(UninstallRegistrar.RootSubKey, "UninstallString")!;
         Assert.StartsWith("\"", us);
         Assert.Contains(h.InstallRoot, us);
-        Assert.EndsWith("PAXCookbookSetup.dll\" uninstall", us);
+        Assert.EndsWith("uninstall.vbs\"", us);
     }
 
     // ---- 24. install-state.json is removed last in standard mode. ----

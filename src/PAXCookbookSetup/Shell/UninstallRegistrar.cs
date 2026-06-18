@@ -12,14 +12,16 @@ namespace PAXCookbookSetup.Shell;
 //   Publisher            = "Microsoft"
 //   InstallLocation      = <installRoot>                (absolute, expanded)
 //   DisplayIcon          = <installRoot>\App\bin\PAXCookbook.exe,0
-//   UninstallString      = "<dotnet.exe>" "<installRoot>\Setup\PAXCookbookSetup.dll" uninstall
-//   QuietUninstallString = "<dotnet.exe>" "<installRoot>\Setup\PAXCookbookSetup.dll" uninstall --force
+//   UninstallString      = "<wscript.exe>" "<installRoot>\Setup\uninstall.vbs"
+//   QuietUninstallString = "<wscript.exe>" "<installRoot>\Setup\uninstall.vbs" --force
 //   NoModify             = 1
 //   NoRepair             = 0   (Repair Setup verb supports it)
 //
 // Uninstall runs the framework-dependent Setup DLL via the Microsoft-signed
 // dotnet.exe host (WDAC-safe; the unsigned Setup apphost is never run from the
-// install tree). All path values are normalized through Path.GetFullPath so the
+// install tree), launched HIDDEN through the Microsoft-signed wscript.exe on the
+// shipped uninstall.vbs so no blank console window flashes during uninstall.
+// All path values are normalized through Path.GetFullPath so the
 // resulting strings are absolute, fully expanded, and contain no
 // relative components. This is a defensive fix for the Phase 12 Mode B
 // "Settings cannot find PAXCookbookSetup.exe" report: if the registry
@@ -45,13 +47,15 @@ public sealed class UninstallRegistrar
         var appExe = Path.GetFullPath(ShortcutCatalog.AppExePath(installRootFull));
 
         // Uninstall runs the framework-dependent Setup assembly through the
-        // Microsoft-signed dotnet.exe host (dotnet.exe "<Setup\PAXCookbookSetup.dll>"
-        // uninstall). This is WDAC-safe: the unsigned Setup apphost would be
-        // blocked, but dotnet.exe is signed and trusted (the same model the app
-        // itself launches with). The DisplayIcon still points at the apphost EXE
-        // because icon reads are allowed even when execution is not.
-        var uninstallString = DotNetLaunch.SetupDllCommand(installRootFull, "uninstall");
-        var quietUninstallString = DotNetLaunch.SetupDllCommand(installRootFull, "uninstall --force");
+        // Microsoft-signed dotnet.exe host, launched HIDDEN via the
+        // Microsoft-signed wscript.exe on the shipped uninstall.vbs (window
+        // style 0) so no blank console window flashes during uninstall — the
+        // only UI is the uninstall confirmation/progress dialog. Both the .vbs
+        // and wscript.exe are WDAC-allowed; the unsigned Setup apphost is never
+        // run. The DisplayIcon still points at the apphost EXE because icon
+        // reads are allowed even when execution is not.
+        var uninstallString = DotNetLaunch.SetupUninstallVbsCommand(installRootFull, "");
+        var quietUninstallString = DotNetLaunch.SetupUninstallVbsCommand(installRootFull, "--force");
         var displayIcon = appExe + ",0";
 
         _registry.SetString(RootSubKey, "DisplayName", DisplayName);

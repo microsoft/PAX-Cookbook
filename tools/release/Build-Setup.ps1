@@ -236,7 +236,15 @@ foreach ($f in $setupFdFiles) {
     }
     Copy-Item $srcF (Join-Path $setupStageDir $f) -Force
 }
-Log ("  staged framework-dependent Setup: {0} files into payload\Setup" -f $setupFdFiles.Count)
+# Hidden uninstaller launcher: the ARP UninstallString runs wscript.exe on this
+# .vbs, which launches dotnet.exe "...PAXCookbookSetup.dll" uninstall with window
+# style 0 so no blank console flashes during uninstall. Ships next to the DLL.
+$uninstallVbsSrc = Join-Path $root 'src\PAXCookbookSetup\uninstall.vbs'
+if (-not (Test-Path -LiteralPath $uninstallVbsSrc)) {
+    throw "uninstall.vbs source missing: $uninstallVbsSrc"
+}
+Copy-Item $uninstallVbsSrc (Join-Path $setupStageDir 'uninstall.vbs') -Force
+Log ("  staged framework-dependent Setup: {0} files + uninstall.vbs into payload\Setup" -f $setupFdFiles.Count)
 
 # ---------------------------------------------------------------------
 # [5/7] Write manifest.json
