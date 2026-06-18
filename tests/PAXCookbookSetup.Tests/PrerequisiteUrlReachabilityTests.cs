@@ -29,6 +29,12 @@ public class PrerequisiteUrlReachabilityTests
     [Theory]
     [InlineData(Architecture.X64)]
     [InlineData(Architecture.Arm64)]
+    public void AspNetCoreRuntime_Url_IsReachable(Architecture arch)
+        => AssertReachableOrInconclusive(AspNetCoreRuntimeInstaller.BuildDownloadUrl(arch));
+
+    [Theory]
+    [InlineData(Architecture.X64)]
+    [InlineData(Architecture.Arm64)]
     public void PowerShell7_FallbackMsi_Url_IsReachable(Architecture arch)
         => AssertReachableOrInconclusive(PowerShell7Installer.FallbackMsiUrlFor(arch));
 

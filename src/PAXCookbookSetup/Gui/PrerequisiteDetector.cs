@@ -34,23 +34,40 @@ public sealed class PrerequisiteDetector
     public PrerequisiteStatus DetectDotNet8DesktopRuntime()
         => EvaluateDotNet8();
 
+    public PrerequisiteStatus DetectAspNetCoreRuntime()
+        => EvaluateAspNetCore();
+
     public PrerequisiteStatus DetectPowerShell7()
         => Evaluate(PrerequisiteKind.PowerShell7, "PowerShell 7", MinPowerShell, PowerShellCandidates());
 
     public PrerequisiteStatus DetectPython()
         => Evaluate(PrerequisiteKind.Python, "Python", MinPython, PythonCandidates());
 
-    // Detect the .NET 8 Desktop Runtime with three independent strategies, in
-    // cost order, returning satisfied as soon as any finds a >= 8.0 runtime.
+    // Detect a shared .NET 8 framework with three independent strategies, in
+    // cost order, returning satisfied as soon as any finds a >= 8.0 install.
     // A single method (the registry alone) false-negatives when .NET 8 was
     // installed via winget / Visual Studio / the SDK, which do not write the
     // sharedfx registry key — so the fallbacks confirm those installs too.
-    //   1. Registry — HKLM\...\sharedfx\Microsoft.WindowsDesktop.App subkeys
-    //      (fast, no process spawn; written by the standalone runtime installer).
-    //   2. `dotnet --list-runtimes` — parses "Microsoft.WindowsDesktop.App 8.x.y".
+    //   1. Registry — HKLM\...\sharedfx\<framework> subkeys (fast, no spawn).
+    //   2. `dotnet --list-runtimes` — parses "<framework> 8.x.y".
     //   3. Well-known shared-framework folder —
-    //      %ProgramFiles%\dotnet\shared\Microsoft.WindowsDesktop.App\8.*.
+    //      %ProgramFiles%\dotnet\shared\<framework>\8.*.
+    // The app needs BOTH Microsoft.WindowsDesktop.App (the WinForms WebView2
+    // host) AND Microsoft.AspNetCore.App (the in-process Kestrel broker); the
+    // Desktop Runtime does NOT include ASP.NET Core, so each is detected — and
+    // installed — independently.
     private PrerequisiteStatus EvaluateDotNet8()
+        => EvaluateSharedFramework("Microsoft.WindowsDesktop.App",
+                                   PrerequisiteKind.DotNet8DesktopRuntime,
+                                   ".NET 8 Desktop Runtime", ".NET 8");
+
+    private PrerequisiteStatus EvaluateAspNetCore()
+        => EvaluateSharedFramework("Microsoft.AspNetCore.App",
+                                   PrerequisiteKind.AspNetCoreRuntime,
+                                   "ASP.NET Core 8 Runtime", "ASP.NET Core");
+
+    private PrerequisiteStatus EvaluateSharedFramework(
+        string frameworkId, PrerequisiteKind kind, string displayName, string logTag)
     {
         // Strategy 1: registry, under the machine-architecture subkey. The app
         // launches through the native dotnet.exe host, so it needs the runtime
@@ -60,16 +77,16 @@ public sealed class PrerequisiteDetector
         // on an ARM64 machine, so the wizard would skip installing the arm64
         // runtime the app actually needs.
         string archRid = PrereqArch.Rid(_hostArch);
-        PrereqLog.Write($"[PREREQ] .NET 8 detection: arch={_hostArch} rid={archRid}");
-        string root = $@"SOFTWARE\dotnet\Setup\InstalledVersions\{archRid}\sharedfx\Microsoft.WindowsDesktop.App";
+        PrereqLog.Write($"[PREREQ] {logTag} detection: arch={_hostArch} rid={archRid}");
+        string root = $@"SOFTWARE\dotnet\Setup\InstalledVersions\{archRid}\sharedfx\{frameworkId}";
         var registrySubkeys = _probe.EnumerateHklmSubKeyNames(root).ToList();
-        PrereqLog.Write($"[PREREQ] .NET 8 detection: registry key checked = HKLM\\{root}");
-        PrereqLog.Write($"[PREREQ] .NET 8 detection: registry subkeys = [{string.Join(", ", registrySubkeys)}]");
+        PrereqLog.Write($"[PREREQ] {logTag} detection: registry key checked = HKLM\\{root}");
+        PrereqLog.Write($"[PREREQ] {logTag} detection: registry subkeys = [{string.Join(", ", registrySubkeys)}]");
         var fromRegistry = HighestDotNet8(registrySubkeys);
         if (fromRegistry is not null)
         {
-            PrereqLog.Write($"[PREREQ] .NET 8 detection: RESULT = installed (Registry, {FormatVersion(fromRegistry)})");
-            return DotNet8Found(fromRegistry, "Registry");
+            PrereqLog.Write($"[PREREQ] {logTag} detection: RESULT = installed (Registry, {FormatVersion(fromRegistry)})");
+            return FrameworkFound(kind, displayName, fromRegistry, "Registry");
         }
 
         // Strategy 2: `dotnet --list-runtimes`, but only from the NATIVE host the
@@ -88,15 +105,15 @@ public sealed class PrerequisiteDetector
         {
             listHost = "dotnet";
         }
-        PrereqLog.Write($"[PREREQ] .NET 8 detection: list-runtimes host = {(listHost.Length > 0 ? listHost : "(skipped)")}");
+        PrereqLog.Write($"[PREREQ] {logTag} detection: list-runtimes host = {(listHost.Length > 0 ? listHost : "(skipped)")}");
         if (listHost.Length > 0)
         {
             var listed = _probe.RunVersion(listHost, "--list-runtimes");
-            PrereqLog.Write($"[PREREQ] .NET 8 detection: list-runtimes output = {(string.IsNullOrWhiteSpace(listed) ? "(none)" : listed!.Replace("\r", " ").Replace("\n", " | "))}");
+            PrereqLog.Write($"[PREREQ] {logTag} detection: list-runtimes output = {(string.IsNullOrWhiteSpace(listed) ? "(none)" : listed!.Replace("\r", " ").Replace("\n", " | "))}");
             if (!string.IsNullOrWhiteSpace(listed))
             {
                 Version? best = null;
-                foreach (Match mm in Regex.Matches(listed, @"Microsoft\.WindowsDesktop\.App\s+(\d+\.\d+\.\d+)"))
+                foreach (Match mm in Regex.Matches(listed, Regex.Escape(frameworkId) + @"\s+(\d+\.\d+\.\d+)"))
                 {
                     if (TryParseVersion(mm.Groups[1].Value, out var v) && v.Major == 8 && v >= MinDotNet8
                         && (best is null || v > best))
@@ -104,8 +121,8 @@ public sealed class PrerequisiteDetector
                 }
                 if (best is not null)
                 {
-                    PrereqLog.Write($"[PREREQ] .NET 8 detection: RESULT = installed (list-runtimes, {FormatVersion(best)})");
-                    return DotNet8Found(best, "dotnet --list-runtimes");
+                    PrereqLog.Write($"[PREREQ] {logTag} detection: RESULT = installed (list-runtimes, {FormatVersion(best)})");
+                    return FrameworkFound(kind, displayName, best, "dotnet --list-runtimes");
                 }
             }
         }
@@ -114,18 +131,18 @@ public sealed class PrerequisiteDetector
         var programFiles = _probe.GetEnvPath("ProgramFiles");
         if (!string.IsNullOrEmpty(programFiles))
         {
-            var sharedRoot = Path.Combine(programFiles, "dotnet", "shared", "Microsoft.WindowsDesktop.App");
+            var sharedRoot = Path.Combine(programFiles, "dotnet", "shared", frameworkId);
             var fromDisk = HighestDotNet8(
                 _probe.EnumerateDirectories(sharedRoot, "8.*").Select(d => Path.GetFileName(d)));
             if (fromDisk is not null)
             {
-                PrereqLog.Write($"[PREREQ] .NET 8 detection: RESULT = installed (ProgramFiles, {FormatVersion(fromDisk)})");
-                return DotNet8Found(fromDisk, "ProgramFiles");
+                PrereqLog.Write($"[PREREQ] {logTag} detection: RESULT = installed (ProgramFiles, {FormatVersion(fromDisk)})");
+                return FrameworkFound(kind, displayName, fromDisk, "ProgramFiles");
             }
         }
 
-        PrereqLog.Write("[PREREQ] .NET 8 detection: RESULT = not installed");
-        return PrerequisiteStatus.Missing(PrerequisiteKind.DotNet8DesktopRuntime, ".NET 8 Desktop Runtime");
+        PrereqLog.Write($"[PREREQ] {logTag} detection: RESULT = not installed");
+        return PrerequisiteStatus.Missing(kind, displayName);
     }
 
     // Highest 8.x.y version (>= MinDotNet8) among the supplied version strings,
@@ -142,14 +159,9 @@ public sealed class PrerequisiteDetector
         return best;
     }
 
-    private static PrerequisiteStatus DotNet8Found(Version version, string source)
-        => new PrerequisiteStatus(
-            PrerequisiteKind.DotNet8DesktopRuntime,
-            ".NET 8 Desktop Runtime",
-            true,
-            FormatVersion(version),
-            null,
-            source);
+    private static PrerequisiteStatus FrameworkFound(
+        PrerequisiteKind kind, string displayName, Version version, string source)
+        => new PrerequisiteStatus(kind, displayName, true, FormatVersion(version), null, source);
 
     // -----------------------------------------------------------------
     // Search-order candidate generators (lazy — probing stops as soon as

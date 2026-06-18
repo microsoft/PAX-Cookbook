@@ -429,6 +429,113 @@ public class WizardDetectionTests
     }
 
     // -----------------------------------------------------------------
+    // ASP.NET Core 8 Runtime — detected independently of the Desktop Runtime
+    // (the Desktop Runtime does NOT include Microsoft.AspNetCore.App, which the
+    // broker's in-process Kestrel server requires).
+    // -----------------------------------------------------------------
+    private const string AspNetRegRoot =
+        @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.AspNetCore.App";
+    private const string AspNetArm64RegRoot =
+        @"SOFTWARE\dotnet\Setup\InstalledVersions\arm64\sharedfx\Microsoft.AspNetCore.App";
+    private const string AspNetSharedRoot =
+        @"C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App";
+
+    [Fact]
+    public void AspNetCore_FoundInRegistry_IsSatisfied()
+    {
+        var f = new FakeProbe();
+        f.HklmSubKeys[AspNetRegRoot] = new[] { "8.0.28" };
+
+        var s = new PrerequisiteDetector(f, Architecture.X64).DetectAspNetCoreRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.28", s.DetectedVersion);
+        Assert.Equal("Registry", s.DetectionSource);
+        Assert.Equal(PrerequisiteKind.AspNetCoreRuntime, s.Kind);
+    }
+
+    [Fact]
+    public void AspNetCore_FoundViaListRuntimes_IsSatisfied()
+    {
+        var f = new FakeProbe();
+        f.Versions["dotnet"] =
+            "Microsoft.NETCore.App 8.0.28 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\n" +
+            "Microsoft.AspNetCore.App 8.0.28 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]";
+
+        var s = new PrerequisiteDetector(f, Architecture.X64).DetectAspNetCoreRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.28", s.DetectedVersion);
+        Assert.Equal("dotnet --list-runtimes", s.DetectionSource);
+    }
+
+    [Fact]
+    public void AspNetCore_DesktopRuntimeOnly_IsMissing_ButDesktopIsSatisfied()
+    {
+        // The exact tester scenario: NETCore + WindowsDesktop present, but NO
+        // AspNetCore.App. The Desktop Runtime detector must report satisfied
+        // while the ASP.NET Core detector reports missing — so the wizard
+        // installs ASP.NET Core but not the (already-present) Desktop Runtime.
+        var f = new FakeProbe();
+        f.Versions["dotnet"] =
+            "Microsoft.NETCore.App 8.0.28 [C:\\x]\n" +
+            "Microsoft.WindowsDesktop.App 8.0.28 [C:\\x]";
+
+        var detector = new PrerequisiteDetector(f, Architecture.X64);
+        Assert.True(detector.DetectDotNet8DesktopRuntime().Satisfied);
+
+        var aspnet = detector.DetectAspNetCoreRuntime();
+        Assert.False(aspnet.Satisfied);
+        Assert.Equal("not-found", aspnet.DetectionSource);
+    }
+
+    [Fact]
+    public void AspNetCore_FoundViaWellKnownFolder_IsSatisfied()
+    {
+        var f = new FakeProbe();
+        f.Env["ProgramFiles"] = @"C:\Program Files";
+        f.Dirs[(AspNetSharedRoot, "8.*")] = new[] { AspNetSharedRoot + @"\8.0.28" };
+
+        var s = new PrerequisiteDetector(f, Architecture.X64).DetectAspNetCoreRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.28", s.DetectedVersion);
+        Assert.Equal("ProgramFiles", s.DetectionSource);
+    }
+
+    [Fact]
+    public void AspNetCore_NotFoundAnywhere_IsMissing()
+    {
+        var s = new PrerequisiteDetector(new FakeProbe(), Architecture.X64).DetectAspNetCoreRuntime();
+        Assert.False(s.Satisfied);
+        Assert.Equal("not-found", s.DetectionSource);
+    }
+
+    [Fact]
+    public void AspNetCore_Arm64Host_FoundInArm64Registry_IsSatisfied()
+    {
+        var f = new FakeProbe();
+        f.HklmSubKeys[AspNetArm64RegRoot] = new[] { "8.0.28" };
+
+        var s = new PrerequisiteDetector(f, Architecture.Arm64).DetectAspNetCoreRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("Registry", s.DetectionSource);
+    }
+
+    [Fact]
+    public void AspNetCore_Arm64Host_IgnoresX64OnlyRegistry_IsMissing()
+    {
+        var f = new FakeProbe();
+        f.HklmSubKeys[AspNetRegRoot] = new[] { "8.0.28" }; // x64 key only
+
+        var s = new PrerequisiteDetector(f, Architecture.Arm64).DetectAspNetCoreRuntime();
+
+        Assert.False(s.Satisfied);
+        Assert.Equal("not-found", s.DetectionSource);
+    }
+
+    // -----------------------------------------------------------------
     // Display lines
     // -----------------------------------------------------------------
     [Fact]

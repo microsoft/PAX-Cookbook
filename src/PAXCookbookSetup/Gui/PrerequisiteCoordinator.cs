@@ -70,6 +70,7 @@ public sealed class PrerequisiteCoordinator
     private static string DisplayName(PrerequisiteKind kind) => kind switch
     {
         PrerequisiteKind.DotNet8DesktopRuntime => ".NET 8 Desktop Runtime",
+        PrerequisiteKind.AspNetCoreRuntime => "ASP.NET Core 8 Runtime",
         PrerequisiteKind.PowerShell7 => "PowerShell 7",
         PrerequisiteKind.Python => "Python",
         _ => kind.ToString()

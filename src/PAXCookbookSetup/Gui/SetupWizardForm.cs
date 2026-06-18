@@ -44,8 +44,8 @@ internal sealed class SetupWizardForm : Form
                   _panelProgress = null!, _panelComplete = null!;
 
     // Prerequisites screen
-    private Label _prereqHeading = null!, _dotnet8Line = null!, _ps7Line = null!, _pyLine = null!, _prereqIntro = null!, _prereqNote = null!;
-    private PrerequisiteStatus? _dotnet8Status, _ps7Status, _pyStatus;
+    private Label _prereqHeading = null!, _dotnet8Line = null!, _aspnetLine = null!, _ps7Line = null!, _pyLine = null!, _prereqIntro = null!, _prereqNote = null!;
+    private PrerequisiteStatus? _dotnet8Status, _aspnetStatus, _ps7Status, _pyStatus;
 
     // Location screen
     private TextBox _txtPath = null!;
@@ -248,17 +248,20 @@ internal sealed class SetupWizardForm : Form
     {
         var p = new Panel { Padding = new Padding(28, 24, 28, 16) };
         _prereqHeading = Body("Checking prerequisites…", 28, 24, 612, 28, 11F, FontStyle.Bold);
-        _dotnet8Line = Body("• .NET 8 Desktop Runtime: checking…", 40, 70, 600, 24);
-        _ps7Line = Body("• PowerShell 7: checking…", 40, 100, 600, 24);
-        _pyLine = Body("• Python: checking…", 40, 130, 600, 24);
-        _prereqIntro = Body("", 28, 170, 612, 48, 10F);
+        _dotnet8Line = Body("• .NET 8 Desktop Runtime: checking…", 40, 64, 600, 24);
+        _aspnetLine = Body("• ASP.NET Core 8 Runtime: checking…", 40, 92, 600, 24);
+        _ps7Line = Body("• PowerShell 7: checking…", 40, 120, 600, 24);
+        _pyLine = Body("• Python: checking…", 40, 148, 600, 24);
+        _prereqIntro = Body("", 28, 186, 612, 48, 10F);
         _prereqNote = Body(
-            "Note: installing PowerShell 7 may require administrator approval. PAX Cookbook " +
-            "itself installs for your user account only and does not require administrator rights.",
-            28, 230, 612, 60, 9F);
+            "Note: installing the .NET runtimes and PowerShell 7 may require administrator " +
+            "approval. PAX Cookbook itself installs for your user account only and does not " +
+            "require administrator rights.",
+            28, 240, 612, 60, 9F);
         _prereqNote.ForeColor = Color.FromArgb(0x60, 0x60, 0x60);
         p.Controls.Add(_prereqHeading);
         p.Controls.Add(_dotnet8Line);
+        p.Controls.Add(_aspnetLine);
         p.Controls.Add(_ps7Line);
         p.Controls.Add(_pyLine);
         p.Controls.Add(_prereqIntro);
@@ -460,6 +463,7 @@ internal sealed class SetupWizardForm : Form
     {
         _prereqHeading.Text = "Checking prerequisites…";
         _dotnet8Line.Text = "• .NET 8 Desktop Runtime: checking…";
+        _aspnetLine.Text = "• ASP.NET Core 8 Runtime: checking…";
         _ps7Line.Text = "• PowerShell 7: checking…";
         _pyLine.Text = "• Python: checking…";
         _prereqIntro.Text = "";
@@ -468,26 +472,31 @@ internal sealed class SetupWizardForm : Form
         Task.Run(() =>
         {
             var dotnet8 = _detector.DetectDotNet8DesktopRuntime();
+            var aspnet = _detector.DetectAspNetCoreRuntime();
             var ps7 = _detector.DetectPowerShell7();
             var py = _detector.DetectPython();
-            BeginInvokeSafe(() => RenderPrereq(dotnet8, ps7, py));
+            BeginInvokeSafe(() => RenderPrereq(dotnet8, aspnet, ps7, py));
         });
     }
 
-    private void RenderPrereq(PrerequisiteStatus dotnet8, PrerequisiteStatus ps7, PrerequisiteStatus py)
+    private void RenderPrereq(PrerequisiteStatus dotnet8, PrerequisiteStatus aspnet,
+                              PrerequisiteStatus ps7, PrerequisiteStatus py)
     {
         _dotnet8Status = dotnet8;
+        _aspnetStatus = aspnet;
         _ps7Status = ps7;
         _pyStatus = py;
         _dotnet8Line.Text = (dotnet8.Satisfied ? "✓  " : "⚠  ") + dotnet8.ToDisplayLine();
+        _aspnetLine.Text = (aspnet.Satisfied ? "✓  " : "⚠  ") + aspnet.ToDisplayLine();
         _ps7Line.Text = (ps7.Satisfied ? "✓  " : "⚠  ") + ps7.ToDisplayLine();
         _pyLine.Text = (py.Satisfied ? "✓  " : "⚠  ") + py.ToDisplayLine();
         _dotnet8Line.ForeColor = dotnet8.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0xC8, 0x1F, 0x1F);
+        _aspnetLine.ForeColor = aspnet.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0xC8, 0x1F, 0x1F);
         _ps7Line.ForeColor = ps7.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0xC8, 0x1F, 0x1F);
         _pyLine.ForeColor = py.Satisfied ? Color.FromArgb(0x1B, 0x7F, 0x2E) : Color.FromArgb(0xC8, 0x1F, 0x1F);
 
-        bool allMet = dotnet8.Satisfied && ps7.Satisfied && py.Satisfied;
-        
+        bool allMet = dotnet8.Satisfied && aspnet.Satisfied && ps7.Satisfied && py.Satisfied;
+
         if (allMet)
         {
             _prereqHeading.Text = "All prerequisites met";
@@ -496,8 +505,9 @@ internal sealed class SetupWizardForm : Form
         else
         {
             _prereqHeading.Text = "Required prerequisites";
-            int missing = (dotnet8.Satisfied ? 0 : 1) + (ps7.Satisfied ? 0 : 1) + (py.Satisfied ? 0 : 1);
-            _prereqIntro.Text = $"PAX Cookbook requires all three components.\n{missing} missing component{(missing > 1 ? "s" : "")} will be installed automatically.";
+            int missing = (dotnet8.Satisfied ? 0 : 1) + (aspnet.Satisfied ? 0 : 1)
+                        + (ps7.Satisfied ? 0 : 1) + (py.Satisfied ? 0 : 1);
+            _prereqIntro.Text = $"PAX Cookbook requires all four components.\n{missing} missing component{(missing > 1 ? "s" : "")} will be installed automatically.";
         }
         _btnNext.Enabled = true;
     }
@@ -527,6 +537,7 @@ internal sealed class SetupWizardForm : Form
         {
             ["installRoot"] = _installRoot,
             ["dotnet8"] = _dotnet8Status?.DetectionSource ?? "unknown",
+            ["aspnetcore"] = _aspnetStatus?.DetectionSource ?? "unknown",
             ["ps7"] = _ps7Status?.DetectionSource ?? "unknown",
             ["python"] = _pyStatus?.DetectionSource ?? "unknown"
         });
@@ -538,6 +549,7 @@ internal sealed class SetupWizardForm : Form
 
         // All three prerequisites are REQUIRED. Install any that are missing.
         bool needDotNet8 = _dotnet8Status is { Satisfied: false };
+        bool needAspNet = _aspnetStatus is { Satisfied: false };
         bool needPs7 = _ps7Status is { Satisfied: false };
         bool needPy = _pyStatus is { Satisfied: false };
 
@@ -553,7 +565,7 @@ internal sealed class SetupWizardForm : Form
                 Action<string> progress = msg =>
                     BeginInvokeSafe(() => { _progressStatus.Text = msg; AppendLog(msg); });
 
-                if (needDotNet8 || needPs7 || needPy)
+                if (needDotNet8 || needAspNet || needPs7 || needPy)
                 {
                     BeginInvokeSafe(() => AppendLog("Installing required prerequisites…"));
 
@@ -561,12 +573,14 @@ internal sealed class SetupWizardForm : Form
                     var coordinator = new PrerequisiteCoordinator(new IPrerequisiteInstaller[]
                     {
                         new DotNet8DesktopRuntimeInstaller(downloader, new RealElevatedLauncher(), _detector),
+                        new AspNetCoreRuntimeInstaller(downloader, new RealElevatedLauncher(), _detector),
                         new PowerShell7Installer(downloader, new RealElevatedLauncher(), _detector),
                         new PythonInstaller(downloader, new RealSilentLauncher(), _detector)
                     });
                     var needed = new Dictionary<PrerequisiteKind, bool>
                     {
                         [PrerequisiteKind.DotNet8DesktopRuntime] = needDotNet8,
+                        [PrerequisiteKind.AspNetCoreRuntime] = needAspNet,
                         [PrerequisiteKind.PowerShell7] = needPs7,
                         [PrerequisiteKind.Python] = needPy
                     };
@@ -619,6 +633,7 @@ internal sealed class SetupWizardForm : Form
         var name = kind switch
         {
             PrerequisiteKind.DotNet8DesktopRuntime => ".NET 8 Desktop Runtime",
+            PrerequisiteKind.AspNetCoreRuntime => "ASP.NET Core 8 Runtime",
             PrerequisiteKind.PowerShell7 => "PowerShell 7",
             PrerequisiteKind.Python => "Python",
             _ => kind.ToString()
@@ -671,6 +686,8 @@ internal sealed class SetupWizardForm : Form
         var warns = new List<string>();
         if (_dotnet8Status is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.DotNet8DesktopRuntime))
             warns.Add("⚠ .NET 8 Desktop Runtime is required but not installed.");
+        if (_aspnetStatus is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.AspNetCoreRuntime))
+            warns.Add("⚠ ASP.NET Core 8 Runtime is required but not installed.");
         if (_ps7Status is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.PowerShell7))
             warns.Add("⚠ PowerShell 7 is required but not installed.");
         if (_pyStatus is { Satisfied: false } && !PrereqEndedSatisfied(PrerequisiteKind.Python))

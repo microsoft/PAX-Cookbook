@@ -20,18 +20,21 @@ internal static class CliPrerequisites
         PrereqLog.Begin();
         var detector = new PrerequisiteDetector(new SystemPrerequisiteProbe());
         var dotnet = detector.DetectDotNet8DesktopRuntime();
+        var aspnet = detector.DetectAspNetCoreRuntime();
         var ps7 = detector.DetectPowerShell7();
         var python = detector.DetectPython();
 
         Console.WriteLine();
         Console.WriteLine("Checking prerequisites...");
         Console.WriteLine("  " + StatusLine(dotnet));
+        Console.WriteLine("  " + StatusLine(aspnet));
         Console.WriteLine("  " + StatusLine(ps7));
         Console.WriteLine("  " + StatusLine(python));
 
         var needed = new Dictionary<PrerequisiteKind, bool>
         {
             [PrerequisiteKind.DotNet8DesktopRuntime] = !dotnet.Satisfied,
+            [PrerequisiteKind.AspNetCoreRuntime] = !aspnet.Satisfied,
             [PrerequisiteKind.PowerShell7] = !ps7.Satisfied,
             [PrerequisiteKind.Python] = !python.Satisfied
         };
@@ -39,6 +42,7 @@ internal static class CliPrerequisites
         log.Write("cli-prereq-detected", fields: new Dictionary<string, object?>
         {
             ["dotnet8"] = dotnet.Satisfied,
+            ["aspnetcore"] = aspnet.Satisfied,
             ["powershell7"] = ps7.Satisfied,
             ["python"] = python.Satisfied
         });
@@ -56,6 +60,7 @@ internal static class CliPrerequisites
             var coordinator = new PrerequisiteCoordinator(new IPrerequisiteInstaller[]
             {
                 new DotNet8DesktopRuntimeInstaller(downloader, new RealElevatedLauncher(), detector),
+                new AspNetCoreRuntimeInstaller(downloader, new RealElevatedLauncher(), detector),
                 new PowerShell7Installer(downloader, new RealElevatedLauncher(), detector),
                 new PythonInstaller(downloader, new RealSilentLauncher(), detector)
             });
@@ -106,6 +111,7 @@ internal static class CliPrerequisites
     private static string DisplayName(PrerequisiteKind kind) => kind switch
     {
         PrerequisiteKind.DotNet8DesktopRuntime => ".NET 8 Desktop Runtime",
+        PrerequisiteKind.AspNetCoreRuntime => "ASP.NET Core 8 Runtime",
         PrerequisiteKind.PowerShell7 => "PowerShell 7",
         PrerequisiteKind.Python => "Python",
         _ => kind.ToString()

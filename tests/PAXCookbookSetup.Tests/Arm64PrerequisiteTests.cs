@@ -66,6 +66,26 @@ public class Arm64PrerequisiteTests
     }
 
     // -----------------------------------------------------------------
+    // ASP.NET Core 8 Runtime (the broker needs Microsoft.AspNetCore.App, which
+    // the Desktop Runtime does not include)
+    // -----------------------------------------------------------------
+    [Fact]
+    public void AspNetCore_BuildDownloadUrl_Arm64_PicksArm64Installer()
+    {
+        var url = AspNetCoreRuntimeInstaller.BuildDownloadUrl(Architecture.Arm64);
+        Assert.EndsWith("aspnetcore-runtime-8.0.28-win-arm64.exe", url);
+        Assert.True(PrereqDownloadHosts.IsAllowed(url));
+    }
+
+    [Fact]
+    public void AspNetCore_BuildDownloadUrl_X64_PicksX64Installer()
+    {
+        var url = AspNetCoreRuntimeInstaller.BuildDownloadUrl(Architecture.X64);
+        Assert.EndsWith("aspnetcore-runtime-8.0.28-win-x64.exe", url);
+        Assert.True(PrereqDownloadHosts.IsAllowed(url));
+    }
+
+    // -----------------------------------------------------------------
     // PowerShell 7
     // -----------------------------------------------------------------
     private const string Ps7ReleaseJson = """

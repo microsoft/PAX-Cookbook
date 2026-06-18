@@ -4,6 +4,7 @@ namespace PAXCookbookSetup.Gui;
 public enum PrerequisiteKind
 {
     DotNet8DesktopRuntime,
+    AspNetCoreRuntime,
     PowerShell7,
     Python
 }
