@@ -22,6 +22,15 @@ public sealed record ShortcutWriteResult(
     bool ExcludeSucceeded
 );
 
+// Read-only view of an existing .lnk, returned by Win32ShortcutWriter.ReadLink
+// (IShellLinkW — no Windows Script Host).
+public sealed record ShortcutReadResult(
+    string Target,
+    string Arguments,
+    string WorkingDirectory,
+    string IconLocation
+);
+
 // Abstraction so unit tests do not touch the real Start Menu / Desktop.
 public interface IShortcutWriter
 {

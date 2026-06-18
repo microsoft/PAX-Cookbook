@@ -43,11 +43,13 @@ public sealed class AutoStartRegistrar
         var workspacePath = Path.Combine(installRootFull, ProductConstants.WorkspaceFolderName);
         var appRootPath = Path.Combine(installRootFull, ProductConstants.AppRootFolderName);
 
-        // WDAC-safe headless auto-start with NO console window: wscript.exe runs
-        // the shipped launch.vbs, which starts the signed dotnet.exe host hidden.
-        // Same --headless/--workspace/--approot contract as before.
+        // WDAC-safe headless auto-start: run the signed dotnet.exe host directly
+        // with the app DLL (no wscript / launch.vbs — strict WDAC blocks script
+        // hosts). The app hides its own console window at startup, so the daemon
+        // starts with no visible terminal. Same --headless/--workspace/--approot
+        // contract as before.
         var argTail = $"--headless --workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
-        var command = DotNetLaunch.VbsLauncherCommand(installRootFull, argTail);
+        var command = DotNetLaunch.AppDllCommand(installRootFull, argTail);
 
         _registry.SetString(RootSubKey, ValueName, command);
 

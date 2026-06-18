@@ -16,10 +16,44 @@ using PAXCookbookSetup.Verbs;
 // the launching terminal so interactive verb output stays visible.
 if (args.Length == 0)
 {
+    // GUI wizard: hide the dotnet.exe host console window so no blank terminal
+    // flashes (the bootstrapper apphost has no console, but the installed Setup
+    // run as `dotnet.exe PAXCookbookSetup.dll` would).
+    ConsoleWindowHelper.HideConsoleWindow();
     return WizardLauncher.Run();
 }
-NativeConsole.AttachToParent();
+// FIX 3 / WDAC: the installed Setup runs via the Microsoft-signed dotnet.exe
+// host (dotnet.exe "PAXCookbookSetup.dll" <verb>) instead of the former
+// wscript.exe + uninstall.vbs hidden launcher. For an interactive uninstall the
+// only UI is the GUI confirm/progress dialog, so hide the console window — no
+// blank terminal flashes. A scripted/silent run (--quiet/--silent) or a
+// CLI-output verb keeps its console attached to the launching terminal.
+if (IsGuiSetupInvocation(args))
+{
+    ConsoleWindowHelper.HideConsoleWindow();
+}
+else
+{
+    NativeConsole.AttachToParent();
+}
 return Run(args);
+
+// True when this Setup invocation will show a GUI and produce no meaningful
+// console output, so its dotnet.exe host console should be hidden: the
+// interactive uninstall dialog. --quiet/--silent (scripted) and CLI-output
+// verbs are excluded so their terminal output is preserved.
+static bool IsGuiSetupInvocation(string[] a)
+{
+    foreach (var x in a)
+    {
+        if (string.Equals(x, "--quiet", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(x, "--silent", StringComparison.OrdinalIgnoreCase))
+            return false;
+    }
+    return a.Length > 0
+        && string.Equals(a[0], "uninstall", StringComparison.OrdinalIgnoreCase)
+        && Environment.UserInteractive;
+}
 
 static int Run(string[] argv)
 {

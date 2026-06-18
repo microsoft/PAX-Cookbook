@@ -62,6 +62,14 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // WDAC fix: the app is launched through the Microsoft-signed dotnet.exe
+        // host (dotnet.exe "PAX Cookbook.dll") instead of the former wscript.exe
+        // + launch.vbs hidden launcher, because strict corporate WDAC policies
+        // block Windows Script Host. dotnet.exe is a console application, so hide
+        // and detach its console window as the very first thing the process does
+        // — in well under a millisecond, so no blank terminal flashes.
+        ConsoleWindowHelper.HideConsoleWindow();
+
         // --headless runs the long-lived background broker daemon: the
         // in-process Kestrel broker with a system-tray presence but no WebView2
         // window, so scheduled bakes fire in the background and the user can open

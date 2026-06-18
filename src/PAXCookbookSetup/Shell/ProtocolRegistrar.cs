@@ -21,10 +21,11 @@ public sealed class ProtocolRegistrar
     public ProtocolRegistrationResult Register(string installRoot)
     {
         var appExe = ShortcutCatalog.AppExePath(installRoot);
-        // WDAC-safe + NO console window: wscript.exe runs the shipped launch.vbs,
-        // which starts the signed dotnet.exe host hidden. DefaultIcon still
-        // points at the apphost EXE (icon reads allowed).
-        var command = DotNetLaunch.VbsLauncherCommand(installRoot, "protocol \"%1\"");
+        // WDAC-safe: run the signed dotnet.exe host directly with the app DLL (no
+        // wscript / launch.vbs). The app hides its own console at startup, so no
+        // terminal flashes. DefaultIcon still points at the apphost EXE (icon
+        // reads allowed).
+        var command = DotNetLaunch.AppDllCommand(installRoot, "protocol \"%1\"");
 
         _registry.SetString(RootSubKey, null, "URL:PAX Cookbook Protocol");
         _registry.SetString(RootSubKey, "URL Protocol", "");

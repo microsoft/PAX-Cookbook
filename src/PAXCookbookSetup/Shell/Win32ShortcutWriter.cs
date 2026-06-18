@@ -25,6 +25,12 @@ public sealed class Win32ShortcutWriter : IShortcutWriter
         var shellLink = (IShellLinkW)new ShellLink();
         shellLink.SetPath(def.Target);
         shellLink.SetArguments(def.Arguments);
+        // FIX 4 / WDAC belt-and-suspenders: create the shortcut MINIMIZED
+        // (SW_SHOWMINNOACTIVE = 7). The shortcut now targets the console-subsystem
+        // dotnet.exe host directly, so starting minimized means that even before
+        // the app hides its own console window at startup, the host window is
+        // never shown — the user never sees any console.
+        shellLink.SetShowCmd(SW_SHOWMINNOACTIVE);
         if (!string.IsNullOrEmpty(def.WorkingDirectory))
             shellLink.SetWorkingDirectory(def.WorkingDirectory);
         if (!string.IsNullOrEmpty(def.IconLocation))
@@ -69,6 +75,36 @@ public sealed class Win32ShortcutWriter : IShortcutWriter
     public void Delete(string lnkPath)
     {
         if (File.Exists(lnkPath)) File.Delete(lnkPath);
+    }
+
+    // Read-only .lnk metadata via IShellLinkW (the same WDAC-safe COM path used
+    // for writing; NO Windows Script Host). Returns null when the file is missing
+    // or cannot be read. AUMID is not read here — callers that need it use
+    // IPropertyStore separately. This replaces the former WScript.Shell COM read.
+    public static ShortcutReadResult? ReadLink(string lnkPath)
+    {
+        if (!File.Exists(lnkPath)) return null;
+        try
+        {
+            var shellLink = (IShellLinkW)new ShellLink();
+            ((IPersistFile)shellLink).Load(lnkPath, STGM_READ);
+
+            var sbTarget = new System.Text.StringBuilder(1024);
+            shellLink.GetPath(sbTarget, sbTarget.Capacity, IntPtr.Zero, 0);
+            var sbArgs = new System.Text.StringBuilder(1024);
+            shellLink.GetArguments(sbArgs, sbArgs.Capacity);
+            var sbWork = new System.Text.StringBuilder(1024);
+            shellLink.GetWorkingDirectory(sbWork, sbWork.Capacity);
+            var sbIcon = new System.Text.StringBuilder(1024);
+            shellLink.GetIconLocation(sbIcon, sbIcon.Capacity, out var iconIndex);
+
+            return new ShortcutReadResult(
+                Target: sbTarget.ToString(),
+                Arguments: sbArgs.ToString(),
+                WorkingDirectory: sbWork.ToString(),
+                IconLocation: sbIcon.Length > 0 ? sbIcon + "," + iconIndex : "");
+        }
+        catch { return null; }
     }
 
     private static (string Path, int Index) SplitIcon(string spec)
@@ -163,6 +199,11 @@ public sealed class Win32ShortcutWriter : IShortcutWriter
 
     private const ushort VT_LPWSTR = 31;
     private const ushort VT_BOOL = 11;
+
+    // SW_SHOWMINNOACTIVE — the .lnk ShowCmd that starts the target minimized and
+    // without activating it. STGM_READ — IPersistFile.Load read mode.
+    private const int SW_SHOWMINNOACTIVE = 7;
+    private const int STGM_READ = 0;
 
     [DllImport("ole32.dll")]
     private static extern int PropVariantClear(ref PROPVARIANT pvar);

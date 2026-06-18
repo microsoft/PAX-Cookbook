@@ -22,13 +22,4 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Hidden launcher: shipped next to the app DLL so shell launches go
-         through wscript.exe (no console window). Copied to the publish output
-         (App\bin\launch.vbs) and verified in the payload manifest. -->
-    <Content Include="launch.vbs">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
 </Project>

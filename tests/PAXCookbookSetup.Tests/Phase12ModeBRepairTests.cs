@@ -202,7 +202,7 @@ public class Phase12ModeBRepairTests
     // Bug 2 — Defensive ARP UninstallString / DisplayIcon normalization
     // ============================================================
 
-    // ---- 10. UninstallString runs uninstall.vbs hidden via wscript.exe. ----
+    // ---- 10. UninstallString runs the Setup DLL uninstall via dotnet.exe. ----
     [Fact]
     public void Arp_UninstallString_ShapeAndQuoting()
     {
@@ -210,14 +210,14 @@ public class Phase12ModeBRepairTests
         var u = new UninstallRegistrar(rg);
         var r = u.Register(FakeInstallRoot, AppVersion);
         Assert.StartsWith("\"", r.UninstallString);
-        // Windowless + WDAC-safe: wscript.exe "<...>\Setup\uninstall.vbs"
-        Assert.Contains("wscript.exe", r.UninstallString);
-        Assert.EndsWith(@"Setup\uninstall.vbs""", r.UninstallString);
+        // WDAC-safe: dotnet.exe "<...>\Setup\PAXCookbookSetup.dll" uninstall
+        Assert.Contains("dotnet.exe", r.UninstallString);
+        Assert.EndsWith(@"Setup\PAXCookbookSetup.dll"" uninstall", r.UninstallString);
         Assert.Equal(r.UninstallString,
             rg.GetString(UninstallRegistrar.RootSubKey, "UninstallString"));
     }
 
-    // ---- 11. UninstallString's uninstall.vbs target is a fully-qualified path. ----
+    // ---- 11. UninstallString's Setup DLL target is a fully-qualified path. ----
     [Fact]
     public void Arp_UninstallString_TargetIsFullyQualified()
     {
@@ -226,8 +226,8 @@ public class Phase12ModeBRepairTests
         var r = u.Register(FakeInstallRoot, AppVersion);
         var inner = ExtractSecondQuotedToken(r.UninstallString);
         Assert.True(Path.IsPathFullyQualified(inner),
-            $"UninstallString launcher target should be fully qualified, got: {inner}");
-        Assert.EndsWith(@"Setup\uninstall.vbs", inner);
+            $"UninstallString Setup DLL target should be fully qualified, got: {inner}");
+        Assert.EndsWith(@"Setup\PAXCookbookSetup.dll", inner);
     }
 
     // ---- 12. QuietUninstallString is registered and ends with --force. ----
@@ -238,10 +238,10 @@ public class Phase12ModeBRepairTests
         var u = new UninstallRegistrar(rg);
         var r = u.Register(FakeInstallRoot, AppVersion);
         Assert.False(string.IsNullOrEmpty(r.QuietUninstallString));
-        Assert.EndsWith(@"Setup\uninstall.vbs"" --force", r.QuietUninstallString);
+        Assert.EndsWith(@"Setup\PAXCookbookSetup.dll"" uninstall --force", r.QuietUninstallString);
         Assert.Equal(r.QuietUninstallString,
             rg.GetString(UninstallRegistrar.RootSubKey, "QuietUninstallString"));
-        // Same uninstall.vbs launcher target as UninstallString (extra --force).
+        // Same Setup DLL target as UninstallString (extra --force).
         Assert.Equal(ExtractSecondQuotedToken(r.UninstallString),
                      ExtractSecondQuotedToken(r.QuietUninstallString));
     }
@@ -421,8 +421,8 @@ public class Phase12ModeBRepairTests
 
     private static string ExtractSecondQuotedToken(string s)
     {
-        // Expects: "<wscript.exe>" "<uninstall.vbs>" <flags...>
-        // Returns the SECOND quoted token (the launcher script wscript runs).
+        // Expects: "<dotnet.exe>" "<PAXCookbookSetup.dll>" <verb/flags...>
+        // Returns the SECOND quoted token (the Setup DLL dotnet runs).
         var first = s.IndexOf('"');
         if (first < 0) return s;
         var firstClose = s.IndexOf('"', first + 1);

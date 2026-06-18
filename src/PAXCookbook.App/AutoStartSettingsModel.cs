@@ -177,18 +177,19 @@ internal static class AutoStartSettingsModel
     }
 
     // Build the SAME launch command the installer's AutoStartRegistrar writes:
-    //   "<wscript>" "<launch.vbs>" --headless --workspace "<ws>" --approot "<approot>"
-    // so toggling off then on reproduces the installer's key. wscript.exe runs
-    // the shipped launch.vbs (next to the app DLL in <appRoot>\bin), which
-    // starts the signed dotnet.exe host hidden -- no console window. The
+    //   "<dotnet>" "<App\bin\PAX Cookbook.dll>" --headless --workspace "<ws>" --approot "<approot>"
+    // so toggling off then on reproduces the installer's key. The signed
+    // dotnet.exe host runs the app DLL directly (no wscript / launch.vbs —
+    // strict corporate WDAC blocks script hosts); the app hides its own console
+    // window at startup, so the daemon starts with no visible terminal. The
     // workspace / approot are the values THIS broker was launched with.
     private static string BuildCommand(string workspacePath, string appRoot)
     {
-        string wscript = DotNetLaunch.WScriptExePath();
-        string vbs = SafeFullPath(Path.Combine(appRoot, "bin", "launch.vbs"));
+        string dotnet = DotNetLaunch.DotNetExePath();
+        string dll = SafeFullPath(Path.Combine(appRoot, "bin", "PAX Cookbook.dll"));
         string wsFull = SafeFullPath(workspacePath);
         string appFull = SafeFullPath(appRoot);
-        return $"\"{wscript}\" \"{vbs}\" --headless --workspace \"{wsFull}\" --approot \"{appFull}\"";
+        return $"\"{dotnet}\" \"{dll}\" --headless --workspace \"{wsFull}\" --approot \"{appFull}\"";
     }
 
     private static string SafeFullPath(string p)

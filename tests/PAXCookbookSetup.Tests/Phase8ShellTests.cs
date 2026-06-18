@@ -83,24 +83,24 @@ public class Phase8ShellTests
 
     // ---- 4. Target is the signed dotnet host; args carry the DLL + paths. ----
     [Fact]
-    public void Catalog_TargetIsWScript_ArgsCarryVbs()
+    public void Catalog_TargetIsDotNet_ArgsCarryDll()
     {
         var defs = ShortcutCatalog.StartMenuShortcuts(FakeInstallRoot, true, true);
         var primary = defs.First(d => d.Name == ShortcutCatalog.PrimaryName);
-        // No console window: the shortcut runs wscript.exe on the hidden
-        // launch.vbs (which starts the signed dotnet host hidden), never dotnet
-        // directly and never the unsigned apphost.
-        Assert.EndsWith("wscript.exe", primary.Target, System.StringComparison.OrdinalIgnoreCase);
-        var expectedVbs = Path.Combine(FakeInstallRoot, "App", "bin", "launch.vbs");
+        // WDAC-safe: the shortcut targets the signed dotnet.exe host directly,
+        // with the app DLL as its first argument; never wscript / launch.vbs and
+        // never the unsigned apphost.
+        Assert.EndsWith("dotnet.exe", primary.Target, System.StringComparison.OrdinalIgnoreCase);
+        var expectedDll = Path.Combine(FakeInstallRoot, "App", "bin", "PAX Cookbook.dll");
         var expectedWs  = Path.Combine(FakeInstallRoot, "Workspace");
         var expectedApp = Path.Combine(FakeInstallRoot, "App");
-        Assert.Equal($"\"{expectedVbs}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", primary.Arguments);
+        Assert.Equal($"\"{expectedDll}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", primary.Arguments);
         // Icon still comes from the apphost EXE (icon reads are allowed).
         Assert.EndsWith(@"App\bin\PAX Cookbook.exe,0", primary.IconLocation);
-        // The desktop shortcut shares the same hidden launch.
+        // The desktop shortcut shares the same launch.
         var desktop = ShortcutCatalog.DesktopShortcut(FakeInstallRoot);
-        Assert.EndsWith("wscript.exe", desktop.Target, System.StringComparison.OrdinalIgnoreCase);
-        Assert.Equal($"\"{expectedVbs}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", desktop.Arguments);
+        Assert.EndsWith("dotnet.exe", desktop.Target, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Equal($"\"{expectedDll}\" --workspace \"{expectedWs}\" --approot \"{expectedApp}\"", desktop.Arguments);
     }
 
     // ---- 5. ShellOperations.Install creates expected shortcut count. ----
@@ -245,8 +245,8 @@ public class Phase8ShellTests
         var rg = new InMemoryRegistryWriter();
         var u = new UninstallRegistrar(rg);
         var r = u.Register(FakeInstallRoot, AppVersion);
-        // Windowless + WDAC-safe: wscript.exe runs the hidden uninstall.vbs.
-        Assert.EndsWith(@"Setup\uninstall.vbs""", r.UninstallString);
+        // WDAC-safe: dotnet.exe runs the Setup DLL's uninstall verb directly.
+        Assert.EndsWith(@"Setup\PAXCookbookSetup.dll"" uninstall", r.UninstallString);
         Assert.StartsWith("\"", r.UninstallString);
     }
 
@@ -413,7 +413,7 @@ public class Phase8ShellTests
     }
 
     // ---- 29. Default flow registers ARP and points UninstallString at
-    //          the windowless installed-Setup uninstall launcher.
+    //          the installed-Setup uninstall verb (dotnet.exe + Setup DLL).
     [Fact]
     public void DefaultShellFlow_RegistersArp_WithUninstallStringPointingAtInstalledSetup()
     {
@@ -421,7 +421,7 @@ public class Phase8ShellTests
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         Assert.True(h.Registry.SubKeyExists(UninstallRegistrar.RootSubKey));
         var us = h.Registry.GetString(UninstallRegistrar.RootSubKey, "UninstallString")!;
-        Assert.EndsWith("uninstall.vbs\"", us);
+        Assert.EndsWith("PAXCookbookSetup.dll\" uninstall", us);
         Assert.Contains(h.InstallRoot, us);
     }
 
@@ -433,8 +433,8 @@ public class Phase8ShellTests
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         var m = h.ManifestStore.TryLoad(h.InstallRoot)!;
         Assert.Contains(m.Shortcuts,
-            e => e.Target.EndsWith("wscript.exe", System.StringComparison.OrdinalIgnoreCase)
-                 && e.Arguments.Contains("launch.vbs")
+            e => e.Target.EndsWith("dotnet.exe", System.StringComparison.OrdinalIgnoreCase)
+                 && e.Arguments.Contains("PAX Cookbook.dll")
                  && e.Arguments.Contains("--workspace"));
     }
 

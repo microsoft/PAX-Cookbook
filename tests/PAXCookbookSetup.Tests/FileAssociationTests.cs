@@ -45,7 +45,7 @@ public class FileAssociationTests
                 ProductConstants.PaxFullFileExtension), null));
     }
 
-    // ---- 2. open command runs the hidden VBS launcher + quoted %1. ----
+    // ---- 2. open command runs dotnet.exe + the app DLL + quoted %1. ----
     [Fact]
     public void Register_OpenCommandRunsLauncherWithPercent1()
     {
@@ -53,10 +53,12 @@ public class FileAssociationTests
         new FileAssociationRegistrar(rg).Register(InstallRoot);
 
         var cmd = rg.GetString(LiteProgKey + @"\shell\open\command", null);
-        var expectedVbs = DotNetLaunch.LaunchVbsPath(InstallRoot);
+        var expectedDll = DotNetLaunch.AppDllPath(InstallRoot);
         Assert.NotNull(cmd);
-        Assert.EndsWith($"\"{expectedVbs}\" \"%1\"", cmd);
-        Assert.Contains("wscript.exe", cmd);
+        Assert.EndsWith($"\"{expectedDll}\" \"%1\"", cmd);
+        Assert.Contains("dotnet.exe", cmd);
+        Assert.DoesNotContain("wscript", cmd);
+        Assert.DoesNotContain(".vbs", cmd);
     }
 
     // ---- 3. DefaultIcon points at the app exe, index 0. ----

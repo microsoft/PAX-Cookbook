@@ -761,26 +761,17 @@ internal static class IconDiagnostics
             // best-effort
         }
 
-        // Target / arguments / icon location via WScript.Shell (read-only).
+        // Target / arguments / icon location via IShellLinkW (read-only; no
+        // Windows Script Host — WDAC-safe).
         try
         {
-            Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
-            if (shellType is not null)
+            var link = ShellLinkReader.Read(lnkPath);
+            if (link is not null)
             {
-                dynamic shell = Activator.CreateInstance(shellType)!;
-                try
-                {
-                    dynamic link = shell.CreateShortcut(lnkPath);
-                    record.TargetPath = (string?)link.TargetPath;
-                    record.Arguments = (string?)link.Arguments;
-                    record.IconLocation = (string?)link.IconLocation;
-                    record.WorkingDirectory = (string?)link.WorkingDirectory;
-                    Marshal.FinalReleaseComObject(link);
-                }
-                finally
-                {
-                    Marshal.FinalReleaseComObject(shell);
-                }
+                record.TargetPath = link.Target;
+                record.Arguments = link.Arguments;
+                record.IconLocation = link.IconLocation;
+                record.WorkingDirectory = link.WorkingDirectory;
             }
         }
         catch (Exception ex)

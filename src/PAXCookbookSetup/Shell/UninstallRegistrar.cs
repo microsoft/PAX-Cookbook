@@ -46,16 +46,15 @@ public sealed class UninstallRegistrar
         var installRootFull = Path.GetFullPath(installRoot);
         var appExe = Path.GetFullPath(ShortcutCatalog.AppExePath(installRootFull));
 
-        // Uninstall runs the framework-dependent Setup assembly through the
-        // Microsoft-signed dotnet.exe host, launched HIDDEN via the
-        // Microsoft-signed wscript.exe on the shipped uninstall.vbs (window
-        // style 0) so no blank console window flashes during uninstall — the
-        // only UI is the uninstall confirmation/progress dialog. Both the .vbs
-        // and wscript.exe are WDAC-allowed; the unsigned Setup apphost is never
-        // run. The DisplayIcon still points at the apphost EXE because icon
+        // Uninstall runs the framework-dependent Setup assembly directly through
+        // the Microsoft-signed dotnet.exe host (no wscript / uninstall.vbs —
+        // strict corporate WDAC blocks script hosts). Setup hides its own
+        // console window at startup for the interactive uninstall, so no blank
+        // terminal flashes — the only UI is the uninstall confirmation/progress
+        // dialog. The DisplayIcon still points at the apphost EXE because icon
         // reads are allowed even when execution is not.
-        var uninstallString = DotNetLaunch.SetupUninstallVbsCommand(installRootFull, "");
-        var quietUninstallString = DotNetLaunch.SetupUninstallVbsCommand(installRootFull, "--force");
+        var uninstallString = DotNetLaunch.SetupDllCommand(installRootFull, "uninstall");
+        var quietUninstallString = DotNetLaunch.SetupDllCommand(installRootFull, "uninstall --force");
         var displayIcon = appExe + ",0";
 
         _registry.SetString(RootSubKey, "DisplayName", DisplayName);

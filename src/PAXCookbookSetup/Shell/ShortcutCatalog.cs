@@ -40,10 +40,12 @@ public static class ShortcutCatalog
     }
 
     // The one canonical launch shortcut, shared by the Start Menu and Desktop.
-    // WDAC-safe AND console-free: target the Microsoft-signed wscript.exe on the
-    // shipped launch.vbs, which starts the signed dotnet.exe host hidden (no
-    // blank terminal window). The icon still comes from the apphost EXE (icon
-    // reads are allowed).
+    // WDAC-safe: target the Microsoft-signed dotnet.exe host directly with the
+    // app DLL as its argument (no wscript / launch.vbs — strict corporate WDAC
+    // blocks script hosts). The app hides its own console window at startup and
+    // the .lnk is created minimized, so no blank terminal flashes. The icon
+    // still comes from the apphost EXE (icon reads are allowed; executing it is
+    // not). WorkingDirectory is the app bin folder.
     private static ShortcutDefinition PrimaryDefinition(string installRoot, string kind = "start-menu")
     {
         var appExe = AppExePath(installRoot);
@@ -53,8 +55,8 @@ public static class ShortcutCatalog
         var argTail = $"--workspace \"{workspacePath}\" --approot \"{appRootPath}\"";
         return new ShortcutDefinition(
             Kind: kind, Name: kind == "desktop" ? DesktopName : PrimaryName,
-            Target: DotNetLaunch.WScriptExePath(),
-            Arguments: DotNetLaunch.VbsLauncherArguments(installRoot, argTail),
+            Target: DotNetLaunch.DotNetExePath(),
+            Arguments: DotNetLaunch.AppDllArguments(installRoot, argTail),
             WorkingDirectory: appDir,
             Aumid: ProductConstants.Aumid, IconLocation: appExe + ",0",
             ExcludeFromRecommended: false, OrderHint: 0);
