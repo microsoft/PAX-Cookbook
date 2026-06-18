@@ -721,17 +721,15 @@ export function BakesWorkspace() {
         {/* Left: real bake history read from the broker */}
         <section className="dvw-card tt-pane bk-pane" aria-label="Bake history">
           <header className="tt-pane__head">
-            <div className="bk-history-head__lead">
-              <h2 className="tt-pane__title">Bake history</h2>
+            <h2 className="tt-pane__title">Bake history</h2>
+            <div className="tt-pane__head-actions">
               <button
                 type="button"
-                className="dvw-btn dvw-btn--primary dvw-btn--sm"
+                className="dvw-btn dvw-btn--ghost"
                 onClick={() => requestShellSection('recipes')}
               >
-                Create or open a recipe
+                Open Recipes
               </button>
-            </div>
-            <div className="tt-pane__head-actions">
               <button
                 type="button"
                 className="dvw-btn dvw-btn--ghost"

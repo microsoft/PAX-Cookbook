@@ -214,16 +214,6 @@
   font-size: 1.05rem;
 }
 
-/* Small pill variant: a compact action button (e.g. the Bakes header
-   "Create or open a recipe" CTA). Pair with a color modifier such as
-   .dvw-btn--primary for the green theme fill. */
-.dvw-btn--sm {
-  min-height: 28px;
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-13);
-  border-radius: var(--r-pill);
-}
-
 /* Import Recipe dropdown in the Home command bar. The chevron sits inside the
    trigger button; the menu floats below it and closes on Escape / outside-click. */
 .dvw-import-menu {
@@ -2244,17 +2234,6 @@
 
 .bk-pane {
   min-width: 0;
-}
-
-/* Groups the "Bake history" title with its small green "Create or open a
-   recipe" pill so the action sits on the header line, tucked beside the title
-   instead of floating below the card head. Wraps on a narrow pane. */
-.bk-history-head__lead {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  min-width: 0;
-  flex-wrap: wrap;
 }
 
 /* Cap the bake history at roughly 7 visible rows and scroll the rest with a
