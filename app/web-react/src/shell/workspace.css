@@ -2016,6 +2016,32 @@
   font-size: var(--fs-14);
 }
 
+/* Small muted text link shown only in the Bakes empty state, centered below
+   the body copy (the .tt-empty column centers it). Quieter than the title —
+   muted at rest, blue + underline on hover. */
+.bk-empty__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--c-muted);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.bk-empty__link:hover {
+  color: var(--c-blue);
+  text-decoration: underline;
+}
+
+.bk-empty__link:focus-visible {
+  outline: 2px solid var(--c-blue);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
 /* Result header + verdict */
 .tt-result__head {
   display: flex;

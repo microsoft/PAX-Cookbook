@@ -726,13 +726,6 @@ export function BakesWorkspace() {
               <button
                 type="button"
                 className="dvw-btn dvw-btn--ghost"
-                onClick={() => requestShellSection('recipes')}
-              >
-                Open Recipes
-              </button>
-              <button
-                type="button"
-                className="dvw-btn dvw-btn--ghost"
                 onClick={clearHistory}
                 disabled={cooks.length === 0}
                 title="Clear this view only — your bake records and logs are not deleted."
@@ -829,6 +822,13 @@ export function BakesWorkspace() {
                   ? 'This view was cleared for the session. Your bake records and logs were not deleted — refresh to reload them.'
                   : 'No bakes have been recorded on this PC. This page reviews real bake history — status, outputs, and logs — when records exist. It does not start a bake: prepare recipes in Recipes and preflight them in Taste Tests.'}
               </p>
+              <button
+                type="button"
+                className="bk-empty__link"
+                onClick={() => requestShellSection('recipes')}
+              >
+                Open Recipes →
+              </button>
             </div>
           ) : null}
         </section>
