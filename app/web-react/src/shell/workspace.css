@@ -2236,6 +2236,13 @@
   min-width: 0;
 }
 
+/* Subtle text link at the top of the Bake history card that takes the user to
+   the Recipes list. align-self keeps it compact and left-aligned within the
+   card's flex column (the card gap supplies the surrounding spacing). */
+.bk-history-cta {
+  align-self: flex-start;
+}
+
 /* Cap the bake history at roughly 7 visible rows and scroll the rest with a
    thin, app-styled scrollbar. Scoped to the Bakes history list via
    bk-history-list so the shared .tt-list (Taste Tests) is untouched. */

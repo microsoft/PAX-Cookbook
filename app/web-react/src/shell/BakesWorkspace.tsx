@@ -743,6 +743,14 @@ export function BakesWorkspace() {
             </div>
           </header>
 
+          <button
+            type="button"
+            className="dvw-link bk-history-cta"
+            onClick={() => requestShellSection('recipes')}
+          >
+            Create or open a recipe
+          </button>
+
           {listPhase === 'loading' ? (
             <div className="bk-status-block" role="status">
               <p className="tt-muted">Loading bake history…</p>

@@ -717,7 +717,6 @@ export function DesktopHome() {
             recipeDashboard={recipeDashboard}
             onOpen={openRecipe}
             onViewAll={() => requestShellSection('recipes')}
-            onOpenFromFile={() => { void startImport(); }}
           />
           <AttentionPanel phase={phase} alerts={alerts} />
         </div>
@@ -966,7 +965,6 @@ function RecentRecipesPanel({
   recipeDashboard,
   onOpen,
   onViewAll,
-  onOpenFromFile,
 }: {
   phase: ListPhase;
   recipes: readonly RecipeSummary[];
@@ -974,7 +972,6 @@ function RecentRecipesPanel({
   recipeDashboard: Record<string, string>;
   onOpen: (recipe: RecipeSummary) => void;
   onViewAll: () => void;
-  onOpenFromFile: () => void;
 }) {
   return (
     <section className="dvw-card dvw-recent" aria-labelledby="dvw-recent-h">
@@ -1039,12 +1036,6 @@ function RecentRecipesPanel({
           })}
         </ul>
       ) : null}
-
-      <footer className="dvw-card__foot">
-        <button type="button" className="dvw-link" onClick={onOpenFromFile}>
-          Open recipe from file…
-        </button>
-      </footer>
     </section>
   );
 }
