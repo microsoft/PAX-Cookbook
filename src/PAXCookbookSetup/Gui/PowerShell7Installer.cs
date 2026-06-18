@@ -114,6 +114,7 @@ public sealed class PowerShell7Installer : IPrerequisiteInstaller
         var arch = PrereqArch.Os;
         var json = _downloader.GetText(ReleasesApiUrl, accept: "application/vnd.github+json");
         var url = TrySelectMsiUrl(json, arch) ?? FallbackMsiUrlFor(arch);
+        PrereqLog.Write($"[PREREQ] PowerShell 7: arch={arch} url={url}");
         if (!PrereqDownloadHosts.IsAllowed(url))
             return PrerequisiteInstallResult.Failed("Could not resolve a trusted PowerShell 7 download URL.");
 
@@ -130,10 +131,15 @@ public sealed class PowerShell7Installer : IPrerequisiteInstaller
         }
 
         if (!_downloader.DownloadFile(url, msiPath))
+        {
+            PrereqLog.Write("[PREREQ] PowerShell 7: download FAILED.");
             return PrerequisiteInstallResult.Failed("Failed to download the PowerShell 7 installer.");
+        }
+        PrereqLog.Write("[PREREQ] PowerShell 7: download completed.");
 
         progress("Installing PowerShell 7 (administrator approval required)…");
         var run = _elevated.RunElevatedAndWait("msiexec.exe", BuildMsiArguments(msiPath), InstallTimeoutMs);
+        PrereqLog.Write($"[PREREQ] PowerShell 7: install exit code = {run.ExitCode} (declined={run.UserDeclined})");
 
         TryDelete(msiPath);
 

@@ -23,6 +23,30 @@ public class Arm64PrerequisiteTests
         => Assert.Equal(expected, PrereqArch.Rid(arch));
 
     // -----------------------------------------------------------------
+    // PrereqArch machine PROCESSOR_ARCHITECTURE mapping (the FIX: the real
+    // hardware comes from the machine registry, not OSArchitecture, which an
+    // x64-emulated process on ARM64 reports as X64).
+    // -----------------------------------------------------------------
+    [Theory]
+    [InlineData("ARM64", Architecture.Arm64)]
+    [InlineData("arm64", Architecture.Arm64)]   // case-insensitive
+    [InlineData("AMD64", Architecture.X64)]
+    [InlineData(" AMD64 ", Architecture.X64)]   // trimmed
+    [InlineData("x86", Architecture.X86)]
+    [InlineData("X86", Architecture.X86)]
+    public void MapProcessorArchitecture_MapsKnownValues(string value, Architecture expected)
+        => Assert.Equal(expected, PrereqArch.MapProcessorArchitecture(value));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("RISCV64")]
+    [InlineData("IA64")]
+    public void MapProcessorArchitecture_ReturnsNullForUnknown(string? value)
+        => Assert.Null(PrereqArch.MapProcessorArchitecture(value));
+
+    // -----------------------------------------------------------------
     // .NET 8 Desktop Runtime
     // -----------------------------------------------------------------
     [Fact]

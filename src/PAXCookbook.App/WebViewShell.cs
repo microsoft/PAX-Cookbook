@@ -255,6 +255,11 @@ internal static class WebViewShell
         {
             Text = title,
             StartPosition = FormStartPosition.CenterScreen,
+            // Open maximized to fill the screen. The SPA shell is responsive and
+            // the WebView2 is docked Fill, so maximizing simply gives more room.
+            // ClientSize/StartPosition remain the restored-state bounds (a
+            // centered 1280x860) for when the user un-maximizes the window.
+            WindowState = FormWindowState.Maximized,
             ClientSize = new Size(1280, 860),
             MinimumSize = new Size(880, 600),
         };

@@ -21,10 +21,12 @@ public sealed class PrerequisiteDetector
     public PrerequisiteDetector(IPrerequisiteProbe probe, Architecture? hostArchitecture = null)
     {
         _probe = probe;
-        // Default to the OS architecture (NOT the process architecture): Setup
-        // runs x64-emulated on ARM64, but the app launches via the native host,
-        // so the runtime we look for must match the machine, not this process.
-        _hostArch = hostArchitecture ?? RuntimeInformation.OSArchitecture;
+        // Default to the REAL machine architecture (PrereqArch.Os reads the
+        // machine registry PROCESSOR_ARCHITECTURE). Setup runs x64-emulated on
+        // ARM64 — where RuntimeInformation.OSArchitecture wrongly returns X64 —
+        // and the app launches via the native host, so the runtime we look for
+        // must match the machine, not this (possibly emulated) process.
+        _hostArch = hostArchitecture ?? PrereqArch.Os;
     }
 
     private readonly record struct Candidate(bool Located, string? Path, Version? Version, string Source);
@@ -58,10 +60,17 @@ public sealed class PrerequisiteDetector
         // on an ARM64 machine, so the wizard would skip installing the arm64
         // runtime the app actually needs.
         string archRid = PrereqArch.Rid(_hostArch);
+        PrereqLog.Write($"[PREREQ] .NET 8 detection: arch={_hostArch} rid={archRid}");
         string root = $@"SOFTWARE\dotnet\Setup\InstalledVersions\{archRid}\sharedfx\Microsoft.WindowsDesktop.App";
-        var fromRegistry = HighestDotNet8(_probe.EnumerateHklmSubKeyNames(root));
+        var registrySubkeys = _probe.EnumerateHklmSubKeyNames(root).ToList();
+        PrereqLog.Write($"[PREREQ] .NET 8 detection: registry key checked = HKLM\\{root}");
+        PrereqLog.Write($"[PREREQ] .NET 8 detection: registry subkeys = [{string.Join(", ", registrySubkeys)}]");
+        var fromRegistry = HighestDotNet8(registrySubkeys);
         if (fromRegistry is not null)
+        {
+            PrereqLog.Write($"[PREREQ] .NET 8 detection: RESULT = installed (Registry, {FormatVersion(fromRegistry)})");
             return DotNet8Found(fromRegistry, "Registry");
+        }
 
         // Strategy 2: `dotnet --list-runtimes`, but only from the NATIVE host the
         // app actually launches (%ProgramFiles%\dotnet\dotnet.exe). On ARM64 a
@@ -79,9 +88,11 @@ public sealed class PrerequisiteDetector
         {
             listHost = "dotnet";
         }
+        PrereqLog.Write($"[PREREQ] .NET 8 detection: list-runtimes host = {(listHost.Length > 0 ? listHost : "(skipped)")}");
         if (listHost.Length > 0)
         {
             var listed = _probe.RunVersion(listHost, "--list-runtimes");
+            PrereqLog.Write($"[PREREQ] .NET 8 detection: list-runtimes output = {(string.IsNullOrWhiteSpace(listed) ? "(none)" : listed!.Replace("\r", " ").Replace("\n", " | "))}");
             if (!string.IsNullOrWhiteSpace(listed))
             {
                 Version? best = null;
@@ -92,7 +103,10 @@ public sealed class PrerequisiteDetector
                         best = v;
                 }
                 if (best is not null)
+                {
+                    PrereqLog.Write($"[PREREQ] .NET 8 detection: RESULT = installed (list-runtimes, {FormatVersion(best)})");
                     return DotNet8Found(best, "dotnet --list-runtimes");
+                }
             }
         }
 
@@ -104,9 +118,13 @@ public sealed class PrerequisiteDetector
             var fromDisk = HighestDotNet8(
                 _probe.EnumerateDirectories(sharedRoot, "8.*").Select(d => Path.GetFileName(d)));
             if (fromDisk is not null)
+            {
+                PrereqLog.Write($"[PREREQ] .NET 8 detection: RESULT = installed (ProgramFiles, {FormatVersion(fromDisk)})");
                 return DotNet8Found(fromDisk, "ProgramFiles");
+            }
         }
 
+        PrereqLog.Write("[PREREQ] .NET 8 detection: RESULT = not installed");
         return PrerequisiteStatus.Missing(PrerequisiteKind.DotNet8DesktopRuntime, ".NET 8 Desktop Runtime");
     }
 

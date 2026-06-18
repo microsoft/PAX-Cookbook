@@ -34,6 +34,7 @@ internal static class WizardLauncher
             });
 
             var shellOps = ShellOperationsFactory.Build();
+            PrereqLog.Begin();
             var detector = new PrerequisiteDetector(new SystemPrerequisiteProbe());
 
             Application.EnableVisualStyles();

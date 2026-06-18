@@ -17,6 +17,7 @@ internal static class CliPrerequisites
     // or a non-zero exit code when one of them could not be installed.
     public static int Ensure(SetupLogger log)
     {
+        PrereqLog.Begin();
         var detector = new PrerequisiteDetector(new SystemPrerequisiteProbe());
         var dotnet = detector.DetectDotNet8DesktopRuntime();
         var ps7 = detector.DetectPowerShell7();

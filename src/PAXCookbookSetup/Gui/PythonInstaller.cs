@@ -68,6 +68,7 @@ public sealed class PythonInstaller : IPrerequisiteInstaller
 
         var arch = PrereqArch.Os;
         var url = BuildInstallerUrl(arch);
+        PrereqLog.Write($"[PREREQ] Python: arch={arch} url={url}");
 
         if (!PrereqDownloadHosts.IsAllowed(url))
             return PrerequisiteInstallResult.Failed("Could not resolve a trusted Python download URL.");
@@ -85,10 +86,15 @@ public sealed class PythonInstaller : IPrerequisiteInstaller
         }
 
         if (!_downloader.DownloadFile(url, installerPath))
+        {
+            PrereqLog.Write("[PREREQ] Python: download FAILED.");
             return PrerequisiteInstallResult.Failed("Failed to download the Python installer.");
+        }
+        PrereqLog.Write("[PREREQ] Python: download completed.");
 
         progress("Installing Python…");
         var run = _launcher.RunAndWait(installerPath, BuildInstallerArguments(), InstallTimeoutMs);
+        PrereqLog.Write($"[PREREQ] Python: install exit code = {run.ExitCode}");
 
         TryDelete(installerPath);
 

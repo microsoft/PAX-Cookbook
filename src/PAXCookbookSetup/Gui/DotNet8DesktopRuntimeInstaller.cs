@@ -57,9 +57,14 @@ public sealed class DotNet8DesktopRuntimeInstaller : IPrerequisiteInstaller
         var arch = PrereqArch.Os;
         var archToken = ArchToken(arch);
         var url = BuildDownloadUrl(arch);
+        PrereqLog.Write($"[PREREQ] .NET 8 install: arch={arch} rid={archToken}");
+        PrereqLog.Write($"[PREREQ] .NET 8 download URL = {url}");
 
         if (!PrereqDownloadHosts.IsAllowed(url))
+        {
+            PrereqLog.Write("[PREREQ] .NET 8 install: URL rejected by host allow-list - aborting.");
             return PrerequisiteInstallResult.Failed("Could not resolve a trusted .NET 8 Desktop Runtime download URL.");
+        }
 
         progress($"Downloading .NET 8 Desktop Runtime ({archToken})…");
         string exePath;
@@ -67,15 +72,19 @@ public sealed class DotNet8DesktopRuntimeInstaller : IPrerequisiteInstaller
         {
             Directory.CreateDirectory(tempDir);
             exePath = Path.Combine(tempDir, $"windowsdesktop-runtime-{RuntimeVersion}-win-{archToken}.exe");
-            _downloader.DownloadFile(url, exePath);
+            PrereqLog.Write("[PREREQ] .NET 8 download: started.");
+            var downloaded = _downloader.DownloadFile(url, exePath);
+            PrereqLog.Write($"[PREREQ] .NET 8 download: completed (returned {downloaded}).");
         }
         catch (Exception ex)
         {
+            PrereqLog.Write($"[PREREQ] .NET 8 download: FAILED - {ex.Message}");
             return PrerequisiteInstallResult.Failed($"Failed to download .NET 8 Desktop Runtime: {ex.Message}");
         }
 
         progress($"Installing .NET 8 Desktop Runtime ({archToken})…");
         var result = _elevated.RunElevatedAndWait(exePath, "/install /quiet /norestart", InstallTimeoutMs);
+        PrereqLog.Write($"[PREREQ] .NET 8 install: exit code = {result.ExitCode} (declined={result.UserDeclined}, error={result.Error ?? "none"})");
         
         try { File.Delete(exePath); } catch { /* ignore cleanup errors */ }
 
