@@ -89,7 +89,8 @@ export type ContextualHelpTopicId =
   | 'cookbookFileAssociations'
   | 'cookbookEngine'
   | 'cookbookStartup'
-  | 'cookbookScheduling';
+  | 'cookbookScheduling'
+  | 'cookbookNotifications';
 
 export type ContextualHelpTopic = {
   /** Optional short title shown at the top of the popover. */
@@ -384,6 +385,10 @@ export const CONTEXTUAL_HELP_TOPICS: Record<
   cookbookStartup: {
     title: 'Start at login',
     body: 'Start PAX Cookbook at login keeps a small background broker running after you sign in to Windows. That broker is what actually runs your bakes - including scheduled ones - so it needs to be available when a scheduled time arrives. With it on, scheduled bakes fire on time even if you never open the window; with it off, they only run while PAX Cookbook is open. Turning it off does not close the app you are using now - it just won\u2019t start on its own the next time you sign in. Change it any time in Settings - Startup.',
+  },
+  cookbookNotifications: {
+    title: 'Notifications',
+    body: 'Notifications send you a Telegram message when a bake finishes or fails, and deliver the sign-in code when a bake needs a Device Code. They use your own Telegram bot - message @BotFather to create one, paste its token here, and turn notifications on. The token is stored securely and never shown again. Only bake details (recipe name, status, duration, and the output file location) are sent; your tenant data is never included. Notifications stay off until you turn them on.',
   },
   cookbookScheduling: {
     title: 'Scheduled bakes',

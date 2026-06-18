@@ -2294,6 +2294,15 @@
   flex-wrap: wrap;
 }
 
+/* Groups the bake's recipe name and the Open Recipe button so they sit
+   together on the left while the status badge stays at the right edge. */
+.bk-detail__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
 .bk-detail__actions {
   display: flex;
   align-items: center;
@@ -3163,6 +3172,15 @@
   gap: var(--sp-3);
   padding-bottom: var(--sp-2);
   border-bottom: 1px solid var(--c-border);
+}
+
+/* Keeps a section's contextual-help "?" button pinned immediately to the right
+   of its heading (the head row itself is space-between, which would otherwise
+   scatter the title, help button, and status chip across the full width). */
+.dvw-settings__head-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
 .dvw-settings__desc {

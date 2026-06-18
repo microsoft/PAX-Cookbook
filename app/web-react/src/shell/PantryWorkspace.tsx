@@ -30,7 +30,7 @@ interface PantryResource {
 const PANTRY_RESOURCES: ReadonlyArray<PantryResource> = [
   {
     id: 'user-guide',
-    name: '\u{1F4D6} PAX Cookbook User Guide',
+    name: 'PAX Cookbook User Guide',
     short: 'The complete guide \u2014 installation, recipes, bakes, scheduling, and every feature. Opens right here in the app.',
     owner: 'microsoft',
     repo: 'PAX-Cookbook',
@@ -1102,7 +1102,9 @@ export function PantryWorkspace() {
   const [online, setOnline] = useState(
     typeof navigator === 'undefined' ? true : navigator.onLine,
   );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Default to the User Guide so the Pantry opens straight onto the guide
+  // preview without the user having to pick it from the sidebar first.
+  const [selectedId, setSelectedId] = useState<string | null>('user-guide');
   const [previewFile, setPreviewFile] = useState<PantryContentItem | null>(null);
   const [saveToast, setSaveToast] = useState<{ kind: 'saving' | 'saved' | 'error'; name: string } | null>(
     null,

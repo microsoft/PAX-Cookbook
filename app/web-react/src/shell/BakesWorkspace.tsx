@@ -45,6 +45,8 @@ import {
 import { downloadBakeLogByCookId, downloadBakeLogText } from './logDownload';
 import {
   formatModified,
+  rememberPendingSelect,
+  requestShellSection,
   takePendingBakeSelect,
 } from './shellNav';
 import { userScrolledAway } from './bakesLogScroll';
@@ -858,11 +860,29 @@ export function BakesWorkspace() {
           {detailPhase === 'loaded' && detail ? (
             <div className="bk-detail">
               <header className="bk-detail__head">
-                <h2 className="tt-result__title">
-                  {isResumeTrigger(detail.trigger)
-                    ? 'Resume from checkpoint'
-                    : detail.recipe?.name ?? detail.recipeId}
-                </h2>
+                <div className="bk-detail__title-row">
+                  <h2 className="tt-result__title">
+                    {isResumeTrigger(detail.trigger)
+                      ? 'Resume from checkpoint'
+                      : detail.recipe?.name ?? detail.recipeId}
+                  </h2>
+                  {(detail.recipe?.recipeId ?? detail.recipeId) ? (
+                    <button
+                      type="button"
+                      className="dvw-btn bk-detail__open-recipe"
+                      onClick={() => {
+                        const rid = detail.recipe?.recipeId ?? detail.recipeId;
+                        if (rid) {
+                          rememberPendingSelect(rid);
+                          requestShellSection('recipes');
+                        }
+                      }}
+                    >
+                      <IconCode className="dvw-btn__icon" />
+                      <span>Open Recipe</span>
+                    </button>
+                  ) : null}
+                </div>
                 <span className={'bk-status bk-status--' + normalizeStatus(detail.status)}>
                   <StatusGlyph status={detail.status} />
                   <span>{statusLabel(detail.status)}</span>

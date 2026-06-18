@@ -804,7 +804,7 @@ function LastBakePanel({
             onClick={onNewRecipe}
           >
             <IconPlus className="dvw-btn__icon" />
-            <span>New Recipe</span>
+            <span>Create or open a recipe</span>
           </button>
         </div>
       </section>

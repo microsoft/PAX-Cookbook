@@ -200,7 +200,10 @@ function NotificationsCard() {
   return (
     <section className="dvw-settings__section">
       <div className="dvw-settings__head">
-        <h3 className="dvw-keys__section-head">Notifications</h3>
+        <div className="dvw-settings__head-title">
+          <h3 className="dvw-keys__section-head">Notifications</h3>
+          <ContextualHelpButton topic="cookbookNotifications" />
+        </div>
         {phase !== 'loading' ? (
           <span
             className={
@@ -408,8 +411,10 @@ function StartupCard() {
   return (
     <section className="dvw-settings__section">
       <div className="dvw-settings__head">
-        <h3 className="dvw-keys__section-head">Startup</h3>
-        <ContextualHelpButton topic="cookbookStartup" />
+        <div className="dvw-settings__head-title">
+          <h3 className="dvw-keys__section-head">Startup</h3>
+          <ContextualHelpButton topic="cookbookStartup" />
+        </div>
         {phase === 'ready' ? (
           <span className={enabled ? 'chip chip--local' : 'chip chip--muted'}>
             {enabled ? 'On' : 'Off'}
