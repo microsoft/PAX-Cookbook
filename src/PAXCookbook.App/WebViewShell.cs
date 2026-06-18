@@ -71,7 +71,7 @@ internal static class WebViewShell
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
-    private const int SW_SHOWNORMAL = 1;
+    private const int SW_SHOWMAXIMIZED = 3;
 
     // Taskbar button icon for the running window. Under corporate WDAC the app
     // runs via the Microsoft-signed dotnet.exe host, launched from a shortcut
@@ -251,16 +251,34 @@ internal static class WebViewShell
 
         ApplicationConfiguration.Initialize();
 
+        // Open on the monitor where the user launched the app (the screen under
+        // the cursor), not always the primary monitor. A maximized window
+        // maximizes on the monitor that contains its restore bounds, so those
+        // bounds are positioned on the target screen BEFORE the first show.
+        // Cursor.Position can throw in unusual session states, so fall back to
+        // the primary screen's working area.
+        Rectangle targetWorkingArea;
+        try { targetWorkingArea = Screen.FromPoint(Cursor.Position).WorkingArea; }
+        catch { targetWorkingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 860); }
+        var restoreSize = new Size(
+            Math.Min(1280, targetWorkingArea.Width),
+            Math.Min(860, targetWorkingArea.Height));
+        var restoreLocation = new Point(
+            targetWorkingArea.X + Math.Max(0, (targetWorkingArea.Width - restoreSize.Width) / 2),
+            targetWorkingArea.Y + Math.Max(0, (targetWorkingArea.Height - restoreSize.Height) / 2));
+
         using var form = new Form
         {
             Text = title,
-            StartPosition = FormStartPosition.CenterScreen,
-            // Open maximized to fill the screen. The SPA shell is responsive and
-            // the WebView2 is docked Fill, so maximizing simply gives more room.
-            // ClientSize/StartPosition remain the restored-state bounds (a
-            // centered 1280x860) for when the user un-maximizes the window.
+            // Manual placement on the target screen so the maximize lands on the
+            // monitor the user launched from (CenterScreen always uses primary).
+            StartPosition = FormStartPosition.Manual,
+            Location = restoreLocation,
+            // Restore-state bounds (used when the user un-maximizes); the window
+            // OPENS maximized via WindowState below, and the force-show timer
+            // re-asserts the maximized state rather than restoring it.
+            ClientSize = restoreSize,
             WindowState = FormWindowState.Maximized,
-            ClientSize = new Size(1280, 860),
             MinimumSize = new Size(880, 600),
         };
 
@@ -712,8 +730,11 @@ internal static class WebViewShell
                 // WITHOUT a Hide/Show toggle. A toggle would destroy and recreate
                 // the taskbar button (a hidden window has no button), and the
                 // fresh button would adopt the dotnet host process's generic icon
-                // instead of the bundled high-resolution app icon.
-                ShowWindow(form.Handle, SW_SHOWNORMAL);
+                // instead of the bundled high-resolution app icon. SW_SHOWMAXIMIZED
+                // (not SW_SHOWNORMAL) is used so force-showing keeps the window
+                // maximized — SW_SHOWNORMAL would RESTORE it, which made the window
+                // flash maximized and then shrink to its restore size.
+                ShowWindow(form.Handle, SW_SHOWMAXIMIZED);
                 if (form.WindowState == FormWindowState.Minimized)
                 {
                     form.WindowState = FormWindowState.Normal;
