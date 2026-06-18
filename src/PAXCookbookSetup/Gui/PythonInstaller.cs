@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace PAXCookbookSetup.Gui;
 
 // Installs Python by downloading a known-good stable python.org installer and
@@ -15,9 +17,20 @@ public sealed class PythonInstaller : IPrerequisiteInstaller
 {
     public PrerequisiteKind Kind => PrerequisiteKind.Python;
 
-    // Pinned known-good stable release (python.org, allow-listed host).
-    public const string InstallerUrl =
-        "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe";
+    private const string PythonVersion = "3.12.8";
+
+    // Pinned known-good stable release (python.org, allow-listed host), selected
+    // for the machine architecture. python.org ships per-arch Windows installers
+    // (-amd64.exe for x64, -arm64.exe for ARM64).
+    public static string BuildInstallerUrl(Architecture arch) =>
+        $"https://www.python.org/ftp/python/{PythonVersion}/python-{PythonVersion}-{ArchSuffix(arch)}.exe";
+
+    // python.org uses "amd64" for x64 and "arm64" for ARM64.
+    private static string ArchSuffix(Architecture arch)
+        => arch == Architecture.Arm64 ? "arm64" : "amd64";
+
+    // Convenience accessor for the current machine architecture.
+    public static string InstallerUrl => BuildInstallerUrl(PrereqArch.Os);
 
     private const int InstallTimeoutMs = 10 * 60 * 1000; // 10 minutes
 
@@ -53,7 +66,10 @@ public sealed class PythonInstaller : IPrerequisiteInstaller
         if (_detector.DetectPython().Satisfied)
             return PrerequisiteInstallResult.AlreadyPresent("Python is already installed.");
 
-        if (!PrereqDownloadHosts.IsAllowed(InstallerUrl))
+        var arch = PrereqArch.Os;
+        var url = BuildInstallerUrl(arch);
+
+        if (!PrereqDownloadHosts.IsAllowed(url))
             return PrerequisiteInstallResult.Failed("Could not resolve a trusted Python download URL.");
 
         progress("Downloading Python…");
@@ -61,14 +77,14 @@ public sealed class PythonInstaller : IPrerequisiteInstaller
         try
         {
             Directory.CreateDirectory(tempDir);
-            installerPath = Path.Combine(tempDir, "python-amd64.exe");
+            installerPath = Path.Combine(tempDir, "python-" + ArchSuffix(arch) + ".exe");
         }
         catch (Exception ex)
         {
             return PrerequisiteInstallResult.Failed("Could not prepare the download folder: " + ex.Message);
         }
 
-        if (!_downloader.DownloadFile(InstallerUrl, installerPath))
+        if (!_downloader.DownloadFile(url, installerPath))
             return PrerequisiteInstallResult.Failed("Failed to download the Python installer.");
 
         progress("Installing Python…");

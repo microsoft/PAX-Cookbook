@@ -1,5 +1,7 @@
 namespace PAXCookbookSetup.Gui;
 
+using System.Runtime.InteropServices;
+
 // Installer for the .NET 8 Desktop Runtime. The Setup exe stays self-contained
 // (it must run without .NET), but the PAX Cookbook app itself is now framework-
 // dependent (uses .NET 8 from the system). This installer handles the one-time
@@ -8,11 +10,26 @@ public sealed class DotNet8DesktopRuntimeInstaller : IPrerequisiteInstaller
 {
     public PrerequisiteKind Kind => PrerequisiteKind.DotNet8DesktopRuntime;
 
-    // Official Microsoft download location for .NET 8 Desktop Runtime. Hardcode
-    // a known-good version (8.0.11) to avoid breaking on future CI/build variations.
-    // This URL is allow-listed and stable.
-    public const string DownloadUrl =
-        "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.11/windowsdesktop-runtime-8.0.11-win-x64.exe";
+    private const string RuntimeVersion = "8.0.11";
+
+    // Official Microsoft download location for the .NET 8 Desktop Runtime,
+    // selected for the machine architecture. A known-good version (8.0.11) is
+    // pinned to avoid breaking on future build variations; the host
+    // (builds.dotnet.microsoft.com) is allow-listed. The architecture token MUST
+    // match the OS: an x64 runtime on an ARM64 machine installs under
+    // Program Files (x86)\dotnet, and the native ARM64 dotnet.exe host at
+    // Program Files\dotnet then reports "No frameworks were found".
+    public static string BuildDownloadUrl(Architecture arch) =>
+        $"https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/{RuntimeVersion}/" +
+        $"windowsdesktop-runtime-{RuntimeVersion}-win-{ArchToken(arch)}.exe";
+
+    // The .NET 8 Desktop Runtime ships win-x64, win-x86 and win-arm64 installers;
+    // we install arm64 on ARM64 machines and x64 everywhere else.
+    private static string ArchToken(Architecture arch)
+        => arch == Architecture.Arm64 ? "arm64" : "x64";
+
+    // Convenience accessor for the current machine architecture.
+    public static string DownloadUrl => BuildDownloadUrl(PrereqArch.Os);
 
     private const int InstallTimeoutMs = 5 * 60 * 1000; // 5 minutes
 
@@ -37,23 +54,27 @@ public sealed class DotNet8DesktopRuntimeInstaller : IPrerequisiteInstaller
         if (_detector.DetectDotNet8DesktopRuntime().Satisfied)
             return PrerequisiteInstallResult.AlreadyPresent(".NET 8 Desktop Runtime is already installed.");
 
-        if (!PrereqDownloadHosts.IsAllowed(DownloadUrl))
+        var arch = PrereqArch.Os;
+        var archToken = ArchToken(arch);
+        var url = BuildDownloadUrl(arch);
+
+        if (!PrereqDownloadHosts.IsAllowed(url))
             return PrerequisiteInstallResult.Failed("Could not resolve a trusted .NET 8 Desktop Runtime download URL.");
 
-        progress("Downloading .NET 8 Desktop Runtime…");
+        progress($"Downloading .NET 8 Desktop Runtime ({archToken})…");
         string exePath;
         try
         {
             Directory.CreateDirectory(tempDir);
-            exePath = Path.Combine(tempDir, "windowsdesktop-runtime-8.0.11-win-x64.exe");
-            _downloader.DownloadFile(DownloadUrl, exePath);
+            exePath = Path.Combine(tempDir, $"windowsdesktop-runtime-{RuntimeVersion}-win-{archToken}.exe");
+            _downloader.DownloadFile(url, exePath);
         }
         catch (Exception ex)
         {
             return PrerequisiteInstallResult.Failed($"Failed to download .NET 8 Desktop Runtime: {ex.Message}");
         }
 
-        progress("Installing .NET 8 Desktop Runtime…");
+        progress($"Installing .NET 8 Desktop Runtime ({archToken})…");
         var result = _elevated.RunElevatedAndWait(exePath, "/install /quiet /norestart", InstallTimeoutMs);
         
         try { File.Delete(exePath); } catch { /* ignore cleanup errors */ }

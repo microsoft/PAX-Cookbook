@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using PAXCookbookSetup.Gui;
 using Xunit;
 
@@ -377,6 +378,54 @@ public class WizardDetectionTests
         Assert.False(s.Satisfied);
         Assert.Null(s.DetectedVersion);
         Assert.Equal("not-found", s.DetectionSource);
+    }
+
+    // -----------------------------------------------------------------
+    // .NET 8 Desktop Runtime — ARM64 architecture awareness
+    // -----------------------------------------------------------------
+    private const string DotNetArm64RegRoot =
+        @"SOFTWARE\dotnet\Setup\InstalledVersions\arm64\sharedfx\Microsoft.WindowsDesktop.App";
+
+    [Fact]
+    public void DotNet8_Arm64Host_FoundInArm64Registry_IsSatisfied()
+    {
+        var f = new FakeProbe();
+        f.HklmSubKeys[DotNetArm64RegRoot] = new[] { "8.0.11" };
+
+        var s = new PrerequisiteDetector(f, Architecture.Arm64).DetectDotNet8DesktopRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("8.0.11", s.DetectedVersion);
+        Assert.Equal("Registry", s.DetectionSource);
+    }
+
+    [Fact]
+    public void DotNet8_Arm64Host_IgnoresX64OnlyRegistry_IsMissing()
+    {
+        // The x64 runtime is registered (its key exists) but the machine is
+        // ARM64: the native ARM64 host cannot load it, so detection must NOT
+        // report satisfied from the x64 subkey — otherwise the wizard would skip
+        // installing the arm64 runtime the app actually needs.
+        var f = new FakeProbe();
+        f.HklmSubKeys[DotNetRegRoot] = new[] { "8.0.11" }; // x64 key only
+
+        var s = new PrerequisiteDetector(f, Architecture.Arm64).DetectDotNet8DesktopRuntime();
+
+        Assert.False(s.Satisfied);
+        Assert.Equal("not-found", s.DetectionSource);
+    }
+
+    [Fact]
+    public void DotNet8_X64Host_FoundInX64Registry_IsSatisfied()
+    {
+        // Symmetric guard: an x64 machine still resolves via the x64 subkey.
+        var f = new FakeProbe();
+        f.HklmSubKeys[DotNetRegRoot] = new[] { "8.0.11" };
+
+        var s = new PrerequisiteDetector(f, Architecture.X64).DetectDotNet8DesktopRuntime();
+
+        Assert.True(s.Satisfied);
+        Assert.Equal("Registry", s.DetectionSource);
     }
 
     // -----------------------------------------------------------------

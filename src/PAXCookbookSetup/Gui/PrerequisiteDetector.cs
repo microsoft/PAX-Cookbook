@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
 namespace PAXCookbookSetup.Gui;
@@ -15,8 +16,16 @@ public sealed class PrerequisiteDetector
     public static readonly Version MinPython = new(3, 9);
 
     private readonly IPrerequisiteProbe _probe;
+    private readonly Architecture _hostArch;
 
-    public PrerequisiteDetector(IPrerequisiteProbe probe) => _probe = probe;
+    public PrerequisiteDetector(IPrerequisiteProbe probe, Architecture? hostArchitecture = null)
+    {
+        _probe = probe;
+        // Default to the OS architecture (NOT the process architecture): Setup
+        // runs x64-emulated on ARM64, but the app launches via the native host,
+        // so the runtime we look for must match the machine, not this process.
+        _hostArch = hostArchitecture ?? RuntimeInformation.OSArchitecture;
+    }
 
     private readonly record struct Candidate(bool Located, string? Path, Version? Version, string Source);
 
@@ -41,26 +50,50 @@ public sealed class PrerequisiteDetector
     //      %ProgramFiles%\dotnet\shared\Microsoft.WindowsDesktop.App\8.*.
     private PrerequisiteStatus EvaluateDotNet8()
     {
-        // Strategy 1: registry.
-        const string root = @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App";
+        // Strategy 1: registry, under the machine-architecture subkey. The app
+        // launches through the native dotnet.exe host, so it needs the runtime
+        // matching the OS architecture (arm64 on an ARM64 machine, x64 on x64).
+        // Checking only the x64 subkey would miss an ARM64 install and — worse —
+        // falsely report "satisfied" when only an unusable x64 runtime is present
+        // on an ARM64 machine, so the wizard would skip installing the arm64
+        // runtime the app actually needs.
+        string archRid = PrereqArch.Rid(_hostArch);
+        string root = $@"SOFTWARE\dotnet\Setup\InstalledVersions\{archRid}\sharedfx\Microsoft.WindowsDesktop.App";
         var fromRegistry = HighestDotNet8(_probe.EnumerateHklmSubKeyNames(root));
         if (fromRegistry is not null)
             return DotNet8Found(fromRegistry, "Registry");
 
-        // Strategy 2: `dotnet --list-runtimes` (lines like
-        // "Microsoft.WindowsDesktop.App 8.0.11 [C:\Program Files\dotnet\shared\...]").
-        var listed = _probe.RunVersion("dotnet", "--list-runtimes");
-        if (!string.IsNullOrWhiteSpace(listed))
+        // Strategy 2: `dotnet --list-runtimes`, but only from the NATIVE host the
+        // app actually launches (%ProgramFiles%\dotnet\dotnet.exe). On ARM64 a
+        // stray x64 dotnet on PATH would otherwise report an 8.0 runtime the
+        // native ARM64 host cannot load. When ProgramFiles gives no signal
+        // (unit tests), fall back to PATH resolution of "dotnet".
+        string listHost;
+        var programFilesForHost = _probe.GetEnvPath("ProgramFiles");
+        if (!string.IsNullOrEmpty(programFilesForHost))
         {
-            Version? best = null;
-            foreach (Match mm in Regex.Matches(listed, @"Microsoft\.WindowsDesktop\.App\s+(\d+\.\d+\.\d+)"))
+            var nativeDotnet = Path.Combine(programFilesForHost, "dotnet", "dotnet.exe");
+            listHost = _probe.FileExists(nativeDotnet) ? nativeDotnet : "";
+        }
+        else
+        {
+            listHost = "dotnet";
+        }
+        if (listHost.Length > 0)
+        {
+            var listed = _probe.RunVersion(listHost, "--list-runtimes");
+            if (!string.IsNullOrWhiteSpace(listed))
             {
-                if (TryParseVersion(mm.Groups[1].Value, out var v) && v.Major == 8 && v >= MinDotNet8
-                    && (best is null || v > best))
-                    best = v;
+                Version? best = null;
+                foreach (Match mm in Regex.Matches(listed, @"Microsoft\.WindowsDesktop\.App\s+(\d+\.\d+\.\d+)"))
+                {
+                    if (TryParseVersion(mm.Groups[1].Value, out var v) && v.Major == 8 && v >= MinDotNet8
+                        && (best is null || v > best))
+                        best = v;
+                }
+                if (best is not null)
+                    return DotNet8Found(best, "dotnet --list-runtimes");
             }
-            if (best is not null)
-                return DotNet8Found(best, "dotnet --list-runtimes");
         }
 
         // Strategy 3: well-known shared-framework folder (dotnet not on PATH).

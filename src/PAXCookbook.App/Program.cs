@@ -59,17 +59,82 @@ internal static class Program
             [".webmanifest"] = "application/manifest+json; charset=utf-8",
         };
 
+    // True only for a plain interactive desktop launch (a shortcut click with no
+    // headless/test flags and a real, non-redirected console). The smoke harness
+    // launches with redirected stdout and/or --headless/--no-window/test-seam
+    // flags, so it is false there — a startup failure must never pop a modal
+    // dialog that would hang an unattended test run.
+    private static bool _interactiveLaunch;
+
     [STAThread]
     public static int Main(string[] args)
     {
-        // WDAC fix: the app is launched through the Microsoft-signed dotnet.exe
-        // host (dotnet.exe "PAX Cookbook.dll") instead of the former wscript.exe
-        // + launch.vbs hidden launcher, because strict corporate WDAC policies
-        // block Windows Script Host. dotnet.exe is a console application, so hide
-        // and detach its console window as the very first thing the process does
-        // — in well under a millisecond, so no blank terminal flashes.
-        ConsoleWindowHelper.HideConsoleWindow();
+        // Capture whether this is an interactive desktop launch BEFORE the
+        // console is hidden, so a startup error can decide whether to show a
+        // visible dialog. Test/headless launches redirect output or pass flags.
+        try
+        {
+            bool headlessOrTest = args.Any(a =>
+                a.StartsWith("--headless", StringComparison.OrdinalIgnoreCase) ||
+                a.StartsWith("--no-window", StringComparison.OrdinalIgnoreCase) ||
+                a.StartsWith("--test-seam", StringComparison.OrdinalIgnoreCase));
+            _interactiveLaunch = !headlessOrTest
+                && !Console.IsOutputRedirected
+                && !Console.IsErrorRedirected;
+        }
+        catch
+        {
+            _interactiveLaunch = false;
+        }
 
+        // Persistent startup diagnostics + last-chance handlers, installed BEFORE
+        // any startup work. The console is hidden later (after early init), so
+        // without this a launch that throws would be completely silent: no
+        // window, no tray, no message. The log captures milestones and any fatal
+        // error with a stack trace; the try/catch turns an unhandled startup
+        // exception into a visible dialog instead of a silent exit.
+        StartupLog.Begin(args);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            StartupLog.Fatal("AppDomain.UnhandledException", e.ExceptionObject as Exception);
+
+        try
+        {
+            return Run(args);
+        }
+        catch (Exception ex)
+        {
+            StartupLog.Fatal("Main", ex);
+            ShowStartupError(ex);
+            return 87;
+        }
+    }
+
+    // Shows a visible "failed to start" dialog for an interactive desktop launch
+    // so a startup failure is never silent. Suppressed for headless/test launches
+    // and always best-effort — it must never throw or block.
+    private static void ShowStartupError(Exception ex)
+        => ShowStartupError(ex.GetType().Name + ": " + ex.Message);
+
+    private static void ShowStartupError(string detail)
+    {
+        try
+        {
+            if (!_interactiveLaunch) return;
+            System.Windows.Forms.MessageBox.Show(
+                "PAX Cookbook failed to start.\n\n" + detail +
+                "\n\nDetails have been saved to:\n" + StartupLog.LogPath,
+                AppName,
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Error);
+        }
+        catch
+        {
+            // Never let the error dialog itself become a failure mode.
+        }
+    }
+
+    private static int Run(string[] args)
+    {
         // --headless runs the long-lived background broker daemon: the
         // in-process Kestrel broker with a system-tray presence but no WebView2
         // window, so scheduled bakes fire in the background and the user can open
@@ -305,6 +370,7 @@ internal static class Program
         // save on a fresh install fails with persist_failed (the read routes
         // tolerate a missing database, the write routes do not).
         WorkspaceDatabase.EnsureInitialized(workspacePath);
+        StartupLog.Mark("Workspace initialized: " + workspacePath);
 
         string tokenFile = Path.Combine(runtimeDir, "broker.token");
         string importHandoffDir = ImportHandoffQueue.ResolveDir(workspacePath);
@@ -387,15 +453,33 @@ internal static class Program
         string? appRoot = ResolveAppRoot(args);
         if (appRoot is null)
         {
-            Console.Error.WriteLine(
-                "FATAL: could not locate the install-tree app/ root (expected app\\web\\index.html). " +
-                "Pass --approot <path-to-app> or run from within the repository.");
+            const string appRootError =
+                "Could not locate the install-tree app/ root (expected app\\web\\index.html). " +
+                "Pass --approot <path-to-app> or run from within the repository.";
+            Console.Error.WriteLine("FATAL: " + appRootError);
+            StartupLog.Fatal("ResolveAppRoot", appRootError);
+            ShowStartupError(appRootError);
             return 4;
         }
         string webRoot = Path.GetFullPath(Path.Combine(appRoot, "web"));
         string versionFile = Path.Combine(appRoot, "VERSION.json");
         string iconPath = Path.Combine(webRoot, "images", "pax-cookbook-app-icon.ico");
         VersionInfo versionInfo = LoadVersionInfo(versionFile);
+        StartupLog.Mark("App root resolved: " + appRoot);
+        StartupLog.Mark("Version metadata loaded");
+
+        // WDAC fix: the app is launched through the Microsoft-signed dotnet.exe
+        // host (dotnet.exe "PAX Cookbook.dll") instead of the former wscript.exe
+        // + launch.vbs launcher, because strict corporate WDAC policies block
+        // Windows Script Host. dotnet.exe is a console application, so its console
+        // window is hidden here — AFTER the early initialization most likely to
+        // fail (runtime load, workspace + database init, app-root and version
+        // resolution). Hiding it at the first line of Main() masked every startup
+        // failure (no window, no tray, no error); deferring the hide until after
+        // early init lets those errors surface to the still-visible console and
+        // the startup log before the window goes away.
+        ConsoleWindowHelper.HideConsoleWindow();
+        StartupLog.Mark("Console hidden");
 
         // Two-process broker coordination (V2). Before this process selects a
         // port or builds the in-process Kestrel broker, see whether a background
@@ -456,11 +540,18 @@ internal static class Program
                         "FATAL: the Microsoft Edge WebView2 Runtime is required to run PAX Cookbook but was not found. " +
                         "Install the Evergreen WebView2 Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and relaunch. " +
                         $"Detail: {ex.Message}");
+                    StartupLog.Fatal("WebViewShell.Run attach (WebView2 runtime missing)", ex);
+                    ShowStartupError(
+                        "The Microsoft Edge WebView2 Runtime is required but was not found. " +
+                        "Install the Evergreen WebView2 Runtime from " +
+                        "https://developer.microsoft.com/microsoft-edge/webview2/ and relaunch.");
                     attachExit = 3;
                 }
                 catch (Exception ex)
                 {
                     Console.Error.WriteLine($"FATAL: application window terminated: {ex.Message}");
+                    StartupLog.Fatal("WebViewShell.Run attach", ex);
+                    ShowStartupError(ex);
                     attachExit = 1;
                 }
 
@@ -527,10 +618,14 @@ internal static class Program
         int port = SelectLoopbackPort();
         if (port == 0)
         {
-            Console.Error.WriteLine(
-                $"FATAL: no free loopback port in range {PortRangeStart}-{PortRangeEnd}. Broker refuses to start.");
+            string portError =
+                $"No free loopback port in range {PortRangeStart}-{PortRangeEnd}. Broker refuses to start.";
+            Console.Error.WriteLine("FATAL: " + portError);
+            StartupLog.Fatal("SelectLoopbackPort", portError);
+            ShowStartupError(portError);
             return 2;
         }
+        StartupLog.Mark("Broker port selected: " + port);
 
         // 256-bit per-launch session token, base64url unpadded, written to the
         // workspace Runtime sidecar (oracle path: <workspace>\Runtime\broker.token).
@@ -1537,8 +1632,11 @@ internal static class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"FATAL: broker host failed to start: {ex.Message}");
+            StartupLog.Fatal("app.StartAsync", ex);
+            ShowStartupError(ex);
             return 1;
         }
+        StartupLog.Mark("Broker started on port " + port);
 
         // The in-process broker is now serving. If this process owns its broker
         // (the daemon, or a standalone window with no daemon running), publish
@@ -1714,6 +1812,7 @@ internal static class Program
         // trigger a redirect; Chromium falls back to 127.0.0.1 transport.
         string url = $"http://localhost:{port}/";
         string webView2UserData = Path.Combine(workspacePath, "WebView2");
+        StartupLog.Mark("Startup complete \u2014 opening application window");
         try
         {
             WebViewShell.Run(url, AppName, iconPath, webView2UserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir);
@@ -1724,6 +1823,11 @@ internal static class Program
                 "FATAL: the Microsoft Edge WebView2 Runtime is required to run PAX Cookbook but was not found. " +
                 "Install the Evergreen WebView2 Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and relaunch. " +
                 $"Detail: {ex.Message}");
+            StartupLog.Fatal("WebViewShell.Run (WebView2 runtime missing)", ex);
+            ShowStartupError(
+                "The Microsoft Edge WebView2 Runtime is required but was not found. " +
+                "Install the Evergreen WebView2 Runtime from " +
+                "https://developer.microsoft.com/microsoft-edge/webview2/ and relaunch.");
             StopBrokerHost(app);
             BrokerDetection.ReleasePortFile(portFileHandle);
             portFileHandle = null;
@@ -1732,6 +1836,8 @@ internal static class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"FATAL: application window terminated: {ex.Message}");
+            StartupLog.Fatal("WebViewShell.Run", ex);
+            ShowStartupError(ex);
             StopBrokerHost(app);
             BrokerDetection.ReleasePortFile(portFileHandle);
             portFileHandle = null;

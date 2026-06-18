@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace PAXCookbookSetup.Gui;
@@ -21,8 +22,19 @@ public sealed class PowerShell7Installer : IPrerequisiteInstaller
 
     // Known-good fallback used only when the GitHub API is unreachable or
     // returns no usable asset. A real, allow-listed GitHub release asset URL.
+    // The x64 constant is preserved for back-compat; FallbackMsiUrlFor selects
+    // the architecture-matching asset (arm64 on ARM64 machines).
     public const string FallbackMsiUrl =
         "https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/PowerShell-7.4.6-win-x64.msi";
+
+    public static string FallbackMsiUrlFor(Architecture arch) =>
+        "https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/PowerShell-7.4.6-win-"
+        + ArchToken(arch) + ".msi";
+
+    // PowerShell publishes win-x64, win-x86 and win-arm64 MSIs; we install arm64
+    // on ARM64 machines and x64 everywhere else.
+    private static string ArchToken(Architecture arch)
+        => arch == Architecture.Arm64 ? "arm64" : "x64";
 
     private const int InstallTimeoutMs = 10 * 60 * 1000; // 10 minutes
 
@@ -43,11 +55,12 @@ public sealed class PowerShell7Installer : IPrerequisiteInstaller
     // -----------------------------------------------------------------
 
     // Returns the browser_download_url of the first asset whose name ends with
-    // "-win-x64.msi" (the per-machine x64 installer), or null when the JSON is
-    // missing/malformed or contains no such asset.
-    public static string? TrySelectWinX64MsiUrl(string? releaseJson)
+    // "-win-<arch>.msi" (the per-machine installer for the requested arch), or
+    // null when the JSON is missing/malformed or contains no such asset.
+    public static string? TrySelectMsiUrl(string? releaseJson, Architecture arch)
     {
         if (string.IsNullOrWhiteSpace(releaseJson)) return null;
+        var suffix = "-win-" + ArchToken(arch) + ".msi";
         try
         {
             using var doc = JsonDocument.Parse(releaseJson);
@@ -60,7 +73,7 @@ public sealed class PowerShell7Installer : IPrerequisiteInstaller
                 if (!asset.TryGetProperty("name", out var nameEl)) continue;
                 var name = nameEl.GetString();
                 if (string.IsNullOrEmpty(name)) continue;
-                if (!name.EndsWith("-win-x64.msi", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) continue;
 
                 if (asset.TryGetProperty("browser_download_url", out var urlEl))
                 {
@@ -72,6 +85,10 @@ public sealed class PowerShell7Installer : IPrerequisiteInstaller
         catch { /* malformed JSON */ }
         return null;
     }
+
+    // Back-compat wrapper: selects the x64 asset.
+    public static string? TrySelectWinX64MsiUrl(string? releaseJson)
+        => TrySelectMsiUrl(releaseJson, Architecture.X64);
 
     // Silent, per-machine install with the consumer-friendly options the prompt
     // specifies (no shell context menus, no remoting; register the manifest).
@@ -94,8 +111,9 @@ public sealed class PowerShell7Installer : IPrerequisiteInstaller
             return PrerequisiteInstallResult.AlreadyPresent("PowerShell 7 is already installed.");
 
         progress("Finding the latest PowerShell 7…");
+        var arch = PrereqArch.Os;
         var json = _downloader.GetText(ReleasesApiUrl, accept: "application/vnd.github+json");
-        var url = TrySelectWinX64MsiUrl(json) ?? FallbackMsiUrl;
+        var url = TrySelectMsiUrl(json, arch) ?? FallbackMsiUrlFor(arch);
         if (!PrereqDownloadHosts.IsAllowed(url))
             return PrerequisiteInstallResult.Failed("Could not resolve a trusted PowerShell 7 download URL.");
 
@@ -104,7 +122,7 @@ public sealed class PowerShell7Installer : IPrerequisiteInstaller
         try
         {
             Directory.CreateDirectory(tempDir);
-            msiPath = Path.Combine(tempDir, "PowerShell-win-x64.msi");
+            msiPath = Path.Combine(tempDir, "PowerShell-win-" + ArchToken(arch) + ".msi");
         }
         catch (Exception ex)
         {
