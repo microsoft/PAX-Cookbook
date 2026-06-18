@@ -75,7 +75,7 @@ if (-not $Script:AppRoot) {
     Write-Host ''
     Write-Host 'PAX Cookbook Support Mode cannot locate the install tree.' -ForegroundColor Red
     Write-Host ('Launcher dir: ' + $Script:LauncherDir) -ForegroundColor Red
-    Write-Host 'Re-run Install-PAXCookbook.ps1 to restore the install tree.' -ForegroundColor Red
+    Write-Host 'Re-run PAX Cookbook Setup to restore the install tree.' -ForegroundColor Red
     Write-Host ''
     Write-Host 'Press Enter to close this window.'
     [void][System.Console]::ReadLine()

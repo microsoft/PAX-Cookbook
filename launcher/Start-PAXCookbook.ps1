@@ -57,7 +57,7 @@ $ErrorActionPreference = 'Stop'
 # the chef-hat shortcut tile in the operator's taskbar/Start.
 #
 # The same AUMID literal -- 'PAXCookbook.Local.v1' -- is also stamped
-# on every PAX-owned shortcut by Install-PAXCookbook.ps1.
+# on every PAX-owned shortcut by PAX Cookbook Setup.
 try {
     if (-not ('PAXCookbook.Shell.AumidStamp' -as [type])) {
         Add-Type -Namespace 'PAXCookbook.Shell' -Name 'AumidStamp' -MemberDefinition @'
@@ -93,7 +93,7 @@ if (-not $Script:PwshExePath -or -not (Test-Path -LiteralPath $Script:PwshExePat
 #       <repo>\app\bin\PAX Cookbook.exe
 #       <repo>\app\VERSION.json
 #
-#   (b) INSTALLED TREE (user-scope appliance after Install-PAXCookbook)
+#   (b) INSTALLED TREE (user-scope appliance after PAX Cookbook Setup)
 #       <InstallRoot>\App\launcher\Start-PAXCookbook.ps1
 #       <InstallRoot>\App\bin\PAX Cookbook.exe
 #       <InstallRoot>\App\VERSION.json
@@ -126,7 +126,7 @@ if (-not $Script:AppRoot) {
     Write-Host  '  Probed:' -ForegroundColor Red
     Write-Host ('    ' + (Join-Path $probeParent (Join-Path 'bin' $Script:NativeExeName))) -ForegroundColor Red
     Write-Host ('    ' + (Join-Path (Join-Path $probeParent 'app') (Join-Path 'bin' $Script:NativeExeName))) -ForegroundColor Red
-    Write-Host 'Re-run Install-PAXCookbook.ps1 to restore the install tree.' -ForegroundColor Red
+    Write-Host 'Re-run PAX Cookbook Setup to restore the install tree.' -ForegroundColor Red
     exit 5
 }
 
@@ -572,14 +572,14 @@ if (-not $selected) {
 if (-not (Test-Path -LiteralPath $Script:VersionFile -PathType Leaf)) {
     Write-Host ''
     Write-Host ('VERSION.json not found: ' + $Script:VersionFile) -ForegroundColor Red
-    Write-Host 'The install tree is incomplete. Re-run Install-PAXCookbook.ps1.' -ForegroundColor Red
+    Write-Host 'The install tree is incomplete. Re-run PAX Cookbook Setup.' -ForegroundColor Red
     exit 6
 }
 
 if (-not (Test-Path -LiteralPath $Script:PaxScriptPath -PathType Leaf)) {
     Write-Host ''
     Write-Host ('Bundled PAX script not found: ' + $Script:PaxScriptPath) -ForegroundColor Red
-    Write-Host 'The install tree is incomplete. Re-run Install-PAXCookbook.ps1.' -ForegroundColor Red
+    Write-Host 'The install tree is incomplete. Re-run PAX Cookbook Setup.' -ForegroundColor Red
     exit 6
 }
 
@@ -617,7 +617,7 @@ if ($actualSha -ne $expectedSha) {
     Write-Host ('  Script:   ' + $Script:PaxScriptPath) -ForegroundColor Red
     Write-Host ('  Expected: ' + $expectedSha) -ForegroundColor Red
     Write-Host ('  Actual:   ' + $actualSha) -ForegroundColor Red
-    Write-Host 'Re-run Install-PAXCookbook.ps1 to restore the install tree.' -ForegroundColor Red
+    Write-Host 'Re-run PAX Cookbook Setup to restore the install tree.' -ForegroundColor Red
     exit 6
 }
 
@@ -649,7 +649,7 @@ if ($actualSha -ne $expectedSha) {
 if (-not (Test-Path -LiteralPath $Script:NativeExe -PathType Leaf)) {
     Write-Host ''
     Write-Host ('Native host not found: ' + $Script:NativeExe) -ForegroundColor Red
-    Write-Host 'The install tree is incomplete. Re-run Install-PAXCookbook.ps1.' -ForegroundColor Red
+    Write-Host 'The install tree is incomplete. Re-run PAX Cookbook Setup.' -ForegroundColor Red
     exit 5
 }
 

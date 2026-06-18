@@ -185,7 +185,6 @@ public class Phase11SingleExeE2ETests
                              "PAX_Purview_Audit_Log_Processor.ps1"),
                 Path.Combine(installRoot, "App", "VERSION.json"),
                 Path.Combine(installRoot, "App", "launcher", "RuntimeDiscovery.psm1"),
-                Path.Combine(installRoot, "App", "install", "Install-PAXCookbook.ps1"),
                 Path.Combine(installRoot, "Setup", "PAXCookbookSetup.exe")
             };
             foreach (var f in requiredFiles)

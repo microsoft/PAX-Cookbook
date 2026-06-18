@@ -24,8 +24,7 @@
 #     hidden console would leave the operator with no signal.
 #   - Never run elevated. Never escalate.
 #   - Never touch unrelated pwsh.exe processes. Always exclude this
-#     Stop helper's own PID, any Install-PAXCookbook.ps1 process,
-#     and any other Stop-PAXCookbook.ps1 instance.
+#     Stop helper's own PID and any other Stop-PAXCookbook.ps1 instance.
 #   - Best-effort cleanup of workspace.lock + broker.token +
 #     browser.window.json sidecars
 #     so the next start does not run into an "active lock" refusal.
@@ -241,7 +240,6 @@ function Find-OrphanBrokerProcesses {
     $launcherStart   = '*\launcher\Start-PAXCookbook.ps1*'
     $launcherSupport = '*\launcher\Start-PAXCookbookSupportMode.ps1*'
     $brokerEntry     = '*\broker\Start-Broker.ps1*'
-    $installerSelf   = '*Install-PAXCookbook.ps1*'
     $stopSelf        = '*Stop-PAXCookbook.ps1*'
 
     $list = @()
@@ -254,7 +252,6 @@ function Find-OrphanBrokerProcesses {
         $cl = [string]$p.CommandLine
         if (-not $cl) { continue }
         if ($cl -notlike ('*' + $InstallRoot + '*')) { continue }
-        if ($cl -like $installerSelf) { continue }
         if ($cl -like $stopSelf) { continue }
         $isLauncher = ($cl -like $launcherStart) -or ($cl -like $launcherSupport) -or ($cl -like $brokerEntry)
         if (-not $isLauncher) { continue }
@@ -397,8 +394,8 @@ if (Test-Path -LiteralPath $Script:BootstrapFile -PathType Leaf) {
         $bs = Get-Content -LiteralPath $Script:BootstrapFile -Raw | ConvertFrom-Json -ErrorAction Stop
         if ($bs) {
             # Canonical bootstrap key is workspaceFolderPath (written
-            # by Install-PAXCookbook.ps1, Start-PAXCookbook.ps1,
-            # Start-PAXCookbookSupportMode.ps1, and Start-Broker.ps1).
+            # by Start-PAXCookbook.ps1, Start-PAXCookbookSupportMode.ps1,
+            # and Start-Broker.ps1).
             # Fall back to a legacy workspacePath property if present
             # so an older bootstrap file written before the rename
             # still drives the targeted broker-PID + sidecar-cleanup

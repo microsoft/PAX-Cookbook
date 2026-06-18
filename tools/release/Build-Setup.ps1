@@ -259,7 +259,6 @@ Invoke-Step '[5/7] write manifest.json' {
         'App\resources\pax\PAX_Purview_Audit_Log_Processor.ps1'
         'App\VERSION.json'
         'App\launcher\RuntimeDiscovery.psm1'
-        'App\install\Install-PAXCookbook.ps1'
     )
     foreach ($r in $requiredRuntime) {
         if (-not (Test-Path -LiteralPath (Join-Path $payload $r))) {
