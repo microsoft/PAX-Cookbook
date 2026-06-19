@@ -101,6 +101,7 @@ export function UpdatesWorkspace() {
   const appVersion =
     version?.cookbookVersion ?? health?.appVersion ?? NOT_REPORTED;
   const channel = version?.releaseChannel ?? NOT_REPORTED;
+  const buildDate = version?.buildTimestamp ?? NOT_REPORTED;
   const runtimeKind = health?.runtimeKind ?? NOT_REPORTED;
   const transport = version?.runtime.transport ?? NOT_REPORTED;
 
@@ -134,6 +135,10 @@ export function UpdatesWorkspace() {
             <div className="settings-kv__row">
               <dt className="settings-kv__key">App version</dt>
               <dd className="settings-kv__val">{appVersion}</dd>
+            </div>
+            <div className="settings-kv__row">
+              <dt className="settings-kv__key">Build date</dt>
+              <dd className="settings-kv__val">{buildDate}</dd>
             </div>
             <div className="settings-kv__row">
               <dt className="settings-kv__key">Release channel</dt>
@@ -246,6 +251,10 @@ export function UpdatesWorkspace() {
             <div className="settings-kv__row">
               <dt className="settings-kv__key">App version</dt>
               <dd className="settings-kv__val">{appVersion}</dd>
+            </div>
+            <div className="settings-kv__row">
+              <dt className="settings-kv__key">Build date</dt>
+              <dd className="settings-kv__val">{buildDate}</dd>
             </div>
             <div className="settings-kv__row">
               <dt className="settings-kv__key">Release channel</dt>

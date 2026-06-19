@@ -167,13 +167,14 @@
         var secondary = document.getElementById(OVERLAY_ID + '-secondary');
         var status  = document.getElementById(OVERLAY_ID + '-status');
 
-        title.textContent = 'PAX Cookbook is locked';
+        title.textContent = 'Verify it\'s you';
 
         // Empty + repopulate body so coalesced events refresh content.
         while (body.firstChild) { body.removeChild(body.firstChild); }
         var p1 = document.createElement('p');
         p1.textContent = state.message ||
-            'Unlock to continue working in Cookbook.';
+            'Confirm it\'s you to continue. Use your fingerprint, face, or ' +
+            'PIN, the same way you unlock this computer.';
         body.appendChild(p1);
 
         // UX-1H7 -- first-run passkey explanation. The current
@@ -193,17 +194,15 @@
             var pPasskey = document.createElement('p');
             pPasskey.className = 'lock-overlay-fine';
             pPasskey.textContent =
-                'Cookbook will create a local Windows Hello passkey for this ' +
-                'appliance on this device. This stays on your machine and is ' +
-                'used only to unlock the local Cookbook session.';
+                'This is a one-time setup and takes about 10 seconds. What ' +
+                'you set up stays on this device and is never sent to the cloud.';
             body.appendChild(pPasskey);
 
             var pChromeHint = document.createElement('p');
             pChromeHint.className = 'lock-overlay-fine';
             pChromeHint.textContent =
-                'Chrome may ask where to save the passkey. Choose Windows ' +
-                'Hello / this Windows device for the intended local ' +
-                'device-bound flow.';
+                'If you\'re asked where to save it, choose this Windows ' +
+                'device so it stays on your computer.';
             body.appendChild(pChromeHint);
         }
 
@@ -291,8 +290,8 @@
                 var dp1 = document.createElement('p');
                 dp1.className = 'lock-overlay-fine';
                 dp1.textContent =
-                    'Cookbook is currently locked. Unlocking with Windows ' +
-                    'Hello will reopen access to your recipes and settings.';
+                    'Cookbook is locked right now. Confirming it\'s you will ' +
+                    'reopen your recipes and settings.';
                 details.appendChild(dp1);
 
                 var dp2 = document.createElement('p');
@@ -488,11 +487,11 @@
         // verdict comes back non-Verified.
         var primaryText;
         if (state.unlockInFlight) {
-            primaryText = 'Authenticating\u2026';
+            primaryText = 'Verifying\u2026';
         } else if (state.lastFailureMessage) {
             primaryText = 'Try again';
         } else {
-            primaryText = 'Authenticate';
+            primaryText = 'Continue';
         }
         primary.textContent = primaryText;
         primary.disabled = !!state.unlockInFlight;
@@ -510,12 +509,12 @@
         var secondary = document.getElementById(OVERLAY_ID + '-secondary');
         var status  = document.getElementById(OVERLAY_ID + '-status');
 
-        title.textContent = 'Verification was required';
+        title.textContent = 'Quick check needed';
 
         while (body.firstChild) { body.removeChild(body.firstChild); }
         var p1 = document.createElement('p');
         p1.textContent = state.message ||
-            'The broker required a fresh Windows Hello verdict for this action. Try the action again to be prompted.';
+            'PAX Cookbook needs to confirm it\'s you again before doing that. Try that action once more and you\'ll be asked to confirm.';
         body.appendChild(p1);
 
         if (state.opClass) {
@@ -683,7 +682,7 @@
         logUnlock(state.lastDiagnostics);
         preflightBootstrap(); // fire-and-forget; updates state.preparedBootstrap when ready
         setUnlockUi(
-            'Preparing Windows Hello\u2026 the button will say "Continue with Windows Hello" when ready.',
+            'Getting ready\u2026 the button will say "Unlock" when it\'s ready.',
             true,
             'Preparing\u2026'
         );
@@ -951,12 +950,12 @@
                     // depending on which the launcher opened).
                 }
             };
-            setUnlockUi('Opening Windows Hello\u2026', true, 'Verifying\u2026');
+            setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
             return window.navigator.credentials.get(getOpts).then(function (assertion) {
                 if (!assertion || !assertion.response) {
                     return { ok: false, reason: 'no_assertion' };
                 }
-                setUnlockUi('Verifying with Windows Hello\u2026', true, 'Verifying\u2026');
+                setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
                 var body = {
                     credentialId:      arrayBufferToB64u(assertion.rawId),
                     clientDataJSON:    arrayBufferToB64u(assertion.response.clientDataJSON),
@@ -1237,7 +1236,7 @@
             // Keep the status text update minimal; setUnlockUi does
             // not re-render the overlay (it only writes button label
             // + status text), so user activation is preserved.
-            setUnlockUi('Setting up Windows Hello for this browser\u2026', true, 'Setting up\u2026');
+            setUnlockUi('Setting things up\u2026', true, 'Setting up\u2026');
 
             // ----------------------------------------------------------
             // The actual create() call. Wrapped in try/catch so we
@@ -1267,7 +1266,7 @@
                 recordDiag({ phase: 'bootstrap_create_resolved' });
                 logUnlock(state.lastDiagnostics);
                 if (!cred || !cred.response) { return { ok: false, reason: 'no_credential' }; }
-                setUnlockUi('Verifying with Windows Hello\u2026', true, 'Verifying\u2026');
+                setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
 
                 var spkiB64      = '';
                 var alg          = -7;
@@ -1577,10 +1576,10 @@
         // fall back to the steady-state label.
         var sc          = state.statusCache;
         var isFirstRun  = !!(sc && sc.registered === false);
-        var readyLabel  = isFirstRun ? 'Create Windows Hello passkey' : 'Continue with Windows Hello';
+        var readyLabel  = isFirstRun ? 'Set up now' : 'Unlock';
         var readyHint   = isFirstRun
-            ? 'Ready to create your local Windows Hello passkey. Click "Create Windows Hello passkey".'
-            : 'Ready to call Windows Hello. Click "Continue with Windows Hello".';
+            ? 'Ready when you are. Select "Set up now" to confirm it\'s you.'
+            : 'Ready when you are. Select "Unlock" to confirm it\'s you.';
         if (state.preparedBootstrapStatus === 'ready') {
             if (primary) {
                 primary.disabled    = false;
@@ -1592,12 +1591,12 @@
         } else if (state.preparedBootstrapStatus === 'failed') {
             if (primary) {
                 primary.disabled    = false;
-                primary.textContent = 'Retry preparation';
+                primary.textContent = 'Retry';
             }
             if (status) {
-                status.textContent = 'Windows Hello setup could not be prepared (' +
+                status.textContent = 'Setup could not be prepared (' +
                                      (state.preparedBootstrapError || 'unknown') +
-                                     '). Click "Retry preparation".';
+                                     '). Select "Retry".';
             }
         }
     }
@@ -1672,7 +1671,7 @@
         });
         logUnlock(state.lastDiagnostics);
 
-        setUnlockUi('Opening Windows Hello\u2026', true, 'Verifying\u2026');
+        setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
 
         var startMs = Date.now();
         var createPromise;
@@ -1691,11 +1690,11 @@
             state.preparedBootstrap        = null;
             state.preparedBootstrapStatus  = 'idle';
             state.unlockInFlight           = false;
-            state.lastFailureMessage       = 'Windows Hello did not open (sync throw: ' +
+            state.lastFailureMessage       = 'We couldn\'t start the check (' +
                                              ((eSync && eSync.name) || 'unknown') +
-                                             '). Click "Copy diagnostics" below, then click "Retry preparation".';
+                                             '). Select "Copy diagnostics" below, then "Retry".';
             renderLockedView();
-            setUnlockUi(state.lastFailureMessage, false, 'Retry preparation');
+            setUnlockUi(state.lastFailureMessage, false, 'Retry');
             return;
         }
 
@@ -1740,8 +1739,8 @@
             });
             logUnlock(state.lastDiagnostics);
             setUnlockUi(
-                'Windows Hello is still waiting for a response. ' +
-                'Finish the Windows Hello prompt if it is open.',
+                'Still waiting for your response. ' +
+                'Finish the prompt on screen if it is open.',
                 true,
                 'Verifying\u2026'
             );
@@ -1762,7 +1761,7 @@
             }
             logUnlock(state.lastDiagnostics);
             if (!cred || !cred.response) { return finishBootstrapFailure('no_credential', null); }
-            setUnlockUi('Verifying with Windows Hello\u2026', true, 'Verifying\u2026');
+            setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
 
             var spkiB64      = '';
             var alg          = -7;
@@ -1844,13 +1843,13 @@
             state.preparedBootstrapStatus = 'idle';
             state.unlockInFlight          = false;
             if (name === 'NotAllowedError' || name === 'AbortError') {
-                state.lastFailureMessage = 'Windows Hello was cancelled or dismissed. Click "Retry preparation".';
+                state.lastFailureMessage = 'The check was cancelled. Select "Retry".';
             } else {
-                state.lastFailureMessage = 'Windows Hello create() rejected (' + name + '). ' +
-                                           'Click "Copy diagnostics" below, then click "Retry preparation".';
+                state.lastFailureMessage = 'We couldn\'t confirm it\'s you (' + name + '). ' +
+                                           'Select "Copy diagnostics" below, then "Retry".';
             }
             renderLockedView();
-            setUnlockUi(state.lastFailureMessage, false, 'Retry preparation');
+            setUnlockUi(state.lastFailureMessage, false, 'Retry');
         });
     }
 
@@ -1940,15 +1939,15 @@
         // this is a broker-side bug, not a Hello/passkey problem.
         if (isInternalException) {
             state.lastFailureMessage =
-                'Cookbook hit an internal error while verifying the Windows Hello passkey. ' +
-                'Click "Copy diagnostics" below, then click "Retry preparation".';
+                'Cookbook hit an internal error while confirming it\'s you. ' +
+                'Select "Copy diagnostics" below, then "Retry".';
         } else {
             state.lastFailureMessage =
-                'Windows Hello completed, but Cookbook could not verify the passkey. ' +
-                'Click "Copy diagnostics" below, then click "Retry preparation".';
+                'You confirmed it\'s you, but Cookbook could not finish. ' +
+                'Select "Copy diagnostics" below, then "Retry".';
         }
         renderLockedView();
-        setUnlockUi(state.lastFailureMessage, false, 'Retry preparation');
+        setUnlockUi(state.lastFailureMessage, false, 'Retry');
     }
 
     // Legacy broker-owned unlock -- now reserved as an EXPLICIT
@@ -1986,7 +1985,7 @@
             willInvokeBrokerOwnedUnlock: true
         });
         logUnlock(state.lastDiagnostics);
-        setUnlockUi('Using Windows Hello fallback\u2026', true, 'Verifying\u2026');
+        setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
         state.unlockInFlight = true;
         return performBrokerOwnedUnlock().then(function (bResult) {
             state.unlockInFlight = false;
@@ -2006,7 +2005,7 @@
                 state.lastFailureMessage = brokerMsg + ' (verdict: ' + verdict + ')';
                 logUnlock(state.lastDiagnostics);
                 renderLockedView();
-                setUnlockUi(state.lastFailureMessage, false, 'Unlock with Windows Hello');
+                setUnlockUi(state.lastFailureMessage, false, 'Unlock');
             }
         });
     }
@@ -2087,9 +2086,9 @@
                 });
                 logUnlock(state.lastDiagnostics);
                 state.unlockInFlight     = false;
-                state.lastFailureMessage = 'Could not reach the broker\u2019s WebAuthn status endpoint. Click "Copy diagnostics" below, or open Support details for the Windows Hello fallback.';
+                state.lastFailureMessage = 'Couldn\'t reach PAX Cookbook to check your setup. Select "Copy diagnostics" below, or open Support details for another way to continue.';
                 renderLockedView();
-                setUnlockUi(state.lastFailureMessage, false, 'Unlock with Windows Hello');
+                setUnlockUi(state.lastFailureMessage, false, 'Unlock');
                 return;
             }
 
@@ -2105,9 +2104,9 @@
                 });
                 logUnlock(state.lastDiagnostics);
                 state.unlockInFlight     = false;
-                state.lastFailureMessage = 'This browser does not support WebAuthn / Windows Hello. Open Support details to use the Windows Hello fallback.';
+                state.lastFailureMessage = 'This browser can\'t confirm it\'s you directly. Open Support details for another way to continue.';
                 renderLockedView();
-                setUnlockUi(state.lastFailureMessage, false, 'Unlock with Windows Hello');
+                setUnlockUi(state.lastFailureMessage, false, 'Unlock');
                 return;
             }
 
@@ -2149,9 +2148,9 @@
                     logUnlock(state.lastDiagnostics);
                     state.unlockInFlight = false;
                     setUnlockUi(
-                        'Windows Hello was cancelled. Try again when you\u2019re ready.',
+                        'The check was cancelled. Try again when you\u2019re ready.',
                         false,
-                        'Unlock with Windows Hello'
+                        'Unlock'
                     );
                     return;
                 }
@@ -2174,9 +2173,9 @@
                 });
                 logUnlock(state.lastDiagnostics);
                 state.unlockInFlight     = false;
-                state.lastFailureMessage = 'Browser-owned Windows Hello could not complete. Click "Copy diagnostics" below, or open Support details for the Windows Hello fallback.';
+                state.lastFailureMessage = 'We couldn\'t confirm it\'s you. Select "Copy diagnostics" below, or open Support details for another way to continue.';
                 renderLockedView();
-                setUnlockUi(state.lastFailureMessage, false, 'Unlock with Windows Hello');
+                setUnlockUi(state.lastFailureMessage, false, 'Unlock');
             });
         }, function (err) {
             // Failure mode 3: webauthn/status network promise
@@ -2188,9 +2187,9 @@
             });
             logUnlock(state.lastDiagnostics);
             state.unlockInFlight     = false;
-            state.lastFailureMessage = 'Could not reach the broker. Click "Copy diagnostics" below, or open Support details for the Windows Hello fallback.';
+            state.lastFailureMessage = 'Couldn\'t reach PAX Cookbook. Select "Copy diagnostics" below, or open Support details for another way to continue.';
             renderLockedView();
-            setUnlockUi(state.lastFailureMessage, false, 'Unlock with Windows Hello');
+            setUnlockUi(state.lastFailureMessage, false, 'Unlock');
         });
     }
 

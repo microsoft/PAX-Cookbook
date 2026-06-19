@@ -155,21 +155,21 @@
         if (!result || result.ok) { return ''; }
         switch (result.reason) {
             case 'webauthn_unsupported':
-                return 'This device cannot complete Windows Hello in the app window. The bake did not start.';
+                return 'This device can\'t confirm it\'s you in the app window. The bake did not start.';
             case 'no_credential':
-                return 'No Windows Hello credential is enrolled for this workspace. Unlock once to enroll a credential, then try again. The bake did not start.';
+                return 'You haven\'t set up identity confirmation yet. Unlock the app once to set it up, then try again. The bake did not start.';
             case 'user_cancelled':
-                return 'Windows Hello was cancelled. The bake did not start.';
+                return 'The identity check was cancelled. The bake did not start.';
             case 'verify_rejected':
-                return 'Windows Hello verification did not succeed. The bake did not start.';
+                return 'We couldn\'t confirm it\'s you. The bake did not start.';
             case 'status_failed':
             case 'status_network_error':
             case 'challenge_failed':
             case 'challenge_network_error':
             case 'verify_network_error':
-                return 'Could not reach the broker to complete Windows Hello. The bake did not start.';
+                return 'Couldn\'t reach PAX Cookbook to confirm it\'s you. The bake did not start.';
             default:
-                return 'Windows Hello could not complete. The bake did not start.';
+                return 'The identity check couldn\'t be completed. The bake did not start.';
         }
     }
 
