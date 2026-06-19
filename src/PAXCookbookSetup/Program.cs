@@ -38,10 +38,10 @@ else
 }
 return Run(args);
 
-// True when this Setup invocation will show a GUI and produce no meaningful
-// console output, so its dotnet.exe host console should be hidden: the
-// interactive uninstall dialog. --quiet/--silent (scripted) and CLI-output
-// verbs are excluded so their terminal output is preserved.
+// True when this Setup invocation is an interactive Add/Remove Programs action
+// (uninstall or repair) whose dotnet.exe host console should be hidden so no
+// blank terminal flashes. --quiet/--silent (scripted) and CLI-output verbs are
+// excluded so their terminal output is preserved.
 static bool IsGuiSetupInvocation(string[] a)
 {
     foreach (var x in a)
@@ -51,7 +51,8 @@ static bool IsGuiSetupInvocation(string[] a)
             return false;
     }
     return a.Length > 0
-        && string.Equals(a[0], "uninstall", StringComparison.OrdinalIgnoreCase)
+        && (string.Equals(a[0], "uninstall", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(a[0], "repair", StringComparison.OrdinalIgnoreCase))
         && Environment.UserInteractive;
 }
 
@@ -245,20 +246,34 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
         {
             resolver = new EmbeddedPayloadSourceResolver();
         }
-        else if (LocalCachePayloadSourceResolver.HasCache(installRoot))
-        {
-            resolver = new LocalCachePayloadSourceResolver(installRoot);
-        }
         else
         {
-            // Final fallback: download the payload zip from the GitHub Release
-            // and verify its SHA-256 against versions.json — the same path the
-            // GUI wizard uses (PayloadDownloader). --quiet suppresses progress.
+            // Always pull the LATEST payload from the GitHub Release (verified
+            // against versions.json) so re-running Setup — install, update, or an
+            // Add/Remove Programs repair — refreshes to the newest version
+            // instead of reusing a stale local cache. The local cache is kept
+            // only as an OFFLINE fallback when the download cannot be performed,
+            // so repair still works without a network connection.
             Action<string> dlProgress = parsed.Quiet ? (_ => { }) : ConsoleDownloadProgress;
             var downloader = new PayloadDownloader(log, dlProgress);
             var dl = downloader.DownloadAsync().GetAwaiter().GetResult();
             if (!parsed.Quiet) Console.WriteLine();
-            if (!dl.Success || string.IsNullOrEmpty(dl.ZipPath))
+            if (dl.Success && !string.IsNullOrEmpty(dl.ZipPath))
+            {
+                downloadedZip = dl.ZipPath;
+                resolver = new DownloadedPayloadSourceResolver(downloadedZip);
+            }
+            else if (LocalCachePayloadSourceResolver.HasCache(installRoot))
+            {
+                log.Write("payload-download-fallback-cache", "warn",
+                    new Dictionary<string, object?>
+                    {
+                        ["installRoot"] = installRoot,
+                        ["detail"] = dl.Error
+                    });
+                resolver = new LocalCachePayloadSourceResolver(installRoot);
+            }
+            else
             {
                 Console.Error.WriteLine("unable to download PAX Cookbook: " +
                     (dl.Error ?? "unknown error"));
@@ -270,8 +285,6 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
                     });
                 return SetupExitCodes.InstallFailed;
             }
-            downloadedZip = dl.ZipPath;
-            resolver = new DownloadedPayloadSourceResolver(downloadedZip);
         }
 
         var src = resolver.Resolve();

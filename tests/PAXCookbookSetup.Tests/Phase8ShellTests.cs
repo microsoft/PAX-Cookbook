@@ -250,15 +250,20 @@ public class Phase8ShellTests
         Assert.StartsWith("\"", r.UninstallString);
     }
 
-    // ---- 16. UninstallRegistrar.Register NoModify=1, NoRepair=0. ----
+    // ---- 16. UninstallRegistrar.Register NoModify=0 (Modify shown), NoRepair=0,
+    //          and ModifyPath runs the repair verb. ----
     [Fact]
-    public void Arp_Register_NoModifyAndNoRepair()
+    public void Arp_Register_ModifyEnabled_WithRepairPath()
     {
         var rg = new InMemoryRegistryWriter();
         var u = new UninstallRegistrar(rg);
         u.Register(FakeInstallRoot, AppVersion);
-        Assert.Equal(1, (int)rg.Store[UninstallRegistrar.RootSubKey]["NoModify"]);
+        Assert.Equal(0, (int)rg.Store[UninstallRegistrar.RootSubKey]["NoModify"]);
         Assert.Equal(0, (int)rg.Store[UninstallRegistrar.RootSubKey]["NoRepair"]);
+        // ModifyPath drives the Add/Remove Programs "Modify" button -> repair verb.
+        var modifyPath = rg.GetString(UninstallRegistrar.RootSubKey, "ModifyPath");
+        Assert.EndsWith(@"Setup\PAXCookbookSetup.dll"" repair", modifyPath);
+        Assert.StartsWith("\"", modifyPath);
     }
 
     // ---- 17. UninstallRegistrar.IsRegistered toggles. ----

@@ -12,9 +12,10 @@ namespace PAXCookbookSetup.Shell;
 //   Publisher            = "Microsoft"
 //   InstallLocation      = <installRoot>                (absolute, expanded)
 //   DisplayIcon          = <installRoot>\App\bin\PAXCookbook.exe,0
-//   UninstallString      = "<wscript.exe>" "<installRoot>\Setup\uninstall.vbs"
-//   QuietUninstallString = "<wscript.exe>" "<installRoot>\Setup\uninstall.vbs" --force
-//   NoModify             = 1
+//   UninstallString      = "<dotnet.exe>" "<installRoot>\Setup\PAXCookbookSetup.dll" uninstall
+//   QuietUninstallString = "<dotnet.exe>" "<installRoot>\Setup\PAXCookbookSetup.dll" uninstall --force
+//   ModifyPath           = "<dotnet.exe>" "<installRoot>\Setup\PAXCookbookSetup.dll" repair
+//   NoModify             = 0   (the "Modify" button runs ModifyPath -> repair)
 //   NoRepair             = 0   (Repair Setup verb supports it)
 //
 // Uninstall runs the framework-dependent Setup DLL via the Microsoft-signed
@@ -55,6 +56,11 @@ public sealed class UninstallRegistrar
         // reads are allowed even when execution is not.
         var uninstallString = DotNetLaunch.SetupDllCommand(installRootFull, "uninstall");
         var quietUninstallString = DotNetLaunch.SetupDllCommand(installRootFull, "uninstall --force");
+        // ModifyPath drives the Add/Remove Programs "Modify" button: it runs the
+        // repair verb, which re-downloads the latest payload from GitHub, stops
+        // the running app, overwrites the installed app files, and re-registers
+        // shortcuts / ARP. NoModify=0 is what makes the button appear.
+        var modifyString = DotNetLaunch.SetupDllCommand(installRootFull, "repair");
         var displayIcon = appExe + ",0";
 
         _registry.SetString(RootSubKey, "DisplayName", DisplayName);
@@ -64,7 +70,8 @@ public sealed class UninstallRegistrar
         _registry.SetString(RootSubKey, "DisplayIcon", displayIcon);
         _registry.SetString(RootSubKey, "UninstallString", uninstallString);
         _registry.SetString(RootSubKey, "QuietUninstallString", quietUninstallString);
-        _registry.SetDword (RootSubKey, "NoModify", 1);
+        _registry.SetString(RootSubKey, "ModifyPath", modifyString);
+        _registry.SetDword (RootSubKey, "NoModify", 0);
         _registry.SetDword (RootSubKey, "NoRepair", 0);
 
         return new UninstallRegistrationResult(

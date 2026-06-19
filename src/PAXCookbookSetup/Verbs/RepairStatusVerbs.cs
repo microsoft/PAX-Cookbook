@@ -1,16 +1,46 @@
 using PAXCookbook.Shared.Contracts;
 using PAXCookbook.Shared.ExitCodes;
 using PAXCookbookSetup.Shell;
+using PAXCookbookSetup.Uninstall;
 
 namespace PAXCookbookSetup.Verbs;
 
 public static class RepairVerb
 {
+    // How long to wait for a running PAX Cookbook to close before repairing.
+    private const int AppStopTimeoutMs = 15_000;
+
     public static int Run(ParsedArgs args, Manifest m, string payloadRoot,
                           string installRoot, SetupLogger log,
                           IPayloadOperations? payloadOps = null,
-                          IShellOperations? shellOps = null)
+                          IShellOperations? shellOps = null,
+                          IAppStopper? appStopper = null)
     {
+        appStopper ??= new RealAppStopper();
+
+        // Repair (including the Add/Remove Programs "Modify" button) runs while
+        // PAX Cookbook may still be open; its window, tray, and in-process broker
+        // hold locks on App\bin. Stop it first — the same stop InstallVerb does.
+        // Best-effort: a stop that cannot complete never fails repair on its own;
+        // the file-replace step reports any file that is still locked.
+        if (Directory.Exists(installRoot))
+        {
+            try
+            {
+                var stop = appStopper.TryStop(installRoot, AppStopTimeoutMs);
+                log.Write("repair-app-stop", fields: new Dictionary<string, object?>
+                {
+                    ["invoked"] = stop.Invoked, ["exeFound"] = stop.ExeFound,
+                    ["exited"] = stop.Exited, ["exitCode"] = stop.ExitCode, ["detail"] = stop.Detail
+                });
+            }
+            catch (Exception ex)
+            {
+                log.Write("repair-app-stop-error", "warn",
+                    new Dictionary<string, object?> { ["detail"] = ex.Message });
+            }
+        }
+
         // Repair routes through UpdateVerb with isRepair=true so the same
         // snapshot/replace/rollback path executes.
         return UpdateVerb.Run(args, m, payloadRoot, installRoot, log,

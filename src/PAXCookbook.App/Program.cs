@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -23,6 +24,21 @@ internal static class Program
 {
     private const string AppName = "PAX Cookbook";
     private const string RuntimeKind = "dotnet-kestrel";
+
+    // Stable Windows taskbar identity. MUST exactly match
+    // PAXCookbook.Shared.ProductConstants.Aumid — the value the Start-menu
+    // shortcut is stamped with (the App project does not reference Shared, so the
+    // literal is mirrored here). Windows groups taskbar buttons by
+    // AppUserModelID, not by executable path; because every PAX Cookbook launch
+    // runs through the shared dotnet.exe host, without a matching explicit ID the
+    // pinned shortcut and the running window appear as two different apps and the
+    // taskbar shows duplicate icons. Set on the process at the very start of
+    // Main(), before any window or tray icon is created.
+    internal const string AppUserModelId = "PAXCookbook.App.v1";
+
+    [DllImport("shell32.dll", SetLastError = true)]
+    private static extern void SetCurrentProcessExplicitAppUserModelID(
+        [MarshalAs(UnmanagedType.LPWStr)] string appID);
 
     // Mirrors app/VERSION.json cookbook.version. Stubbed as a constant in X1.
     private const string AppVersion = "1.0.0";
@@ -69,6 +85,12 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Establish the stable taskbar identity BEFORE any window or tray icon is
+        // created, so Windows groups the pinned shortcut and this process's window
+        // as one app (no duplicate taskbar icons). Best-effort: a taskbar nicety,
+        // never a launch prerequisite.
+        try { SetCurrentProcessExplicitAppUserModelID(AppUserModelId); } catch { }
+
         // Capture whether this is an interactive desktop launch BEFORE the
         // console is hidden, so a startup error can decide whether to show a
         // visible dialog. Test/headless launches redirect output or pass flags.

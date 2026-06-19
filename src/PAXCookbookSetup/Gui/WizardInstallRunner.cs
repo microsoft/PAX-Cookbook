@@ -44,25 +44,33 @@ public static class WizardInstallRunner
                 progress("Extracting installation files…");
                 resolver = new EmbeddedPayloadSourceResolver();
             }
-            else if (LocalCachePayloadSourceResolver.HasCache(installRoot))
-            {
-                resolver = new LocalCachePayloadSourceResolver(installRoot);
-            }
             else
             {
-                // No embedded payload — download from GitHub
+                // Always pull the LATEST payload from GitHub so re-running Setup
+                // over an existing install refreshes to the newest version
+                // instead of reusing a stale local cache. The cache is used only
+                // as an offline fallback when the download cannot be performed.
                 var downloader = new PayloadDownloader(log, progress);
                 var downloadResult = await downloader.DownloadAsync(cancel);
-                
-                if (!downloadResult.Success || string.IsNullOrEmpty(downloadResult.ZipPath))
+
+                if (downloadResult.Success && !string.IsNullOrEmpty(downloadResult.ZipPath))
+                {
+                    downloadedZipPath = downloadResult.ZipPath;
+                    progress("Extracting installation files…");
+                    resolver = new DownloadedPayloadSourceResolver(downloadedZipPath);
+                }
+                else if (LocalCachePayloadSourceResolver.HasCache(installRoot))
+                {
+                    log.Write("wizard-payload-download-fallback-cache", "warn",
+                        new Dictionary<string, object?> { ["detail"] = downloadResult.Error });
+                    progress("Using previously downloaded installation files…");
+                    resolver = new LocalCachePayloadSourceResolver(installRoot);
+                }
+                else
                 {
                     return Fail(SetupExitCodes.InstallFailed,
                         downloadResult.Error ?? "Unable to download PAX Cookbook. Please check your internet connection.");
                 }
-                
-                downloadedZipPath = downloadResult.ZipPath;
-                progress("Extracting installation files…");
-                resolver = new DownloadedPayloadSourceResolver(downloadedZipPath);
             }
 
             var src = resolver.Resolve();

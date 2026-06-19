@@ -28,7 +28,7 @@ internal static class WebViewShell
     // created is what lets the Windows taskbar adopt the window's own icon
     // (the bundled multi-resolution app icon) instead of deriving a generic,
     // low-resolution icon from the bare process.
-    private const string AppUserModelId = "PAXCookbook.Local.v1";
+    private const string AppUserModelId = Program.AppUserModelId;
 
     private const int WM_SETICON = 0x0080;
     private const int ICON_SMALL = 0;
