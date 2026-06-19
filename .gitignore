@@ -21,6 +21,8 @@ notify_brian.ps1
 .github/instructions/
 .github/prompts/
 .github/copilot-instructions.md
+.copilot-bridge/
+_temp/
 
 # ---- .NET build output (contains machine-specific absolute paths) ----
 **/bin/

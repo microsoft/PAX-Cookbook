@@ -35,6 +35,15 @@ const SECTION_HASH: Record<ShellSectionId, string> = {
   updates: '#/updates',
 };
 
+/**
+ * The legacy shell's URL hash for a section. Used by the navigation guard to
+ * restore the shell chrome (hash + nav-rail highlight) when the operator
+ * chooses to stay after an intercepted navigation.
+ */
+export function shellSectionHash(section: ShellSectionId): string {
+  return SECTION_HASH[section];
+}
+
 /** Key used to hand a selected recipe from Home to the Recipes workspace. */
 export const PENDING_SELECT_KEY = 'cookbook.pendingSelectRecipe';
 

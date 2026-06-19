@@ -11,6 +11,8 @@
  */
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { SHELL_SECTIONS } from './shell/sections';
+import { consultNavigationGuard } from './shell/navigationGuard';
+import { shellSectionHash, type ShellSectionId } from './shell/shellNav';
 import {
   clearImportTicketFromUrl,
   consumeImport,
@@ -80,6 +82,16 @@ function App() {
   const active = SHELL_SECTIONS.find((s) => s.id === activeId) ?? SHELL_SECTIONS[0];
   const sectionKey = `${active.id}:${navKey}`;
 
+  // Kept current for the cross-frame `mk-nav` handler (registered once on
+  // mount) so a guarded "stay" can restore the legacy hash to the section that
+  // is actually shown.
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+  // One-shot: the section id of an echo `mk-nav` to ignore. Set when a guarded
+  // "stay" restores the legacy hash (which re-posts `mk-nav` for that section);
+  // consuming it keeps the builder mounted instead of remounting it.
+  const suppressNavSectionRef = useRef<string | null>(null);
+
   // File-open import handoff. When the Windows app launched (or re-activated)
   // PAX Cookbook from a double-clicked .paxlite / .pax file, it navigated here
   // with `?import=<ticket id>`. Wait for the broker lock to read Unlocked (the
@@ -138,10 +150,47 @@ function App() {
         typeof (data as { section?: unknown }).section === 'string'
       ) {
         const next = (data as { section: string }).section;
-        if (SHELL_SECTIONS.some((s) => s.id === next)) {
+        if (!SHELL_SECTIONS.some((s) => s.id === next)) {
+          return;
+        }
+        // Consume the one-shot echo a guarded "stay" produces when it restores
+        // the legacy hash to the section we are still on.
+        if (suppressNavSectionRef.current === next) {
+          suppressNavSectionRef.current = null;
+          return;
+        }
+        const goToSection = () => {
           setActiveId(next);
           setNavKey((k) => k + 1);
+        };
+        const intercepted = consultNavigationGuard({
+          section: next,
+          proceed: goToSection,
+          cancel: () => {
+            // Restore the legacy hash + nav-rail highlight to the section still
+            // shown, and ignore the echo `mk-nav` that restore re-posts.
+            const current = activeIdRef.current;
+            suppressNavSectionRef.current = current;
+            try {
+              if (window.parent && window.parent !== window) {
+                window.parent.location.hash = shellSectionHash(current as ShellSectionId);
+              }
+            } catch {
+              // Cross-origin or detached parent — nothing we can safely do.
+            }
+            // Safety net: if the echo never arrives, do not leave a stale
+            // suppression that would swallow a later genuine navigation.
+            window.setTimeout(() => {
+              if (suppressNavSectionRef.current === current) {
+                suppressNavSectionRef.current = null;
+              }
+            }, 500);
+          },
+        });
+        if (intercepted) {
+          return;
         }
+        goToSection();
       }
     };
     window.addEventListener('message', onMessage);
@@ -378,8 +427,21 @@ function App() {
               style={accentStyle(section.accent)}
               aria-current={section.id === activeId ? 'page' : undefined}
               onClick={() => {
-                setActiveId(section.id);
-                setNavKey((k) => k + 1);
+                const next = section.id;
+                const goToSection = () => {
+                  setActiveId(next);
+                  setNavKey((k) => k + 1);
+                };
+                const intercepted = consultNavigationGuard({
+                  section: next,
+                  proceed: goToSection,
+                  cancel: () => {
+                    // Standalone chrome: nothing to restore (no legacy hash).
+                  },
+                });
+                if (!intercepted) {
+                  goToSection();
+                }
               }}
             >
               <span className="nav-item__swatch" aria-hidden="true" />

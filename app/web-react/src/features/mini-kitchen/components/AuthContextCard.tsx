@@ -9,7 +9,6 @@ import {
   CK_AUTH_TYPE_FOR_MODE,
   applyAuthModeChange,
   applyAuthChefKeyChange,
-  applyAuthTenantChange,
 } from '../lib/builderAuthTransforms';
 
 // Scheduling-eligibility indicator (Decision 3, informational only). Whether a
@@ -222,25 +221,13 @@ export function AuthContextCard({ value, onChange }: AuthContextCardProps) {
           </>
         )}
       </MiniKitchenField>
-      {isAppReg ? (
-        <MiniKitchenField
-          label="Tenant ID"
-          htmlFor="mk-auth-tenant"
-          hint="Entra tenant GUID. Maps to -TenantId."
-          required
-        >
-          <input
-            id="mk-auth-tenant"
-            type="text"
-            className="mk-input mk-input--code"
-            value={value.tenantId ?? ''}
-            placeholder="00000000-0000-0000-0000-000000000000"
-            autoComplete="off"
-            spellCheck={false}
-            aria-required={true}
-            onChange={e => onChange(applyAuthTenantChange(value, e.target.value))}
-          />
-        </MiniKitchenField>
+      {isAppReg && boundId.length === 0 ? (
+        <p className="mk-callout mk-callout--warning">
+          Select a Chef&rsquo;s Key to provide your App Registration credentials.
+          The tenant, application (client) id, and certificate or secret all live
+          in the Chef&rsquo;s Key &mdash; not in the recipe. Create one from the
+          Chef&rsquo;s Keys page, then bind it above.
+        </p>
       ) : null}
       <p
         className={

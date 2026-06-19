@@ -62,6 +62,7 @@ import {
   describeReauthFailure,
 } from '../../host/manualCookReauth';
 import { rememberPendingBakeSelect, requestShellSection } from '../../shell/shellNav';
+import { setNavigationGuard, type NavIntent } from '../../shell/navigationGuard';
 import { subscribePendingImport, takePendingImport } from '../../host/importHandoff';
 import { ContextualHelpButton } from '../../components/ContextualHelpButton';
 import type {
@@ -120,6 +121,7 @@ import {
 import { AdapterReadinessPanel } from './components/AdapterReadinessPanel';
 import { BakeConfirmModal } from './components/BakeConfirmModal';
 import { DiscardConfirmModal } from './components/DiscardConfirmModal';
+import { NavGuardModal } from './components/NavGuardModal';
 import { OpenRecipeConfirmModal } from './components/OpenRecipeConfirmModal';
 import { SaveRequirementsModal } from './components/SaveRequirementsModal';
 import { computeBakeBlockReason } from './lib/bakeGate';
@@ -385,6 +387,26 @@ export function MiniKitchenBuilderPreview({
   // currently being opened so a second open cannot start until the first
   // settles, and it is cleared when the open finishes.
   const [openingId, setOpeningId] = useState<string | null>(null);
+
+  // Navigation guard. While the builder holds unsaved edits, any in-app
+  // navigation away (the legacy nav-rail, a "Create a Chef's Key" link, the
+  // Home "Open Recipes" link, etc.) is intercepted and the chosen NavIntent is
+  // parked here so the unsaved-changes modal can decide whether to save, leave,
+  // or stay. `isDirtyRef` mirrors the render-time `isDirty` — the exact same
+  // flag the "Discard changes" button uses — so the once-registered guard reads
+  // the latest value without re-registering on every keystroke.
+  const [navIntent, setNavIntent] = useState<NavIntent | null>(null);
+  const isDirtyRef = useRef<boolean>(false);
+  useEffect(() => {
+    setNavigationGuard((intent) => {
+      if (!isDirtyRef.current) {
+        return false; // clean — let navigation proceed with no prompt
+      }
+      setNavIntent(intent); // dirty — intercept; the modal owns the decision
+      return true;
+    });
+    return () => setNavigationGuard(null);
+  }, []);
 
   // A serialized snapshot of the recipe as it last stood at a clean point
   // (initial load, a successful save/update, or an open/import). It is the
@@ -815,15 +837,19 @@ export function MiniKitchenBuilderPreview({
     return null;
   }
 
-  async function handleSaveOrUpdate() {
+  // Save (create) or update the recipe. Returns true only when the recipe was
+  // actually persisted, so callers like "Save and leave" can continue the
+  // navigation on success and abort it (leaving the user in the builder, with
+  // the save-requirements dialog shown) on a block or failure.
+  async function handleSaveOrUpdate(): Promise<boolean> {
     if (busy) {
-      return;
+      return false;
     }
     if (!candidateSaveable || !createBuild.body) {
       // Incomplete recipe: never a silent no-op. Surface the missing details in
       // a dialog that names each gap and the step that fixes it.
       setSaveBlockedOpen(true);
-      return;
+      return false;
     }
     setBusy(true);
     setActionStatus({ kind: 'info', text: savedRecipeId ? 'Updating…' : 'Saving…' });
@@ -838,7 +864,7 @@ export function MiniKitchenBuilderPreview({
             kind: 'error',
             text: 'The recipe still needs some details before it can be updated.',
           });
-          return;
+          return false;
         }
         const result = await updateRecipe(savedRecipeId, updateBody.body);
         if (result.ok) {
@@ -850,49 +876,50 @@ export function MiniKitchenBuilderPreview({
               sched,
             ),
           );
-        } else {
-          setActionStatus({
-            kind: 'error',
-            text: describeBrokerFailure(
-              result.error,
-              result.message,
-              result.validationErrors,
-              result.networkError,
-              result.status,
-            ),
-          });
+          return true;
         }
-      } else {
-        const result = await createRecipe(createBuild.body);
-        if (result.ok) {
-          const newId =
-            result.data && typeof result.data.recipeId === 'string'
-              ? result.data.recipeId
-              : null;
-          if (newId) {
-            setSavedRecipeId(newId);
-          }
-          baselineSnapshotRef.current = JSON.stringify(state);
-          const sched = newId ? await reconcileSchedule(newId) : null;
-          setActionStatus(
-            buildSaveStatus(
-              'Recipe saved.',
-              sched,
-            ),
-          );
-        } else {
-          setActionStatus({
-            kind: 'error',
-            text: describeBrokerFailure(
-              result.error,
-              result.message,
-              result.validationErrors,
-              result.networkError,
-              result.status,
-            ),
-          });
-        }
+        setActionStatus({
+          kind: 'error',
+          text: describeBrokerFailure(
+            result.error,
+            result.message,
+            result.validationErrors,
+            result.networkError,
+            result.status,
+          ),
+        });
+        return false;
       }
+      const result = await createRecipe(createBuild.body);
+      if (result.ok) {
+        const newId =
+          result.data && typeof result.data.recipeId === 'string'
+            ? result.data.recipeId
+            : null;
+        if (newId) {
+          setSavedRecipeId(newId);
+        }
+        baselineSnapshotRef.current = JSON.stringify(state);
+        const sched = newId ? await reconcileSchedule(newId) : null;
+        setActionStatus(
+          buildSaveStatus(
+            'Recipe saved.',
+            sched,
+          ),
+        );
+        return true;
+      }
+      setActionStatus({
+        kind: 'error',
+        text: describeBrokerFailure(
+          result.error,
+          result.message,
+          result.validationErrors,
+          result.networkError,
+          result.status,
+        ),
+      });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1535,6 +1562,11 @@ export function MiniKitchenBuilderPreview({
   const isDirty =
     JSON.stringify(state) !== baselineSnapshotRef.current ||
     JSON.stringify(scheduleDraft) !== scheduleBaselineRef.current;
+  // Feed the once-registered navigation guard the latest dirty state without
+  // re-registering each render. Writing a ref during render is render-safe (it
+  // triggers no re-render) and keeps the guard in lockstep with the exact flag
+  // the "Discard changes" button uses.
+  isDirtyRef.current = isDirty;
 
   return (
     // The donor Mini-Kitchen builder CSS is scoped under `.mini-kitchen-page`;
@@ -1647,11 +1679,6 @@ export function MiniKitchenBuilderPreview({
                     Credential Manager on this PC and never leaves your device.
                   </p>
                   <AuthContextCard value={state.auth} onChange={handleAuthChange} />
-                  <p className="mk-chefskeys-note" role="note">
-                    Authentication shown here uses placeholder and test values
-                    only. The builder does not collect or store secrets &mdash;
-                    Chef&rsquo;s Keys manages your real credentials on this PC.
-                  </p>
                 </>
               ) : null}
 
@@ -2407,6 +2434,37 @@ export function MiniKitchenBuilderPreview({
           error={bakeError}
           onCancel={handleBakeCancel}
           onConfirm={handleConfirmBake}
+        />
+      ) : null}
+
+      {navIntent ? (
+        <NavGuardModal
+          saving={busy}
+          onSaveAndLeave={() => {
+            const intent = navIntent;
+            void (async () => {
+              const saved = await handleSaveOrUpdate();
+              setNavIntent(null);
+              if (saved) {
+                intent.proceed();
+              } else {
+                // Blocked (missing details) or failed — the save-requirements
+                // dialog / error is already shown. Cancel the navigation and
+                // keep the operator in the builder.
+                intent.cancel();
+              }
+            })();
+          }}
+          onLeave={() => {
+            const intent = navIntent;
+            setNavIntent(null);
+            intent.proceed();
+          }}
+          onStay={() => {
+            const intent = navIntent;
+            setNavIntent(null);
+            intent.cancel();
+          }}
         />
       ) : null}
 
