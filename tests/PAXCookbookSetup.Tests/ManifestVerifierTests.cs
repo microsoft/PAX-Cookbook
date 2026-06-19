@@ -20,8 +20,8 @@ public class ManifestVerifierTests
           "size": 19996545
         },
         "engine": {
-          "version": "1.11.6",
-          "sha256": "0dd230734715abd15cf4c0a76013672bf9ad6713c3f82520a6333b0dcdaad361"
+          "version": "1.11.7",
+          "sha256": "1a9bc94783683ae1da68ee6a86de2106a96122b67b14ee20090e6687792e3878"
         },
         "minimumSetupVersion": "1.0.0"
       }

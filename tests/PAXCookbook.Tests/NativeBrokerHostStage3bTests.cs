@@ -19,7 +19,7 @@ namespace PAXCookbook.Tests;
 public class NativeBrokerHostStage3bTests
 {
     private const string PaxScriptBaselineHash =
-        "0DD230734715ABD15CF4C0A76013672BF9AD6713C3F82520A6333B0DCDAAD361";
+        "1A9BC94783683AE1DA68EE6A86DE2106A96122B67B14EE20090E6687792E3878";
 
     private const string IndexHtmlBody =
         "<!doctype html><html><head><title>fixture</title></head>" +

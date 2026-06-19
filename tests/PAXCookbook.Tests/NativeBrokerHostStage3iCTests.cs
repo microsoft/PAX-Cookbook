@@ -25,7 +25,7 @@ public class NativeBrokerHostStage3iCTests
     // PAX baseline tripwire. Stage 3i-C is a BROKER-side change;
     // the PAX script does not move.
     private const string PaxScriptBaselineHash =
-        "0DD230734715ABD15CF4C0A76013672BF9AD6713C3F82520A6333B0DCDAAD361";
+        "1A9BC94783683AE1DA68EE6A86DE2106A96122B67B14EE20090E6687792E3878";
 
     // Deterministic ids for envelope byte-stability across runs.
     private const string FactoryAuthProfileId = "12345678-1234-1234-1234-123456789abc";

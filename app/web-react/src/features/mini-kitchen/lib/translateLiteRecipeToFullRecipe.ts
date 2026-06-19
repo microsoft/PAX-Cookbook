@@ -197,7 +197,7 @@ const DEFAULT_RECIPE_ID = '0123456789ABCDEFGHJKMNPQRS';
 // server-stamps `paxAdapterVersion` from the managed engine's VERSION.json
 // (RecipeMutationService), so this value never reaches persisted identity; it
 // only keeps the local pre-save candidate aligned with the bundled engine.
-const DEFAULT_PAX_ADAPTER_VERSION = '1.11.6';
+const DEFAULT_PAX_ADAPTER_VERSION = '1.11.7';
 const DEFAULT_TIMESTAMP = '2026-01-01T00:00:00.000Z';
 const DEFAULT_CREATED_BY = 'mini-kitchen-lite';
 
