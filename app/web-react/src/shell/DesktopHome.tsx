@@ -7,7 +7,7 @@
  * Tips). It reads the saved recipe list (read-only) to populate the recent and
  * attention panels; it never runs PAX, bakes, schedules, or reads a secret.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { listRecipes, listCooks, getCook, openPath, openFile } from '../host/brokerBridge';
 import type {
   RecipeSummary,
@@ -371,7 +371,31 @@ interface HomeAlert {
   onClick: () => void;
 }
 
+// Cooking-themed Home greetings. One is chosen at random each time the Home page
+// mounts — DesktopHome remounts on every navigation back to Home, so the header
+// changes on each visit. useMemo with an empty dependency list picks once per
+// mount and stays stable across this component's frequent re-renders, so the
+// greeting never changes while the user is looking at the page.
+const HOME_GREETINGS = [
+  "What's cooking?",
+  'Time to cook the books',
+  'Ready to bake',
+  "Kitchen's open",
+  "Let's get baking",
+  'Fresh out of the oven',
+  'Order up!',
+  'Mise en place',
+  "Now we're cooking",
+  'Recipe for success',
+  'Audits are on the menu',
+  'Serving up insights',
+] as const;
+
 export function DesktopHome() {
+  const greeting = useMemo(
+    () => HOME_GREETINGS[Math.floor(Math.random() * HOME_GREETINGS.length)],
+    [],
+  );
   const [recipes, setRecipes] = useState<readonly RecipeSummary[]>([]);
   const [phase, setPhase] = useState<ListPhase>('idle');
   const [cooks, setCooks] = useState<readonly CookSummary[]>([]);
@@ -616,7 +640,7 @@ export function DesktopHome() {
     <div className="dvw dvw-home">
       <SectionHeader
         headingLevel="h1"
-        title="Welcome back"
+        title={greeting}
         helpTopic="cookbookHome"
         accent="var(--c-blue)"
         lede="Your Copilot analytics dashboard toolkit — pull data, run exports, and keep your dashboards fresh."
