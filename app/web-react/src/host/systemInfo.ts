@@ -32,6 +32,7 @@ const DEFAULT_TIMEOUT_MS = 30000;
 export interface RuntimeVersionInfo {
   cookbookVersion: string | null;
   releaseChannel: string | null;
+  buildTimestamp: string | null;
   bundledPax: {
     version: string | null;
     sha256: string | null;
@@ -178,6 +179,7 @@ export async function getRuntimeVersion(): Promise<ReadResult<RuntimeVersionInfo
     data: {
       cookbookVersion: str(data.cookbookVersion),
       releaseChannel: str(data.releaseChannel),
+      buildTimestamp: str(data.buildTimestamp),
       bundledPax: {
         version: str(pax.version),
         sha256: str(pax.sha256),

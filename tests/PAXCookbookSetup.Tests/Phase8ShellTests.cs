@@ -51,14 +51,15 @@ public class Phase8ShellTests
         return new Harness(ops, sc, rg, ms, startFolder, installRoot);
     }
 
-    // ---- 1. ShortcutCatalog emits exactly the single primary shortcut. ----
+    // ---- 1. ShortcutCatalog emits the primary launcher + the Repair entry. ----
     [Fact]
-    public void Catalog_EmitsSinglePrimaryShortcut()
+    public void Catalog_EmitsPrimaryAndRepairShortcuts()
     {
         var defs = ShortcutCatalog.StartMenuShortcuts(FakeInstallRoot,
             includeUninstall: true, includeSupport: true);
-        Assert.Single(defs);
-        Assert.Equal(ShortcutCatalog.PrimaryName, defs.First().Name);
+        Assert.Equal(2, defs.Count);
+        Assert.Contains(defs, d => d.Name == ShortcutCatalog.PrimaryName);
+        Assert.Contains(defs, d => d.Name == ShortcutCatalog.RepairShortcutName);
     }
 
     // ---- 2. Recommended-list suppression: primary FALSE, maintenance TRUE. ----
@@ -107,14 +108,15 @@ public class Phase8ShellTests
     // Phase 9 update: real uninstall exists, so the default flow now
     // surfaces the uninstall shortcut as well.
     [Fact]
-    public void Install_CreatesSingleShortcut_WithoutDesktop()
+    public void Install_CreatesPrimaryAndRepair_WithoutDesktop()
     {
         var h = Build();
         var r = h.Ops.Install(h.InstallRoot, AppVersion, createDesktopShortcut: false);
-        // Single primary shortcut (no folder, no maintenance shortcuts, no desktop).
-        Assert.Equal(1, r.ShortcutsCreated);
-        Assert.Single(h.Shortcuts.Writes);
-        Assert.Equal(ShortcutCatalog.PrimaryName, h.Shortcuts.Writes.First().Def.Name);
+        // Primary launcher + Repair entry (no group folder, no desktop).
+        Assert.Equal(2, r.ShortcutsCreated);
+        Assert.Equal(2, h.Shortcuts.Writes.Count);
+        Assert.Contains(h.Shortcuts.Writes, w => w.Def.Name == ShortcutCatalog.PrimaryName);
+        Assert.Contains(h.Shortcuts.Writes, w => w.Def.Name == ShortcutCatalog.RepairShortcutName);
     }
 
     // ---- 6. Desktop shortcut included when requested. ----
@@ -123,8 +125,8 @@ public class Phase8ShellTests
     {
         var h = Build();
         var r = h.Ops.Install(h.InstallRoot, AppVersion, createDesktopShortcut: true);
-        // Primary (start-menu) + desktop = 2.
-        Assert.Equal(2, r.ShortcutsCreated);
+        // Primary + Repair (start-menu) + desktop = 3.
+        Assert.Equal(3, r.ShortcutsCreated);
         Assert.Contains(h.Shortcuts.Writes, w => w.Def.Kind == "desktop");
     }
 
@@ -141,7 +143,7 @@ public class Phase8ShellTests
         Assert.Equal(AppVersion, m.AppVersion);
         Assert.Equal("PAXCookbook.App.v1", m.Aumid);
         Assert.Equal(h.InstallRoot, m.InstallRoot);
-        Assert.Single(m.Shortcuts);
+        Assert.Equal(2, m.Shortcuts.Count);
     }
 
     // ---- 8. Every manifest entry carries sha256 + aumid. ----
@@ -191,8 +193,8 @@ public class Phase8ShellTests
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         h.Shortcuts.Writes.Clear();
         var r = h.Ops.Repair(h.InstallRoot, AppVersion);
-        Assert.Single(h.Shortcuts.Writes);
-        Assert.Equal(1, r.ShortcutsCreated);
+        Assert.Equal(2, h.Shortcuts.Writes.Count);
+        Assert.Equal(2, r.ShortcutsCreated);
     }
 
     // ---- 12. ProtocolRegistrar.Register sets all 4 expected values. ----
@@ -299,7 +301,7 @@ public class Phase8ShellTests
         var s = h.Ops.Inspect(h.InstallRoot);
         Assert.True(s.ProtocolRegistered);
         Assert.True(s.UninstallRegistered);
-        Assert.Equal(1, s.ShortcutsCount);
+        Assert.Equal(2, s.ShortcutsCount);
     }
 
     // ---- 20. The single primary shortcut is NOT excluded from Recommended. ----
@@ -319,9 +321,10 @@ public class Phase8ShellTests
         var h = Build();
         h.Shortcuts.ForceExcludeFailure = true;
         var r = h.Ops.Install(h.InstallRoot, AppVersion, false);
-        // The single primary shortcut is not excluded, so a forced exclude
-        // failure is a no-op; the install still succeeds with one shortcut.
-        Assert.Equal(1, r.ShortcutsCreated);
+        // The primary shortcut is not excluded; the Repair shortcut is, so a
+        // forced exclude failure is caught and the install still succeeds with
+        // both shortcuts written.
+        Assert.Equal(2, r.ShortcutsCreated);
     }
 
     // ---- 22. .lnk paths land under provided Start Menu folder. ----
@@ -406,15 +409,16 @@ public class Phase8ShellTests
         Assert.True(opt.IncludeUninstallShortcut);
     }
 
-    // ---- 28. Default flow surfaces exactly the single primary shortcut. ----
+    // ---- 28. Default flow surfaces the primary + Repair start-menu shortcuts. ----
     [Fact]
-    public void DefaultShellFlow_SurfacesSinglePrimaryShortcut()
+    public void DefaultShellFlow_SurfacesPrimaryAndRepairShortcuts()
     {
         var h = Build();
         h.Ops.Install(h.InstallRoot, AppVersion, false);
         var startMenu = h.Shortcuts.Writes.Where(w => w.Def.Kind == "start-menu").ToList();
-        Assert.Single(startMenu);
-        Assert.Equal(ShortcutCatalog.PrimaryName, startMenu[0].Def.Name);
+        Assert.Equal(2, startMenu.Count);
+        Assert.Contains(startMenu, w => w.Def.Name == ShortcutCatalog.PrimaryName);
+        Assert.Contains(startMenu, w => w.Def.Name == ShortcutCatalog.RepairShortcutName);
     }
 
     // ---- 29. Default flow registers ARP and points UninstallString at
@@ -443,14 +447,15 @@ public class Phase8ShellTests
                  && e.Arguments.Contains("--workspace"));
     }
 
-    // ---- 31. Catalog ignores include flags and always emits one shortcut. ----
+    // ---- 31. Catalog ignores include flags and always emits primary + Repair. ----
     [Fact]
-    public void Catalog_IgnoresIncludeFlags_AlwaysSinglePrimary()
+    public void Catalog_IgnoresIncludeFlags_AlwaysPrimaryAndRepair()
     {
         var defs = ShortcutCatalog.StartMenuShortcuts(FakeInstallRoot,
             includeUninstall: true, includeSupport: true);
-        Assert.Single(defs);
-        Assert.Equal(ShortcutCatalog.PrimaryName, defs.First().Name);
+        Assert.Equal(2, defs.Count);
+        Assert.Contains(defs, d => d.Name == ShortcutCatalog.PrimaryName);
+        Assert.Contains(defs, d => d.Name == ShortcutCatalog.RepairShortcutName);
         Assert.DoesNotContain(defs, d => d.Name == ShortcutCatalog.UninstallName);
     }
 
@@ -495,10 +500,10 @@ public class Phase8ShellTests
         h.Ops.Install(h.InstallRoot, AppVersion, createDesktopShortcut: false);
 
         // Legacy folder gone; stale top-level lnk deleted (the in-memory writer
-        // does not re-create a real file); exactly one shortcut written.
+        // does not re-create a real file); the primary + Repair shortcuts written.
         Assert.False(Directory.Exists(legacyFolder));
         Assert.False(File.Exists(staleLnk));
-        Assert.Single(h.Shortcuts.Writes);
+        Assert.Equal(2, h.Shortcuts.Writes.Count);
     }
 
     // Helper for test 24: builds an UninstallOperations that uses

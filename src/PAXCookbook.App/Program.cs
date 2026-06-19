@@ -2944,6 +2944,7 @@ internal static class Program
         string? engineManifestUrl = null;
         string? engineManifestTrustAnchorThumbprint = null;
         string manifestSignaturePolicy = "required";
+        string? buildTimestamp = null;
 
         try
         {
@@ -2961,6 +2962,11 @@ internal static class Program
                 if (cookbook.TryGetProperty("version", out var cv) && cv.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
                     cookbookVersion = cv.GetString() ?? cookbookVersion;
+                }
+                if (cookbook.TryGetProperty("buildTimestamp", out var bt) && bt.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    string? s = bt.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) { buildTimestamp = s; }
                 }
             }
 
@@ -3007,7 +3013,8 @@ internal static class Program
 
         return new VersionInfo(cookbookVersion, releaseChannel, paxVersion, paxSha256,
             paxRelativePath, paxAcquisitionPolicy,
-            engineManifestUrl, engineManifestTrustAnchorThumbprint, manifestSignaturePolicy);
+            engineManifestUrl, engineManifestTrustAnchorThumbprint, manifestSignaturePolicy,
+            buildTimestamp);
     }
 
     // Static SPA serving — oracle parity with app\broker\Http\StaticHandler.ps1.
@@ -3169,6 +3176,7 @@ internal static class Program
         {
             cookbookVersion = v.CookbookVersion,
             releaseChannel = v.ReleaseChannel,
+            buildTimestamp = v.BuildTimestamp,
             bundledPax = new
             {
                 version = v.PaxVersion,
@@ -3330,7 +3338,8 @@ internal sealed record VersionInfo(
     string PaxAcquisitionPolicy,
     string? EngineManifestUrl,
     string? EngineManifestTrustAnchorThumbprint,
-    string ManifestSignaturePolicy);
+    string ManifestSignaturePolicy,
+    string? BuildTimestamp);
 
 // Observe-only capture of a double-clicked recipe file handed to the EXE by
 // the Windows shell via the .paxlite / .pax associations. Kind is "paxlite"

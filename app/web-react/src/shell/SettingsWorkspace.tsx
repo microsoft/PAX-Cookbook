@@ -520,6 +520,7 @@ export function SettingsWorkspace() {
   const appVersion =
     version?.cookbookVersion ?? health?.appVersion ?? NOT_REPORTED;
   const channel = version?.releaseChannel ?? NOT_REPORTED;
+  const buildDate = version?.buildTimestamp ?? NOT_REPORTED;
 
   const approvedSha = engine?.approvedSha256 ?? version?.bundledPax.sha256 ?? null;
   const approvedVersion =
@@ -571,6 +572,12 @@ export function SettingsWorkspace() {
               title="App version"
               state={appVersion}
               detail={channelDetail}
+              tone="neutral"
+            />
+            <StatusCard
+              title="Build"
+              state={buildDate}
+              detail="UTC build timestamp"
               tone="neutral"
             />
             <StatusCard

@@ -165,6 +165,22 @@ Invoke-Step '[3/7] stage payload tree' {
     }
     Copy-Item (Join-Path $root 'app\VERSION.json') (Join-Path $appDest 'VERSION.json') -Force
 
+    # Stamp this build's UTC timestamp into the STAGED VERSION.json only (a build
+    # output). The source app\VERSION.json is left untouched so it does not churn
+    # on every build. The broker reads cookbook.buildTimestamp at runtime and the
+    # Settings page shows it as the build date.
+    $stagedVersionJson = Join-Path $appDest 'VERSION.json'
+    $buildTimestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd-HH-mm-ss-UTC')
+    $vj = Get-Content -LiteralPath $stagedVersionJson -Raw | ConvertFrom-Json
+    if ($null -eq $vj.cookbook) { throw "staged VERSION.json missing cookbook object: $stagedVersionJson" }
+    if ($vj.cookbook.PSObject.Properties.Name -contains 'buildTimestamp') {
+        $vj.cookbook.buildTimestamp = $buildTimestamp
+    } else {
+        $vj.cookbook | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue $buildTimestamp
+    }
+    $vj | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $stagedVersionJson -Encoding UTF8
+    Log "  stamped build timestamp into staged VERSION.json: $buildTimestamp"
+
     # Defensive scrub: never ship dev/build artifacts in the payload.
     Get-ChildItem $appDest -Recurse -Force -Directory |
         Where-Object { $_.Name -in @('bin','obj','node_modules','_temp','_archive','_backup','.git','.vs') -and $_.FullName -ne $appBinDest } |
