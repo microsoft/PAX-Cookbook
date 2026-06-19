@@ -11,24 +11,25 @@ namespace PAXCookbookSetup.Shell;
 // the app DLL as its argument; the apphost EXE is used ONLY as the icon source
 // (reading an icon is allowed, executing is not).
 //
-// Two shortcuts are created, both directly under Start Menu\Programs (NO product
-// subfolder): the primary "PAX Cookbook" launcher and a "PAX Cookbook - Repair"
-// maintenance entry. The former Support Mode / Uninstall shortcuts and the "PAX
-// Cookbook" group folder are no longer created (Uninstall lives in Add/Remove
-// Programs); the installer and uninstaller clean up any left by a prior version.
+// A SINGLE shortcut is created directly under Start Menu\Programs (NO product
+// subfolder): the primary "PAX Cookbook" launcher. The former "PAX Cookbook -
+// Repair" maintenance entry, the Support Mode / Uninstall shortcuts, and the
+// "PAX Cookbook" group folder are no longer created — Repair and Uninstall are
+// reached from Add/Remove Programs (Modify / Uninstall), not the Start Menu; the
+// installer and uninstaller clean up any left by a prior version.
 public static class ShortcutCatalog
 {
     public const string PrimaryName       = "PAX Cookbook";
     public const string DesktopName       = "PAX Cookbook";
 
-    // The Start Menu Repair entry, created alongside the primary launcher. It
-    // runs the Setup "repair" verb — the same action as the Add/Remove Programs
-    // "Modify" button — so users can repair from the Start Menu.
-    public const string RepairShortcutName = "PAX Cookbook - Repair";
-
     // Legacy names — no longer created. Retained so install/uninstall can
     // recognize and remove shortcuts left by a prior version, and for
     // back-compatible references.
+    //
+    // RepairShortcutName: the old "PAX Cookbook - Repair" Start Menu entry.
+    // Repair now lives ONLY in Add/Remove Programs (the Modify button), never as
+    // a user-facing Start Menu shortcut; the installer deletes any stale copy.
+    public const string RepairShortcutName = "PAX Cookbook - Repair";
     public const string SupportModeName   = "PAX Cookbook Support Mode";
     public const string RepairName        = "Repair PAX Cookbook";
     public const string UninstallName     = "Uninstall PAX Cookbook";
@@ -39,14 +40,13 @@ public static class ShortcutCatalog
     public static IReadOnlyList<ShortcutDefinition> StartMenuShortcuts(
         string installRoot, bool includeUninstall, bool includeSupport)
     {
-        // The primary launcher plus the Repair entry. includeUninstall/
-        // includeSupport are accepted for signature compatibility but the legacy
-        // Support Mode / Uninstall shortcuts are not created (Uninstall lives in
-        // Add/Remove Programs).
+        // The primary launcher ONLY. includeUninstall/includeSupport are
+        // accepted for signature compatibility but the legacy Support Mode /
+        // Uninstall / Repair shortcuts are not created (Repair and Uninstall
+        // live in Add/Remove Programs).
         return new List<ShortcutDefinition>
         {
             PrimaryDefinition(installRoot),
-            RepairDefinition(installRoot),
         };
     }
 
@@ -71,30 +71,6 @@ public static class ShortcutCatalog
             WorkingDirectory: appDir,
             Aumid: ProductConstants.Aumid, IconLocation: appExe + ",0",
             ExcludeFromRecommended: false, OrderHint: 0);
-    }
-
-    // The "PAX Cookbook - Repair" Start Menu entry. WDAC-safe: it targets the
-    // Microsoft-signed dotnet.exe host with the framework-dependent Setup DLL's
-    // "repair" verb — the SAME command the Add/Remove Programs "Modify" button
-    // runs (UninstallRegistrar.ModifyPath). Repair re-downloads the latest
-    // payload, stops the running app, overwrites the installed files, and
-    // re-registers shortcuts / ARP. The icon comes from the apphost EXE (icon
-    // reads are allowed; executing it is not). It shares the app's AUMID so the
-    // shell recognizes it as part of PAX Cookbook, and is excluded from the
-    // Start Menu "recently added" highlight because it is a maintenance entry,
-    // not the app itself.
-    private static ShortcutDefinition RepairDefinition(string installRoot)
-    {
-        var appExe = AppExePath(installRoot);
-        var setupDll = DotNetLaunch.SetupDllPath(installRoot);
-        var setupDir = Path.GetDirectoryName(setupDll)!;
-        return new ShortcutDefinition(
-            Kind: "start-menu", Name: RepairShortcutName,
-            Target: DotNetLaunch.DotNetExePath(),
-            Arguments: $"\"{setupDll}\" repair",
-            WorkingDirectory: setupDir,
-            Aumid: ProductConstants.Aumid, IconLocation: appExe + ",0",
-            ExcludeFromRecommended: true, OrderHint: 100);
     }
 
     public static ShortcutDefinition DesktopShortcut(string installRoot)

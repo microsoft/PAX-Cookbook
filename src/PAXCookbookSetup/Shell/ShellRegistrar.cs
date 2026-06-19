@@ -133,6 +133,17 @@ public sealed class ShellRegistrar
                 File.Delete(staleLnk);
         }
         catch { /* best-effort */ }
+
+        // Remove the "PAX Cookbook - Repair" Start Menu entry written by prior
+        // versions. Repair is now reachable only from Add/Remove Programs
+        // (Modify), never as a user-facing Start Menu shortcut.
+        try
+        {
+            var staleRepairLnk = Path.Combine(startFolder, ShortcutCatalog.RepairShortcutName + ".lnk");
+            if (File.Exists(staleRepairLnk))
+                File.Delete(staleRepairLnk);
+        }
+        catch { /* best-effort */ }
     }
 
     private ShortcutEntry ToEntry(ShortcutDefinition d, ShortcutWriteResult r) => new()
