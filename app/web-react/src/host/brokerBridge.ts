@@ -273,6 +273,10 @@ async function request<T>(
     method,
     headers: buildHeaders(stateChanging),
     signal: controller.signal,
+    // Always hit the broker fresh; never serve a cached list/detail. Prevents a
+    // just-saved recipe (or any changed data) from being masked by a stale
+    // cached GET on the next navigation.
+    cache: 'no-store',
   };
   if (stateChanging && body !== undefined) {
     init.body = JSON.stringify(body);

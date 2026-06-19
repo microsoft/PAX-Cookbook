@@ -372,6 +372,26 @@ export function RecipesWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Whenever the builder closes back to the saved-recipes list, reload the list
+  // so a recipe just created, updated, or deleted in the builder appears right
+  // away — without waiting for a full app reload. This covers both the "Back to
+  // recipes" button and the legacy nav-rail reselect, which return to the list
+  // in place (no remount). The first mount is skipped: the load-once effect
+  // above already fetched the list.
+  const listReloadArmedRef = useRef(false);
+  useEffect(() => {
+    if (mode.kind !== 'workspace') {
+      return;
+    }
+    if (!listReloadArmedRef.current) {
+      listReloadArmedRef.current = true;
+      return;
+    }
+    void reloadRecipes();
+    // reloadRecipes only calls stable state setters + listRecipes; safe to omit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode.kind]);
+
   // When a recipe is selected, gather read-only support diagnostics from the
   // cook-history GETs (last bake + engine fingerprint). Fail-soft: any row whose
   // data does not resolve is simply omitted, and a fetch failure never blocks

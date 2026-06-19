@@ -9,7 +9,7 @@
  * local React state. Home and Recipes are live; cooking actions are disabled in
  * this build.
  */
-import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { SHELL_SECTIONS } from './shell/sections';
 import {
   clearImportTicketFromUrl,
@@ -71,7 +71,14 @@ function App() {
       ? EMBED_CONFIG.section
       : SHELL_SECTIONS[0].id;
   const [activeId, setActiveId] = useState<string>(initialSectionId);
+  // Bumped on every navigation (legacy nav message or local sidebar click).
+  // The active section is keyed by it, so each nav click — including a click on
+  // the section already shown — fully remounts the page and re-runs its data
+  // fetches. This is what makes a just-saved recipe (or any changed data) show
+  // up immediately on the target page instead of stale data from a prior visit.
+  const [navKey, setNavKey] = useState(0);
   const active = SHELL_SECTIONS.find((s) => s.id === activeId) ?? SHELL_SECTIONS[0];
+  const sectionKey = `${active.id}:${navKey}`;
 
   // File-open import handoff. When the Windows app launched (or re-activated)
   // PAX Cookbook from a double-clicked .paxlite / .pax file, it navigated here
@@ -133,6 +140,7 @@ function App() {
         const next = (data as { section: string }).section;
         if (SHELL_SECTIONS.some((s) => s.id === next)) {
           setActiveId(next);
+          setNavKey((k) => k + 1);
         }
       }
     };
@@ -314,7 +322,7 @@ function App() {
           />
           <div className="app-main__content">
             <ImportHandoffBanner state={importBanner} onDismiss={dismissBanner} />
-            {active.body}
+            <Fragment key={sectionKey}>{active.body}</Fragment>
           </div>
         </main>
 
@@ -369,7 +377,10 @@ function App() {
               className="nav-item"
               style={accentStyle(section.accent)}
               aria-current={section.id === activeId ? 'page' : undefined}
-              onClick={() => setActiveId(section.id)}
+              onClick={() => {
+                setActiveId(section.id);
+                setNavKey((k) => k + 1);
+              }}
             >
               <span className="nav-item__swatch" aria-hidden="true" />
               <span className="nav-item__label">{section.label}</span>
@@ -386,7 +397,7 @@ function App() {
           />
           <div className="app-main__content">
             <ImportHandoffBanner state={importBanner} onDismiss={dismissBanner} />
-            {active.body}
+            <Fragment key={sectionKey}>{active.body}</Fragment>
           </div>
         </main>
 

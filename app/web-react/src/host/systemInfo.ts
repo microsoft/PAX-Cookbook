@@ -131,6 +131,8 @@ async function getJson(
       method: 'GET',
       headers: buildHeaders(),
       signal: controller.signal,
+      // Always fetch fresh runtime/version info; never a cached GET.
+      cache: 'no-store',
     });
   } catch {
     clearTimeout(timer);
