@@ -131,8 +131,6 @@ async function getJson(
       method: 'GET',
       headers: buildHeaders(),
       signal: controller.signal,
-      // Always fetch fresh runtime/version info; never a cached GET.
-      cache: 'no-store',
     });
   } catch {
     clearTimeout(timer);
@@ -166,6 +164,28 @@ function num(value: unknown): number | null {
 
 function obj(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+/**
+ * Render the build stamp for display. Build-Setup.ps1 writes it as
+ * "YYYY-MM-DD-HH-MM-SS-UTC"; this returns a compact "YYYY-MM-DD HH:MM" that
+ * fits on one line in the Build status card (the card detail already notes it
+ * is UTC). Unrecognized shapes pass through unchanged; null/empty returns null.
+ */
+export function formatBuildTimestamp(raw: string | null): string | null {
+  if (!raw) {
+    return null;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  const parts = trimmed.split('-');
+  if (parts.length === 7 && parts[6].toUpperCase() === 'UTC' && parts[0].length === 4) {
+    const [y, mo, d, h, mi] = parts;
+    return `${y}-${mo}-${d} ${h}:${mi}`;
+  }
+  return trimmed;
 }
 
 /** GET /api/v1/runtime/version — read-only version display. */

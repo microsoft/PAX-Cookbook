@@ -26,6 +26,7 @@ import {
   getHealth,
   getLockState,
   getSignInProtection,
+  formatBuildTimestamp,
   type RuntimeVersionInfo,
   type PaxEngineState,
   type HealthInfo,
@@ -520,7 +521,7 @@ export function SettingsWorkspace() {
   const appVersion =
     version?.cookbookVersion ?? health?.appVersion ?? NOT_REPORTED;
   const channel = version?.releaseChannel ?? NOT_REPORTED;
-  const buildDate = version?.buildTimestamp ?? NOT_REPORTED;
+  const buildDate = formatBuildTimestamp(version?.buildTimestamp ?? null) ?? NOT_REPORTED;
 
   const approvedSha = engine?.approvedSha256 ?? version?.bundledPax.sha256 ?? null;
   const approvedVersion =

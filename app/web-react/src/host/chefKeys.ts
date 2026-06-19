@@ -188,8 +188,6 @@ async function request<T>(
     method,
     headers: buildHeaders(stateChanging),
     signal: controller.signal,
-    // Always fetch the Chef's Keys list fresh; never a cached GET.
-    cache: 'no-store',
   };
   if ((method === 'POST' || method === 'PUT') && body !== undefined) {
     init.body = JSON.stringify(body);

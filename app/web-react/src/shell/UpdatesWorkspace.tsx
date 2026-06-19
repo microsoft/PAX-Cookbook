@@ -23,6 +23,7 @@ import {
   getRuntimeVersion,
   getPaxEngineState,
   getHealth,
+  formatBuildTimestamp,
   type RuntimeVersionInfo,
   type PaxEngineState,
   type HealthInfo,
@@ -101,7 +102,7 @@ export function UpdatesWorkspace() {
   const appVersion =
     version?.cookbookVersion ?? health?.appVersion ?? NOT_REPORTED;
   const channel = version?.releaseChannel ?? NOT_REPORTED;
-  const buildDate = version?.buildTimestamp ?? NOT_REPORTED;
+  const buildDate = formatBuildTimestamp(version?.buildTimestamp ?? null) ?? NOT_REPORTED;
   const runtimeKind = health?.runtimeKind ?? NOT_REPORTED;
   const transport = version?.runtime.transport ?? NOT_REPORTED;
 
