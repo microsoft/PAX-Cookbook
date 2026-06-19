@@ -121,6 +121,7 @@ import { AdapterReadinessPanel } from './components/AdapterReadinessPanel';
 import { BakeConfirmModal } from './components/BakeConfirmModal';
 import { DiscardConfirmModal } from './components/DiscardConfirmModal';
 import { OpenRecipeConfirmModal } from './components/OpenRecipeConfirmModal';
+import { SaveRequirementsModal } from './components/SaveRequirementsModal';
 import { computeBakeBlockReason } from './lib/bakeGate';
 import './mini-kitchen.css';
 
@@ -370,6 +371,9 @@ export function MiniKitchenBuilderPreview({
   // that replaces the old browser confirm; the revert it gates is instant and
   // purely in-memory, so there is no submitting state to track.
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState<boolean>(false);
+  // When Save / Update is pressed on an incomplete recipe, this opens the
+  // "needs a few more details" dialog instead of letting the click do nothing.
+  const [saveBlockedOpen, setSaveBlockedOpen] = useState<boolean>(false);
 
   // Open-a-different-recipe confirmation. When the builder holds unsaved edits
   // and a saved recipe is clicked, the chosen summary is parked here to show the
@@ -812,7 +816,13 @@ export function MiniKitchenBuilderPreview({
   }
 
   async function handleSaveOrUpdate() {
-    if (busy || !candidateSaveable || !createBuild.body) {
+    if (busy) {
+      return;
+    }
+    if (!candidateSaveable || !createBuild.body) {
+      // Incomplete recipe: never a silent no-op. Surface the missing details in
+      // a dialog that names each gap and the step that fixes it.
+      setSaveBlockedOpen(true);
       return;
     }
     setBusy(true);
@@ -2271,8 +2281,8 @@ export function MiniKitchenBuilderPreview({
                   type="button"
                   className="mk-preview-boundary__btn"
                   onClick={handleSaveOrUpdate}
-                  disabled={busy || !candidateSaveable}
-                  aria-disabled={busy || !candidateSaveable}
+                  disabled={busy}
+                  aria-disabled={busy}
                   title={
                     saveDisabledReason ??
                     (savedRecipeId
@@ -2390,6 +2400,17 @@ export function MiniKitchenBuilderPreview({
         <DiscardConfirmModal
           onCancel={cancelDiscardChanges}
           onConfirm={confirmDiscardChanges}
+        />
+      ) : null}
+
+      {saveBlockedOpen ? (
+        <SaveRequirementsModal
+          requirements={saveRequirements}
+          onGoToStep={step => {
+            setActiveStep(step);
+            setSaveBlockedOpen(false);
+          }}
+          onClose={() => setSaveBlockedOpen(false)}
         />
       ) : null}
 
