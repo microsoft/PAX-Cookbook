@@ -177,6 +177,15 @@ internal sealed class WebAuthnService
             return failure;
         }
 
+        // The bake's Windows Hello step-up doubles as the session unlock: a
+        // verified assertion proves presence, so it lifts the inactivity lock
+        // (when it engaged) and refreshes the activity anchor before the grant is
+        // recorded. SetUnlocked does not bump the lock generation, so the grant
+        // below is captured against the same generation the cook route reads when
+        // it consumes it. This keeps a manual bake to ONE Windows Hello prompt
+        // that both authorizes the cook and refreshes the session, instead of a
+        // locked session blocking the bake before it can reach its own step-up.
+        BrokerLock.SetUnlocked();
         ManualCookReAuth.Grant(recipeId!, BrokerLock.CurrentLockGeneration);
         return new WebAuthnResponse(200, new
         {

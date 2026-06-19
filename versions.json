@@ -4,8 +4,8 @@
     "version": "1.0.0",
     "payload": {
       "filename": "PAX_Cookbook_Payload.zip",
-      "sha256": "e85fd9085c6f49486dacbea5ca7aace1fbec6647d8e4192ca9be1386788c6461",
-      "size": 20339989
+      "sha256": "8ace1b743ea71a6a1848492a060872ded79955b0a7637babf2af2be340c64a22",
+      "size": 20340898
     },
     "engine": {
       "version": "1.11.7",

@@ -56,6 +56,17 @@ internal static class BrokerLock
         ("POST", "/api/v1/broker/webauthn/unlock"),
         ("POST", "/api/v1/broker/webauthn/bootstrap-register-challenge"),
         ("POST", "/api/v1/broker/webauthn/bootstrap-register-unlock"),
+
+        // The manual-cook step-up is reachable while Locked so the bake's own
+        // Windows Hello can clear an inactivity auto-lock in the SAME ceremony
+        // that authorizes the cook: a verified assertion lifts the lock (see
+        // WebAuthnService.VerifyManualCook) and refreshes the session. Both
+        // routes still require a valid WebAuthn assertion, so this is at least as
+        // strong as the unlock ceremony already on this list, and it keeps a
+        // bake to a single Windows Hello prompt instead of dead-ending at the
+        // lock gate with a "locked" error the bake flow cannot clear on its own.
+        ("POST", "/api/v1/broker/reauth/manual-cook/challenge"),
+        ("POST", "/api/v1/broker/reauth/manual-cook/verify"),
     };
 
     // Returns "Locked" or "Unlocked" after applying the lazy inactivity sweep.

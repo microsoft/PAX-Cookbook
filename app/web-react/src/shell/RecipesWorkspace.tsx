@@ -664,7 +664,10 @@ export function RecipesWorkspace() {
         requestShellSection('bakes');
         return;
       }
-      if (outcome.kind === 'reauthRequired' && allowReauth) {
+      if (
+        (outcome.kind === 'reauthRequired' || outcome.kind === 'locked') &&
+        allowReauth
+      ) {
         const reauth = await reauthManualCook(selectedId);
         if (reauth.ok) {
           await runBake(false);
@@ -730,7 +733,10 @@ export function RecipesWorkspace() {
         requestShellSection('bakes');
         return;
       }
-      if (outcome.kind === 'reauthRequired' && allowReauth) {
+      if (
+        (outcome.kind === 'reauthRequired' || outcome.kind === 'locked') &&
+        allowReauth
+      ) {
         const reauth = await reauthManualCook('__resume__');
         if (reauth.ok) {
           await runResume(input, false);

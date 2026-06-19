@@ -337,7 +337,17 @@ internal static partial class RecipeReadModel
         string cookFolderAbs = prepared.CookFolderAbs;
         string cookFolderRel = prepared.CookFolderRel;
         string host = Environment.MachineName;
-        string pwshPath = ResolvePwshPath(pwshPathOverride);
+        string? pwshPath = ResolvePwshPath(pwshPathOverride);
+        if (pwshPath is null)
+        {
+            // PowerShell 7 is required to run a bake but was not found on this
+            // machine (the prerequisite installer normally places it under
+            // %ProgramFiles%\PowerShell\7). Fail with a clear, actionable message
+            // instead of an opaque "cannot find the file specified" OS error.
+            return RecordSpawnFailure(
+                workspacePath, cookFolderAbs, cookFolderRel, recipeId, cookId, host,
+                "PowerShell 7 is required to run bakes. Please reinstall PAX Cookbook to install it.");
+        }
         string commandExpr = prepared.Plan.SpawnArgv[3];
         string paxScriptPath = prepared.Plan.PaxScriptPath;
 
@@ -865,16 +875,18 @@ internal static partial class RecipeReadModel
         });
     }
 
-    // pwsh resolution. The test seam may force an explicit interpreter path; in
-    // production the child is the platform `pwsh` on PATH. No other interpreter
-    // (powershell.exe, msedge, etc.) is ever selected.
-    private static string ResolvePwshPath(string? pwshPathOverride)
+    // pwsh resolution. The test seam may force an explicit interpreter path;
+    // otherwise the full path to PowerShell 7 is resolved via PwshLocator (PATH
+    // then the standard install locations), returning null when it is not found
+    // so the caller surfaces a clear, actionable error rather than an opaque OS
+    // spawn failure.
+    private static string? ResolvePwshPath(string? pwshPathOverride)
     {
         if (!string.IsNullOrWhiteSpace(pwshPathOverride))
         {
             return pwshPathOverride;
         }
-        return "pwsh";
+        return PwshLocator.Resolve();
     }
 
     private static string ToCookIso(DateTime utc) =>

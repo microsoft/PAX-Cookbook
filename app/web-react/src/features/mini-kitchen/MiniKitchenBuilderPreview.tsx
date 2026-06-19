@@ -1061,10 +1061,13 @@ export function MiniKitchenBuilderPreview({
   }
 
   // Start the bake. `allowReauth` is true on the first attempt; on a broker
-  // `reAuthRequired` it runs the browser-owned Windows Hello ceremony and
-  // retries EXACTLY ONCE with `allowReauth = false`, so there is no retry loop.
-  // A started bake (201) is reported only from the broker's own cookId, which
-  // is handed to the Bakes page to focus.
+  // `reAuthRequired` (401) OR a `Locked` (423) it runs the browser-owned
+  // Windows Hello step-up and retries EXACTLY ONCE with `allowReauth = false`,
+  // so there is no retry loop. The step-up is the same single ceremony in both
+  // cases: a verified assertion authorizes the cook AND lifts/refreshes the
+  // session lock on the broker, so a timed-out session never dead-ends the bake
+  // with a "locked" error — one Windows Hello prompt covers both. A started bake
+  // (201) is reported only from the broker's own cookId, handed to Bakes.
   async function runBake(allowReauth: boolean): Promise<void> {
     if (!savedRecipeId) {
       return;
@@ -1084,7 +1087,10 @@ export function MiniKitchenBuilderPreview({
         requestShellSection('bakes');
         return;
       }
-      if (outcome.kind === 'reauthRequired' && allowReauth) {
+      if (
+        (outcome.kind === 'reauthRequired' || outcome.kind === 'locked') &&
+        allowReauth
+      ) {
         const reauth = await reauthManualCook(savedRecipeId);
         if (reauth.ok) {
           await runBake(false);
@@ -1632,6 +1638,14 @@ export function MiniKitchenBuilderPreview({
                   now live with Audit Operations (Step 4). */}
               {activeStep === 2 ? (
                 <>
+                  <p className="mk-chefskeys-note" role="note">
+                    A <strong>Chef&rsquo;s Key</strong> is your saved Microsoft&nbsp;365
+                    sign-in for this recipe. PAX Cookbook uses it to pull your audit
+                    data on your behalf each time this recipe bakes. You create and
+                    manage keys on the <strong>Chef&rsquo;s Keys</strong> page in the
+                    left menu &mdash; each key&rsquo;s secret is kept in Windows
+                    Credential Manager on this PC and never leaves your device.
+                  </p>
                   <AuthContextCard value={state.auth} onChange={handleAuthChange} />
                   <p className="mk-chefskeys-note" role="note">
                     Authentication shown here uses placeholder and test values

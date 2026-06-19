@@ -604,7 +604,7 @@ export function SettingsWorkspace() {
             </span>
             <button
               type="button"
-              className="dvw-settings__help-link"
+              className="dvw-settings__updates-btn"
               onClick={() => requestShellSection('updates')}
             >
               Check for updates

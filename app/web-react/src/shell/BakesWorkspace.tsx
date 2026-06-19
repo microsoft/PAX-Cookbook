@@ -60,6 +60,33 @@ type LogPhase = 'idle' | 'loading' | 'available' | 'empty' | 'error' | 'locked';
 // 2-3 seconds without the user refreshing.
 const AUTO_REFRESH_MS = 2500;
 
+// "Clear History" persists as a cutoff timestamp stored locally on this PC, so
+// bakes recorded up to that moment stay hidden across refreshes and restarts.
+// It never deletes a record, log, or file: "Restore History" removes the cutoff
+// and a newer bake reappears on its own.
+const HISTORY_CLEARED_AT_KEY = 'pax.bakes.historyClearedAt';
+
+function readHistoryClearedAt(): string | null {
+  try {
+    const v = window.localStorage.getItem(HISTORY_CLEARED_AT_KEY);
+    return v && v.trim() ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeHistoryClearedAt(value: string | null): void {
+  try {
+    if (value) {
+      window.localStorage.setItem(HISTORY_CLEARED_AT_KEY, value);
+    } else {
+      window.localStorage.removeItem(HISTORY_CLEARED_AT_KEY);
+    }
+  } catch {
+    /* localStorage unavailable — the cutoff stays in memory for this session. */
+  }
+}
+
 const STATUS_LABELS: Record<string, string> = {
   running: 'Running',
   completed: 'Completed',
@@ -310,10 +337,11 @@ function bakeBannerCopy(
 export function BakesWorkspace() {
   const [cooks, setCooks] = useState<CookSummary[]>([]);
   const [listPhase, setListPhase] = useState<ListPhase>('loading');
-  // Visual-only "Clear History": empties the displayed list for this session.
-  // It never deletes a cook record, log, or file from the broker — a refresh,
-  // the live-tail poll, or a remount repopulates the list from the broker.
-  const [historyCleared, setHistoryCleared] = useState(false);
+  // Persisted, non-destructive "Clear History": a cutoff timestamp (stored
+  // locally on this PC) hides bakes recorded up to that moment across refreshes
+  // and restarts. It never deletes a cook record, log, or file — "Restore
+  // History" removes the cutoff, and a newer bake reappears on its own.
+  const [clearedAt, setClearedAt] = useState<string | null>(() => readHistoryClearedAt());
 
   const [selectedCookId, setSelectedCookId] = useState<string | null>(null);
   const [detail, setDetail] = useState<CookDetailBody | null>(null);
@@ -363,7 +391,6 @@ export function BakesWorkspace() {
     }
     if (res.ok && res.data) {
       setCooks(Array.isArray(res.data.cooks) ? res.data.cooks : []);
-      setHistoryCleared(false);
       setListPhase('loaded');
     } else if (res.status === 423) {
       setListPhase('locked');
@@ -374,11 +401,37 @@ export function BakesWorkspace() {
   }, []);
 
   const clearHistory = useCallback(() => {
-    // Visual only — empties the displayed list. No broker mutation, no record
-    // or log deletion. The next load (refresh, poll, or remount) repopulates.
-    setCooks([]);
-    setHistoryCleared(true);
+    // Persisted, non-destructive — records a cutoff timestamp so bakes recorded
+    // up to now stay hidden across refreshes and restarts. No broker mutation,
+    // no record or log deletion. "Restore History" or a newer bake brings the
+    // list back.
+    const cutoff = new Date().toISOString();
+    setClearedAt(cutoff);
+    writeHistoryClearedAt(cutoff);
   }, []);
+
+  const restoreHistory = useCallback(() => {
+    setClearedAt(null);
+    writeHistoryClearedAt(null);
+  }, []);
+
+  // Apply the persisted clear cutoff to the broker's full list. Rows recorded
+  // after the cutoff (newer bakes) reappear on their own, and any row we cannot
+  // date is kept rather than hidden.
+  const visibleCooks = useMemo(() => {
+    if (!clearedAt) {
+      return cooks;
+    }
+    const cutoff = new Date(clearedAt).getTime();
+    if (!isFinite(cutoff)) {
+      return cooks;
+    }
+    return cooks.filter(cook => {
+      const t = new Date(cook.createdAt).getTime();
+      return !isFinite(t) || t > cutoff;
+    });
+  }, [cooks, clearedAt]);
+  const historyHidden = clearedAt !== null && cooks.length > visibleCooks.length;
 
   const loadDetail = useCallback(async (cookId: string, background = false) => {
     if (!background) {
@@ -727,11 +780,21 @@ export function BakesWorkspace() {
                 type="button"
                 className="dvw-btn dvw-btn--ghost"
                 onClick={clearHistory}
-                disabled={cooks.length === 0}
+                disabled={visibleCooks.length === 0}
                 title="Clear this view only — your bake records and logs are not deleted."
               >
                 Clear History
               </button>
+              {clearedAt !== null ? (
+                <button
+                  type="button"
+                  className="dvw-btn dvw-btn--ghost"
+                  onClick={restoreHistory}
+                  title="Bring back the bakes hidden by Clear History."
+                >
+                  Restore History
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="dvw-btn dvw-btn--icon"
@@ -765,9 +828,9 @@ export function BakesWorkspace() {
             </div>
           ) : null}
 
-          {listPhase === 'loaded' && cooks.length > 0 ? (
+          {listPhase === 'loaded' && visibleCooks.length > 0 ? (
             <ul className="tt-list bk-history-list" role="listbox" aria-label="Bake history">
-              {cooks.map(cook => {
+              {visibleCooks.map(cook => {
                 const selected = cook.cookId === selectedCookId;
                 const finished = formatModified(cook.finishedAt ?? cook.createdAt);
                 const name = isResumeTrigger(cook.trigger)
@@ -811,24 +874,34 @@ export function BakesWorkspace() {
             </ul>
           ) : null}
 
-          {listPhase === 'loaded' && cooks.length === 0 ? (
+          {listPhase === 'loaded' && visibleCooks.length === 0 ? (
             <div className="tt-empty bk-empty">
               <IconClock className="tt-empty__icon" />
               <h3 className="tt-empty__title">
-                {historyCleared ? 'Bake history cleared' : 'No bakes recorded yet'}
+                {historyHidden ? 'Bake history cleared' : 'No bakes recorded yet'}
               </h3>
               <p className="tt-empty__body">
-                {historyCleared
-                  ? 'This view was cleared for the session. Your bake records and logs were not deleted — refresh to reload them.'
+                {historyHidden
+                  ? 'This view is cleared. Your bake records and logs were not deleted — choose Restore History to bring them back, and any new bake will appear here on its own.'
                   : 'No bakes have been recorded on this PC. This page reviews real bake history — status, outputs, and logs — when records exist. It does not start a bake: prepare recipes in Recipes and preflight them in Taste Tests.'}
               </p>
-              <button
-                type="button"
-                className="bk-empty__link"
-                onClick={() => requestShellSection('recipes')}
-              >
-                Open Recipes →
-              </button>
+              {historyHidden ? (
+                <button
+                  type="button"
+                  className="bk-empty__link"
+                  onClick={restoreHistory}
+                >
+                  Restore History
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="bk-empty__link"
+                  onClick={() => requestShellSection('recipes')}
+                >
+                  Open Recipes →
+                </button>
+              )}
             </div>
           ) : null}
         </section>

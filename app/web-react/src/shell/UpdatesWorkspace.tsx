@@ -34,17 +34,6 @@ type LoadPhase = 'loading' | 'ready' | 'error';
 const APPROVED_ENGINE_NAME = 'PAX Purview Audit Log Processor';
 const NOT_REPORTED = 'Not reported by this build';
 
-function shortSha(sha: string | null): string | null {
-  if (!sha) {
-    return null;
-  }
-  const value = sha.trim();
-  if (value.length <= 16) {
-    return value;
-  }
-  return value.slice(0, 8) + '…' + value.slice(-6);
-}
-
 function engineStatusLabel(
   phase: LoadPhase,
   engine: PaxEngineState | null,
@@ -103,11 +92,8 @@ export function UpdatesWorkspace() {
     version?.cookbookVersion ?? health?.appVersion ?? NOT_REPORTED;
   const channel = version?.releaseChannel ?? NOT_REPORTED;
   const buildDate = formatBuildTimestamp(version?.buildTimestamp ?? null) ?? NOT_REPORTED;
-  const runtimeKind = health?.runtimeKind ?? NOT_REPORTED;
-  const transport = version?.runtime.transport ?? NOT_REPORTED;
 
   const approvedSha = engine?.approvedSha256 ?? version?.bundledPax.sha256 ?? null;
-  const approvedShaShort = shortSha(approvedSha);
   const approvedVersion =
     engine?.approvedVersion ?? version?.bundledPax.version ?? NOT_REPORTED;
   const engineStatus = engineStatusLabel(phase, engine);
@@ -129,8 +115,7 @@ export function UpdatesWorkspace() {
             <span className="chip chip--local">Internal build</span>
           </div>
           <p className="card__body">
-            The version, release channel, and connection details for the PAX Cookbook
-            build installed on this PC.
+            The version of PAX Cookbook installed on this PC.
           </p>
           <dl className="settings-kv">
             <div className="settings-kv__row">
@@ -141,18 +126,6 @@ export function UpdatesWorkspace() {
               <dt className="settings-kv__key">Build date</dt>
               <dd className="settings-kv__val">{buildDate}</dd>
             </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Release channel</dt>
-              <dd className="settings-kv__val">{channel}</dd>
-            </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Runtime</dt>
-              <dd className="settings-kv__val">{runtimeKind}</dd>
-            </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Connection</dt>
-              <dd className="settings-kv__val">{transport}</dd>
-            </div>
           </dl>
         </article>
 
@@ -162,8 +135,8 @@ export function UpdatesWorkspace() {
             <span className="chip chip--local">Managed by PAX Cookbook</span>
           </div>
           <p className="card__body">
-            The approved PAX engine is managed and verified by PAX Cookbook. Its version
-            and fingerprint are shown here so you can confirm the build.
+            PAX Cookbook manages and verifies the audit engine for you. Its version
+            and fingerprint are shown so you can confirm this build.
           </p>
           <dl className="settings-kv">
             <div className="settings-kv__row">
@@ -181,10 +154,8 @@ export function UpdatesWorkspace() {
             <div className="settings-kv__row">
               <dt className="settings-kv__key">Fingerprint</dt>
               <dd className="settings-kv__val">
-                {approvedShaShort ? (
-                  <code className="settings-mono" title={approvedSha ?? undefined}>
-                    {approvedShaShort}
-                  </code>
+                {approvedSha ? (
+                  <code className="settings-mono settings-mono--full">{approvedSha}</code>
                 ) : (
                   NOT_REPORTED
                 )}
@@ -202,8 +173,8 @@ export function UpdatesWorkspace() {
             <span className="chip chip--local">Internal testing</span>
           </div>
           <p className="card__body">
-            Online update checking is not available in this build. PAX Cookbook does not
-            contact an update service and does not download or install updates.
+            This build doesn’t check for updates online. To move to a newer version,
+            run the PAX Cookbook installer you were given.
           </p>
           <dl className="settings-kv">
             <div className="settings-kv__row">
@@ -212,11 +183,11 @@ export function UpdatesWorkspace() {
             </div>
             <div className="settings-kv__row">
               <dt className="settings-kv__key">How to update</dt>
-              <dd className="settings-kv__val">Install the internal release package</dd>
+              <dd className="settings-kv__val">Run the installer you were given</dd>
             </div>
           </dl>
           <p className="settings-note">
-            Use the release package you were given for internal testing to move to a newer build.
+            Your saved recipes stay on this PC when you install a newer build.
           </p>
         </article>
 

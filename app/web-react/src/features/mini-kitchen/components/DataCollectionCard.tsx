@@ -142,6 +142,19 @@ export function DataCollectionCard({
           }}
         />
       </MiniKitchenField>
+      <p className="mk-field__note">
+        Activity types are the specific actions recorded in your tenant&rsquo;s
+        audit log (for example, <code>CopilotInteraction</code>). For the full list
+        of names you can enter here, see{' '}
+        <a
+          href="https://learn.microsoft.com/purview/audit-log-activities"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Audited activities in Microsoft Purview
+        </a>
+        .
+      </p>
     </MiniKitchenSectionCard>
   );
 }

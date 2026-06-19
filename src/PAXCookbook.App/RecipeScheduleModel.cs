@@ -572,7 +572,9 @@ internal static class RecipeScheduleModel
         string registrar = string.IsNullOrWhiteSpace(registrarPathOverride)
             ? Path.Combine(appRoot, "install", "Register-PAXScheduledRecipe.ps1")
             : registrarPathOverride!;
-        string pwsh = string.IsNullOrWhiteSpace(pwshOverride) ? "pwsh" : pwshOverride!;
+        string pwsh = !string.IsNullOrWhiteSpace(pwshOverride)
+            ? pwshOverride!
+            : (PwshLocator.Resolve() ?? "pwsh");
 
         var psi = new ProcessStartInfo
         {

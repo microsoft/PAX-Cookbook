@@ -3242,22 +3242,28 @@
 }
 
 .dvw-settings__help {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--sp-2);
-  align-self: flex-start;
+  align-self: stretch;
 }
 
 .dvw-settings__help-label {
   font-size: var(--fs-14);
   font-weight: 600;
   color: var(--c-ink);
+  margin-bottom: var(--sp-1);
 }
 
 .dvw-settings__help-link {
-  padding: 0;
-  border: 0;
-  background: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border, rgba(0, 0, 0, 0.12));
+  border-radius: var(--r-sm, 6px);
+  background: var(--c-surface, #fff);
   font: inherit;
   font-size: var(--fs-14);
   font-weight: 600;
@@ -3266,7 +3272,8 @@
 }
 
 .dvw-settings__help-link:hover {
-  text-decoration: underline;
+  text-decoration: none;
+  background: var(--c-surface-hover, rgba(0, 0, 0, 0.04));
 }
 
 .dvw-settings__help-link:focus-visible {
@@ -3288,6 +3295,28 @@
   font-size: var(--fs-14);
   font-weight: 600;
   color: var(--c-ink);
+}
+
+.dvw-settings__updates-btn {
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--c-blue);
+  border-radius: var(--r-sm, 6px);
+  background: var(--c-blue);
+  font: inherit;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+}
+
+.dvw-settings__updates-btn:hover {
+  filter: brightness(0.95);
+}
+
+.dvw-settings__updates-btn:focus-visible {
+  outline: 2px solid var(--c-blue);
+  outline-offset: 2px;
+  border-radius: var(--r-sm, 4px);
 }
 
 /* The add/edit form modal reuses the shared .mk-modal shell (a wrapping
