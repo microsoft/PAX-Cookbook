@@ -24,7 +24,6 @@ import {
   formatModified,
 } from './shellNav';
 import { RecipeStatusBadge, toneForRecipeStatus } from './StatusCard';
-import { listChefKeys } from '../host/chefKeys';
 import { SectionHeader } from './components/SectionHeader';
 import {
   IconPlus,
@@ -401,7 +400,6 @@ export function DesktopHome() {
   const [cooks, setCooks] = useState<readonly CookSummary[]>([]);
   const [detailByCook, setDetailByCook] = useState<Record<string, CookDetailBody>>({});
   const [cooksPhase, setCooksPhase] = useState<ListPhase>('idle');
-  const [chefKeyCount, setChefKeyCount] = useState<number | null>(null);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
@@ -479,24 +477,6 @@ export function DesktopHome() {
     };
   }, []);
 
-  // Chef's Keys count (read-only) for the "no authentication keys" alert. Left
-  // null on error so the alert is suppressed rather than shown spuriously.
-  useEffect(() => {
-    let cancelled = false;
-    void listChefKeys()
-      .then(res => {
-        if (!cancelled && res.ok && res.data) {
-          setChefKeyCount(res.data.chefKeys.length);
-        }
-      })
-      .catch(() => {
-        /* leave chefKeyCount null */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   useEffect(() => {
     if (!importMenuOpen) {
       return;
@@ -567,19 +547,13 @@ export function DesktopHome() {
     void openFile(path);
   }
 
-  function scrollToAttention() {
-    const el = document.getElementById('dvw-attn-h');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }
-
   // Dynamic "what needs attention" alerts, surfaced only from data already
-  // loaded: a failed last bake, missing auth keys, and recipes whose readiness
-  // still needs work. A recipe that has simply never been baked is NOT an issue
-  // (it is just a new recipe), so it never appears here. (An engine-update alert
-  // is intentionally omitted — no client-side update signal is available without
-  // a new broker call.)
+  // loaded: a failed last bake and recipes whose readiness still needs work. A
+  // recipe that has simply never been baked is NOT an issue (it is just a new
+  // recipe), so it never appears here. Missing Chef's Keys are NOT flagged —
+  // they are optional (a recipe can bake with interactive sign-in or device
+  // code). (An engine-update alert is intentionally omitted — no client-side
+  // update signal is available without a new broker call.)
   const alerts: HomeAlert[] = [];
   if (lastCook && bakeBadge(lastCook.status, lastCook.exitCode).tone === 'error') {
     const failedCookId = lastCook.cookId;
@@ -589,15 +563,6 @@ export function DesktopHome() {
       title: 'Your last bake failed',
       detail: 'Open it in Bakes to see what went wrong.',
       onClick: () => viewInBakes(failedCookId),
-    });
-  }
-  if (chefKeyCount === 0) {
-    alerts.push({
-      id: 'no-keys',
-      tone: 'warning',
-      title: 'No authentication keys set up',
-      detail: "Add a Chef's Key before you run a bake.",
-      onClick: () => requestShellSection('chefskeys'),
     });
   }
   for (const r of recipes) {
@@ -611,7 +576,6 @@ export function DesktopHome() {
       });
     }
   }
-  const attentionCount = alerts.length;
 
   // Open a native file-browse dialog, parse the chosen .pax/.paxlite file, and
   // open the recipe builder pre-populated with its settings. Shared by the
@@ -729,8 +693,6 @@ export function DesktopHome() {
         onOpenLog={openLogFile}
         onNewRecipe={() => requestShellSection('recipes')}
       />
-
-      <SystemHealth count={attentionCount} onShowAttention={scrollToAttention} />
 
       <div className="dvw-home__panels">
         <div className="dvw-home__col">
@@ -952,33 +914,6 @@ function LastBakePanel({
         </button>
       </div>
     </section>
-  );
-}
-
-function SystemHealth({
-  count,
-  onShowAttention,
-}: {
-  count: number;
-  onShowAttention: () => void;
-}) {
-  if (count <= 0) {
-    return (
-      <p className="dvw-syshealth dvw-syshealth--ok" role="status">
-        <span className="dvw-syshealth__dot" aria-hidden="true" />
-        All systems ready
-      </p>
-    );
-  }
-  return (
-    <button
-      type="button"
-      className="dvw-syshealth dvw-syshealth--attention"
-      onClick={onShowAttention}
-    >
-      <span className="dvw-syshealth__dot" aria-hidden="true" />
-      {count} item{count === 1 ? '' : 's'} need{count === 1 ? 's' : ''} attention
-    </button>
   );
 }
 

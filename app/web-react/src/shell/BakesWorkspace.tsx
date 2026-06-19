@@ -40,7 +40,6 @@ import {
   IconCopy,
   IconDownload,
   IconList,
-  IconRefresh,
 } from './CookbookIllustrations';
 import { downloadBakeLogByCookId, downloadBakeLogText } from './logDownload';
 import {
@@ -714,15 +713,6 @@ export function BakesWorkspace() {
     }
   }, [autoScroll]);
 
-  const refreshAll = useCallback(() => {
-    void loadCooks();
-    const current = selectedCookIdRef.current;
-    if (current) {
-      void loadDetail(current);
-      void loadLog(current);
-    }
-  }, [loadCooks, loadDetail, loadLog]);
-
   const errorSummary = detail?.errorSummary ?? null;
   const detailStatus = normalizeStatus(detail?.status);
   const isFailedRun = detailStatus === 'errored' || detailStatus === 'interrupted';
@@ -776,33 +766,25 @@ export function BakesWorkspace() {
           <header className="tt-pane__head">
             <h2 className="tt-pane__title">Bake history</h2>
             <div className="tt-pane__head-actions">
-              <button
-                type="button"
-                className="dvw-btn dvw-btn--ghost"
-                onClick={clearHistory}
-                disabled={visibleCooks.length === 0}
-                title="Clear this view only — your bake records and logs are not deleted."
-              >
-                Clear History
-              </button>
               {clearedAt !== null ? (
                 <button
                   type="button"
-                  className="dvw-btn dvw-btn--ghost"
+                  className="bk-history-btn"
                   onClick={restoreHistory}
                   title="Bring back the bakes hidden by Clear History."
                 >
                   Restore History
                 </button>
+              ) : visibleCooks.length > 0 ? (
+                <button
+                  type="button"
+                  className="bk-history-btn"
+                  onClick={clearHistory}
+                  title="Clear this view only — your bake records and logs are not deleted."
+                >
+                  Clear History
+                </button>
               ) : null}
-              <button
-                type="button"
-                className="dvw-btn dvw-btn--icon"
-                onClick={refreshAll}
-                aria-label="Refresh"
-              >
-                <IconRefresh />
-              </button>
             </div>
           </header>
 

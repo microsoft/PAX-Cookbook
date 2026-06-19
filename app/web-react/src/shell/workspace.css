@@ -163,6 +163,14 @@
   border-color: var(--c-btn-secondary-border);
 }
 
+/* Small, subtle action button (e.g. the Support details "Copy" control) — same
+   visual weight as other compact buttons, lighter than the default control. */
+.dvw-btn--sm {
+  min-height: 28px;
+  padding: 2px var(--sp-3);
+  font-size: var(--fs-13, 13px);
+}
+
 /* Destructive: a filled red for a committed delete (mirrors the modal danger
    button), and a quiet danger-tinted variant for a control that initiates a
    destructive or stop action — subtle at rest, filling red on hover. */
@@ -1889,6 +1897,46 @@
   color: var(--c-ink-strong, var(--c-ink));
 }
 
+/* Bake history header: keep the title on one line and pin the action buttons to
+   the right so "Bake history" never wraps under them. */
+.bk-pane .tt-pane__title {
+  white-space: nowrap;
+}
+
+.bk-pane .tt-pane__head-actions {
+  flex-shrink: 0;
+}
+
+/* Small, compact outlined pill buttons for Clear/Restore History — subtle, so
+   they don't compete with the title. */
+.bk-history-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 12px;
+  min-height: 26px;
+  border: 1px solid var(--c-btn-secondary-border);
+  border-radius: 999px;
+  background: var(--c-card);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: var(--fs-13, 13px);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.bk-history-btn:hover {
+  background: var(--c-btn-secondary-bg-hover);
+  border-color: var(--c-btn-secondary-border-hover);
+}
+
+.bk-history-btn:focus-visible {
+  outline: 2px solid var(--c-blue);
+  outline-offset: 2px;
+}
+
 .tt-muted {
   margin: 0;
   color: var(--c-muted);
@@ -3104,6 +3152,37 @@
   .dvw-keys__prop {
     grid-template-columns: 1fr;
     gap: var(--sp-1);
+  }
+}
+
+/* Chef's Key detail pane: narrow the label column and widen the value column so
+   identifier values (Tenant ID, Application (client) ID, Certificate
+   thumbprint) sit on one line instead of wrapping. Scoped to the detail pane so
+   the shared .dvw-keys__prop / .dvw-keys__mono layout elsewhere — e.g. the
+   Settings engine fingerprint, which is meant to wrap — is unaffected. The
+   overall card width does not change; only the split between the two columns. */
+.dvw-keys__right .dvw-keys__prop {
+  grid-template-columns: 160px 1fr;
+  gap: var(--sp-3);
+}
+
+.dvw-keys__right .dvw-keys__mono {
+  white-space: nowrap;
+  word-break: normal;
+  overflow-x: auto;
+}
+
+/* On a narrow pane, restore the stacked layout and let the value wrap again so
+   a long thumbprint never forces horizontal overflow. */
+@media (max-width: 720px) {
+  .dvw-keys__right .dvw-keys__prop {
+    grid-template-columns: 1fr;
+    gap: var(--sp-1);
+  }
+
+  .dvw-keys__right .dvw-keys__mono {
+    white-space: normal;
+    word-break: break-all;
   }
 }
 

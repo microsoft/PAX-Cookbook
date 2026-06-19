@@ -17,7 +17,7 @@
  * shows a secret. Every value shown reflects state the broker already reports;
  * missing values fall back to a plain "Not reported by this build".
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
 import {
   getRuntimeVersion,
@@ -97,6 +97,46 @@ export function UpdatesWorkspace() {
   const approvedVersion =
     engine?.approvedVersion ?? version?.bundledPax.version ?? NOT_REPORTED;
   const engineStatus = engineStatusLabel(phase, engine);
+
+  // Copy-to-clipboard for the Support details card. The text is built from the
+  // same live values the card shows (never hardcoded), so a paste into a support
+  // chat, email, or Teams message always reflects this build. "Copied!" reverts
+  // to "Copy" after 2 seconds.
+  const [copied, setCopied] = useState(false);
+  const copyResetRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+    };
+  }, []);
+
+  function handleCopySupport() {
+    const rows: Array<[string, string]> = [
+      ['App version', appVersion],
+      ['Build date', buildDate],
+      ['Release channel', channel],
+      ['PAX engine', engineStatus],
+      ['Update checking', 'Not available in this build'],
+      ['Engine fingerprint', approvedSha ?? NOT_REPORTED],
+    ];
+    const labelWidth = Math.max(...rows.map(([key]) => key.length)) + 2;
+    const body = rows
+      .map(([key, val]) => (key + ':').padEnd(labelWidth) + val)
+      .join('\n');
+    const text = 'PAX Cookbook \u2014 Support Details\n' + body;
+    try {
+      void navigator.clipboard?.writeText(text);
+    } catch {
+      // Clipboard access can be denied; the details stay visible to copy by hand.
+    }
+    setCopied(true);
+    if (copyResetRef.current !== null) {
+      window.clearTimeout(copyResetRef.current);
+    }
+    copyResetRef.current = window.setTimeout(() => setCopied(false), 2000);
+  }
 
   return (
     <section aria-labelledby="view-updates">
@@ -214,6 +254,13 @@ export function UpdatesWorkspace() {
         <article className="card settings-card">
           <div className="card__top">
             <h3 className="card__title">Support details</h3>
+            <button
+              type="button"
+              className="dvw-btn dvw-btn--ghost dvw-btn--sm"
+              onClick={handleCopySupport}
+            >
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
           </div>
           <p className="card__body">
             Handy details to share if you need help. Nothing here includes a password,
