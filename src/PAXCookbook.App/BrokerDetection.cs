@@ -57,6 +57,32 @@ internal static class BrokerDetection
         return IsOurBroker(port.Value) ? port : null;
     }
 
+    // Best-effort removal of a stale broker.port left behind by a broker that is
+    // no longer answering (a previous crash/kill, or a process that lingered and
+    // was force-terminated). Call this only AFTER detection has confirmed no live
+    // broker is serving. It is safe: a LIVE owner keeps the file open with an
+    // exclusive write lock, so File.Delete throws a sharing violation and is
+    // swallowed — only a truly orphaned file is ever removed. Returns true when a
+    // stale file was deleted. Never throws.
+    internal static bool TryDeleteStalePortFile()
+    {
+        try
+        {
+            string path = PortFilePath();
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+            File.Delete(path);
+            return true;
+        }
+        catch
+        {
+            // Held by a live owner, or a transient IO error: leave it untouched.
+            return false;
+        }
+    }
+
     // Probe GET http://127.0.0.1:{port}/api/v1/health and confirm the responder
     // identifies as THIS application. Loopback-only, short timeout, no token
     // (health is unauthenticated by design), no redirects followed.

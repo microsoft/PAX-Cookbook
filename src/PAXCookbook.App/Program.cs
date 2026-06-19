@@ -593,6 +593,14 @@ internal static class Program
                 Environment.Exit(attachExit);
                 return attachExit;
             }
+
+            // No live broker answered. Best-effort: remove a stale broker.port
+            // (a dead port advertised by a previously crashed/killed/force-exited
+            // broker) so it neither misleads another reader nor interferes with
+            // this launch taking clean ownership when it starts its own broker
+            // below. A live owner keeps an exclusive write lock, so this no-ops
+            // unless the file is truly orphaned.
+            BrokerDetection.TryDeleteStalePortFile();
         }
         else if (headlessDaemon)
         {
@@ -606,6 +614,10 @@ internal static class Program
                 Console.WriteLine("X2V_ROLE=daemon-redundant-exit");
                 return 0;
             }
+
+            // No live broker: clear a stale port file so this daemon takes clean
+            // ownership below instead of trusting an orphaned advertisement.
+            BrokerDetection.TryDeleteStalePortFile();
         }
 
         // Engine acquisition anchor. The managed PAX engine and its

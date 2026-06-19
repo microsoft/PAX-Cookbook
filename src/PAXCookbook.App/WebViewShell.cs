@@ -383,6 +383,39 @@ internal static class WebViewShell
         // turned into a modal prompt instead of an immediate exit.
         bool fullClose = false;
 
+        // Bounded close watchdog. A full close disposes the embedded WebView2 on
+        // the UI thread; if that dispose ever wedges (a known WebView2 ↔
+        // in-process loopback-socket hazard), Application.Run never returns, the
+        // graceful teardown + Environment.Exit in Program never run, and this
+        // process lingers holding the single-instance mutex. The next launch then
+        // finds the mutex held, signals a restore for a window that is already
+        // gone, and exits with NO window — the "must reinstall to reopen" failure.
+        // Arming this bounded background watchdog on the first full-close request
+        // guarantees the process terminates even if the UI thread is wedged, so a
+        // relaunch always gets a fresh instance. 12s comfortably exceeds the
+        // graceful teardown (WebView2 dispose + the 5s-capped broker stop in
+        // Program), so it only ever fires on a genuine hang. Background thread so
+        // it runs regardless of the UI thread's state.
+        const int CloseWatchdogMs = 12000;
+        int closeWatchdogArmed = 0;
+        void ArmCloseWatchdog()
+        {
+            if (Interlocked.Exchange(ref closeWatchdogArmed, 1) != 0) { return; }
+            var watchdog = new Thread(() =>
+            {
+                try { Thread.Sleep(CloseWatchdogMs); } catch { /* ignore */ }
+                // Still alive after the bounded window: the graceful teardown did
+                // not complete. Force a clean process exit so no lingering process
+                // holds the single-instance mutex or the broker port file.
+                try { Environment.Exit(0); } catch { /* nothing else to do */ }
+            })
+            {
+                IsBackground = true,
+                Name = "PAXCookbook.CloseWatchdog",
+            };
+            watchdog.Start();
+        }
+
         // System-tray presence. The window can be hidden to the tray (the close
         // modal's Minimize to tray choice) while the Cookbook server keeps
         // running so bakes continue. The tray icon stays visible the whole time
@@ -442,6 +475,7 @@ internal static class WebViewShell
         void RequestFullClose()
         {
             fullClose = true;
+            ArmCloseWatchdog();
             try { form.Close(); }
             catch { /* Non-fatal: the form may already be closing. */ }
         }
@@ -458,6 +492,7 @@ internal static class WebViewShell
         {
             if (fullClose)
             {
+                ArmCloseWatchdog();
                 try { web.Dispose(); }
                 catch { /* Non-fatal: best-effort teardown of the embedded control. */ }
                 return;
@@ -472,6 +507,7 @@ internal static class WebViewShell
             }
 
             // Web layer not ready yet — allow the close and tear down.
+            ArmCloseWatchdog();
             try { web.Dispose(); }
             catch { /* Non-fatal: best-effort teardown of the embedded control. */ }
         };
