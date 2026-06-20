@@ -104,18 +104,77 @@
     // Footer status summary mirrors the same read-only rail signals in the
     // full-width strip beneath the workspace. The dot tone follows overall
     // health; the text never exposes a folder path or triggers any action.
+    //
+    // The latest health-derived state is remembered so the "Update available"
+    // overlay (set by the embedded app's startup check) and the health state
+    // never clobber each other.
+    var lastFooterText = '';
+    var lastFooterTone = 'ok';
+    var updateAvailable = false;
+
     function setFooterState(text, tone) {
-        setText('app-footer-state', text);
+        lastFooterText = text;
+        lastFooterTone = tone || 'ok';
+        renderFooter();
+    }
+
+    // Navigate the integrated shell to the Updates page via its own hash router.
+    function openUpdatesSection() {
+        try { window.location.hash = '#/updates'; } catch (e) { /* no-op */ }
+    }
+
+    // Render the footer status. When an update is available it takes over with a
+    // distinct orange dot and a clickable "Update available" reminder that opens
+    // the Updates page; otherwise it shows the latest health state. The overlay
+    // persists for the whole session and is never cleared by a health poll -- a
+    // restart (an applied update relaunches the app) is what resets it.
+    function renderFooter() {
+        var state = document.getElementById('app-footer-state');
         var dot = document.getElementById('app-footer-dot');
         if (dot) {
-            dot.classList.remove('is-warning', 'is-danger');
-            if (tone === 'warning') {
-                dot.classList.add('is-warning');
-            } else if (tone === 'danger') {
-                dot.classList.add('is-danger');
+            dot.classList.remove('is-warning', 'is-danger', 'is-update');
+        }
+        if (updateAvailable) {
+            if (state) {
+                state.textContent = 'Update available';
+                state.classList.add('app-footer-state--link');
+                state.setAttribute('role', 'link');
+                state.setAttribute('tabindex', '0');
+                state.setAttribute('title', 'Open the Updates page');
+                state.onclick = openUpdatesSection;
+                state.onkeydown = function (e) {
+                    if (e && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault();
+                        openUpdatesSection();
+                    }
+                };
             }
+            if (dot) { dot.classList.add('is-update'); }
+            return;
+        }
+        if (state) {
+            if (lastFooterText) { state.textContent = lastFooterText; }
+            state.classList.remove('app-footer-state--link');
+            state.removeAttribute('role');
+            state.removeAttribute('tabindex');
+            state.removeAttribute('title');
+            state.onclick = null;
+            state.onkeydown = null;
+        }
+        if (dot) {
+            if (lastFooterTone === 'warning') { dot.classList.add('is-warning'); }
+            else if (lastFooterTone === 'danger') { dot.classList.add('is-danger'); }
         }
     }
+
+    // Exposed to the embedded React app (via window.parent) so its startup
+    // update-check can light the footer's persistent "Update available"
+    // reminder. Dismissing the startup modal does NOT clear it; only a restart
+    // (after applying the update) does.
+    window.paxShellSetUpdateAvailable = function (v) {
+        updateAvailable = !!v;
+        renderFooter();
+    };
 
     // Footer PAX value shows the BUNDLED engine version that ships with this
     // app -- the same value the Settings cards and About section present

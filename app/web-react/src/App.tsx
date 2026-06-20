@@ -13,7 +13,7 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactEl
 import { SHELL_SECTIONS } from './shell/sections';
 import { consultNavigationGuard } from './shell/navigationGuard';
 import { shellSectionHash, type ShellSectionId } from './shell/shellNav';
-import { setUpdatesBadge, requestShellSection } from './shell/shellNav';
+import { setUpdatesBadge, requestShellSection, setUpdateAvailableStatus } from './shell/shellNav';
 import {
   clearImportTicketFromUrl,
   consumeImport,
@@ -127,6 +127,10 @@ function App() {
       const hasUpdates =
         result.status === 'updates-available' && result.components.length > 0;
       setUpdatesBadge(hasUpdates);
+      // Light the persistent bottom-left "Update available" status (orange dot +
+      // clickable reminder). Stays for the session until an applied update
+      // restarts the app; "Not now" on the startup modal does NOT clear it.
+      setUpdateAvailableStatus(hasUpdates);
       autoUpdateHasUpdatesRef.current = hasUpdates;
       autoUpdateDoneRef.current = true;
     });

@@ -4350,9 +4350,26 @@ body.ux-redesign .app-footer-dot {
 }
 body.ux-redesign .app-footer-dot.is-warning { background: var(--ux-status-warning); }
 body.ux-redesign .app-footer-dot.is-danger  { background: var(--ux-status-danger); }
+/* Update-available: a distinct warm orange, separate from the amber warning. */
+body.ux-redesign .app-footer-dot.is-update  { background: #e67e22; }
 body.ux-redesign .app-footer-state {
     color: var(--ux-text-primary);
     font-weight: 500;
+}
+/* "Update available" is a subtle clickable reminder (not an error) that opens
+   the Updates page. Underline on hover/focus; pointer cursor; never red. */
+body.ux-redesign .app-footer-state--link {
+    cursor: pointer;
+    color: #b8651b;
+}
+body.ux-redesign .app-footer-state--link:hover,
+body.ux-redesign .app-footer-state--link:focus-visible {
+    text-decoration: underline;
+}
+body.ux-redesign .app-footer-state--link:focus-visible {
+    outline: 2px solid #e67e22;
+    outline-offset: 2px;
+    border-radius: 3px;
 }
 body.ux-redesign .app-footer-sep { color: var(--ux-border-strong); }
 body.ux-redesign .app-footer-meta { color: var(--ux-text-muted); }

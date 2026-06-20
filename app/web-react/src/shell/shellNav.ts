@@ -97,6 +97,29 @@ export function setUpdatesBadge(show: boolean): void {
   }
 }
 
+/**
+ * Light (or clear) the legacy shell's bottom-left status bar "Update available"
+ * reminder. The startup update-check turns it on; it persists for the whole
+ * session (dismissing the startup modal does NOT clear it) until a restart after
+ * an applied update. Same-origin parent bridge, guarded so a standalone render —
+ * or an older shell without the bridge — is a harmless no-op.
+ */
+export function setUpdateAvailableStatus(show: boolean): void {
+  if (!isEmbedded()) {
+    return;
+  }
+  try {
+    const fn = (window.parent as unknown as {
+      paxShellSetUpdateAvailable?: (v: boolean) => void;
+    }).paxShellSetUpdateAvailable;
+    if (typeof fn === 'function') {
+      fn(show);
+    }
+  } catch {
+    // Cross-origin or detached parent — nothing we can safely do.
+  }
+}
+
 /** Open the legacy shell's help panel by activating its existing button. */
 export function openShellHelp(): void {
   if (!isEmbedded()) {
