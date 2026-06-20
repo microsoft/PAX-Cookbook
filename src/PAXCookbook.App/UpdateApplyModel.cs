@@ -55,11 +55,18 @@ internal static class UpdateApplyModel
 
         try
         {
+            // UseShellExecute=true launches the updater THROUGH the shell, so it
+            // is re-parented away from this broker. That matters: the updater
+            // (via the installer's IAppStopper) stops every PAX Cookbook process,
+            // and if the updater were a child of this broker, that process-tree
+            // stop would kill the updater itself mid-update. Detaching lets the
+            // updater outlive the broker it is replacing. The window is hidden so
+            // no console flashes.
             var psi = new ProcessStartInfo
             {
                 FileName = dotnet,
-                UseShellExecute = false,
-                CreateNoWindow = true,
+                UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
                 WorkingDirectory = installRoot,
             };
             psi.ArgumentList.Add(setupDll);
@@ -67,6 +74,9 @@ internal static class UpdateApplyModel
             psi.ArgumentList.Add("--quiet");
 
             Process? proc = Process.Start(psi);
+            LogApply(installRoot, proc is null
+                ? "update launch returned null process"
+                : $"update launched (pid={proc.Id}): \"{dotnet}\" \"{setupDll}\" update --quiet");
             if (proc is null)
             {
                 return (500, new
@@ -85,12 +95,32 @@ internal static class UpdateApplyModel
         }
         catch (Exception ex)
         {
+            LogApply(installRoot, "update launch FAILED: " + ex.Message);
             return (500, new
             {
                 error = "updater_launch_failed",
                 message = "Could not start the PAX Cookbook updater.",
                 detail = ex.Message,
             });
+        }
+    }
+
+    // Best-effort append-only log so an update launch can be diagnosed from disk
+    // even though the app closes seconds later. Never throws.
+    private static void LogApply(string installRoot, string line)
+    {
+        try
+        {
+            string dir = Path.Combine(installRoot, "Logs");
+            Directory.CreateDirectory(dir);
+            string stamp = DateTime.UtcNow.ToString("o");
+            File.AppendAllText(
+                Path.Combine(dir, "update-apply.log"),
+                $"[{stamp}] {line}{Environment.NewLine}");
+        }
+        catch
+        {
+            /* logging is best-effort */
         }
     }
 }

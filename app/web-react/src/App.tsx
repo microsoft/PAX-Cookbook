@@ -126,16 +126,34 @@ function App() {
   }, []);
   const handleUpdateNow = () => {
     setUpdateModal((m) => ({ ...m, applying: true, error: null }));
+    // Safety net: a successful apply closes the app within a few seconds (the
+    // installer stops it to replace files). If it has NOT closed after 60s, the
+    // update almost certainly failed silently — surface a clear, recoverable
+    // message instead of an indefinite spinner.
+    const timeoutId = window.setTimeout(() => {
+      setUpdateModal((m) =>
+        m.applying
+          ? {
+              ...m,
+              applying: false,
+              error:
+                'Update may have failed. Try again, or reinstall manually from the PAX Cookbook GitHub Release.',
+            }
+          : m,
+      );
+    }, 60000);
     void (async () => {
       const res = await applyUpdate();
       if (!res.ok) {
+        window.clearTimeout(timeoutId);
         setUpdateModal((m) => ({
           ...m,
           applying: false,
           error: 'Could not start the update. Make sure you are online, then try again.',
         }));
       }
-      // On success the installer closes the app shortly; leave "Updating\u2026".
+      // On success (202) the installer closes the app shortly; leave
+      // "Updating\u2026" until then, with the 60s timeout as the backstop.
     })();
   };
   const handleUpdateLater = () => {

@@ -152,6 +152,25 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
 
   const components: UpdateComponent[] = [];
 
+  // Diagnostics — visible in the dev console so a mis-compare can be traced
+  // (the values that drive "installed" vs "remote"). No secrets are logged.
+  try {
+    console.info('[pax-update-check]', {
+      installedApp,
+      remoteApp,
+      installedPayloadSha,
+      remotePayloadSha,
+      installedBuildTs,
+      remoteBuiltAt,
+      installedEngineVer,
+      remoteEngineVer,
+      installedEngineSha,
+      remoteEngineSha,
+    });
+  } catch {
+    /* console may be unavailable */
+  }
+
   // App tier-1: version. The payload also carries the installed Setup DLL, so a
   // payload change is an app change.
   if (isNewer(remoteApp, installedApp)) {
@@ -161,27 +180,25 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       toVersion: remoteApp,
       newBuildOnly: false,
     });
-  } else if (sameVersion(remoteApp, installedApp)) {
-    // Tier-2: same version — prefer the exact payload SHA the installer recorded;
-    // fall back to the build timestamp on installs that predate SHA recording.
-    let rebuild = false;
-    if (installedPayloadSha) {
-      rebuild =
-        !!remotePayloadSha &&
-        installedPayloadSha.toLowerCase() !== remotePayloadSha.toLowerCase();
-    } else {
-      rebuild = !!installedBuildTs && !!remoteBuiltAt && installedBuildTs !== remoteBuiltAt;
-    }
-    if (rebuild) {
-      components.push({
-        name: 'PAX Cookbook app',
-        fromVersion: installedApp,
-        toVersion: remoteApp,
-        newBuildOnly: true,
-        fromBuild: installedBuildTs,
-        toBuild: remoteBuiltAt,
-      });
-    }
+  } else if (
+    sameVersion(remoteApp, installedApp) &&
+    !!installedPayloadSha &&
+    !!remotePayloadSha &&
+    installedPayloadSha.toLowerCase() !== remotePayloadSha.toLowerCase()
+  ) {
+    // Same version, but the installer-recorded payload SHA differs — a real
+    // same-version rebuild. We ONLY trust the recorded payload SHA here; the
+    // build-timestamp fallback was removed because the shipped VERSION.json
+    // timestamp and versions.json builtAtUtc can come from different sources,
+    // which produced false "new build available" prompts on a fresh install.
+    // When the payload SHA has not been recorded yet (installs predating it),
+    // a same-version rebuild is simply not flagged until the next version bump.
+    components.push({
+      name: 'PAX Cookbook app',
+      fromVersion: installedApp,
+      toVersion: remoteApp,
+      newBuildOnly: true,
+    });
   }
 
   // Engine tier-1: version; tier-2: SHA (known on both sides).
