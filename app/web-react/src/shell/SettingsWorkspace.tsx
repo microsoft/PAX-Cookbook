@@ -531,6 +531,12 @@ export function SettingsWorkspace() {
   const buildDate = formatBuildTimestamp(version?.buildTimestamp ?? null) ?? NOT_REPORTED;
 
   const approvedSha = engine?.approvedSha256 ?? version?.bundledPax.sha256 ?? null;
+  // All displayed SHAs must be lowercase; null/empty -> null.
+  const engineSha = approvedSha && approvedSha.trim() ? approvedSha.trim().toLowerCase() : null;
+  const installedPayloadSha =
+    version?.installedPayloadSha256 && version.installedPayloadSha256.trim()
+      ? version.installedPayloadSha256.trim().toLowerCase()
+      : null;
   const approvedVersion =
     engine?.approvedVersion ?? version?.bundledPax.version ?? NOT_REPORTED;
   const engineStatus = engineStatusLabel(phase, engine);
@@ -673,12 +679,25 @@ export function SettingsWorkspace() {
             </div>
             <div className="dvw-keys__props">
               <div className="dvw-keys__prop">
+                <span className="dvw-keys__prop-label">App fingerprint (SHA-256)</span>
+                <div className="dvw-keys__prop-value">
+                  {installedPayloadSha ? (
+                    <>
+                      <code className="dvw-keys__mono">{installedPayloadSha}</code>
+                      <CopyButton text={installedPayloadSha} label="Copy app fingerprint" />
+                    </>
+                  ) : (
+                    <span className="dvw-keys__not-set">Not recorded</span>
+                  )}
+                </div>
+              </div>
+              <div className="dvw-keys__prop">
                 <span className="dvw-keys__prop-label">Engine fingerprint (SHA-256)</span>
                 <div className="dvw-keys__prop-value">
-                  {approvedSha ? (
+                  {engineSha ? (
                     <>
-                      <code className="dvw-keys__mono">{approvedSha}</code>
-                      <CopyButton text={approvedSha} label="Copy engine fingerprint" />
+                      <code className="dvw-keys__mono">{engineSha}</code>
+                      <CopyButton text={engineSha} label="Copy engine fingerprint" />
                     </>
                   ) : (
                     <span className="dvw-keys__not-set">{NOT_REPORTED}</span>

@@ -190,14 +190,19 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
     /* console may be unavailable */
   }
 
-  // App update? A version bump, or a same-version rebuild detected via the
-  // installer-recorded payload SHA.
+  // App update? A version bump, or — at the SAME version — a different payload
+  // SHA. If the installed payload SHA is UNKNOWN (installed-skus.json missing or
+  // empty), we cannot verify the build is current, so we report an update
+  // available rather than silently claiming "up to date" (which also self-heals:
+  // applying the update makes the installer record the SHA). All SHA compares
+  // are case-insensitive.
+  const appVersionSame =
+    !isNewer(remoteApp, installedApp) && sameVersion(remoteApp, installedApp);
   const appNewBuildOnly =
-    !isNewer(remoteApp, installedApp) &&
-    sameVersion(remoteApp, installedApp) &&
-    !!installedPayloadSha &&
+    appVersionSame &&
     !!remotePayloadSha &&
-    installedPayloadSha.toLowerCase() !== remotePayloadSha.toLowerCase();
+    (!installedPayloadSha ||
+      installedPayloadSha.toLowerCase() !== remotePayloadSha.toLowerCase());
   const appHasUpdate = isNewer(remoteApp, installedApp) || appNewBuildOnly;
 
   // Engine update? Only once the engine is actually acquired — on a fresh

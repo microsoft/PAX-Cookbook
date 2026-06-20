@@ -3236,19 +3236,35 @@ internal static class Program
 
     // The SHA-256 of the payload zip this build was installed from, recorded by
     // the installer in <installRoot>\installed-skus.json (the install root, the
-    // parent of appRoot, alongside install-state.json). Returns null when the
-    // file is absent (installs predating the self-update feature) or unreadable;
-    // the updater then falls back to version comparison.
+    // parent of appRoot, alongside install-state.json). Falls back to the legacy
+    // <installRoot>\App\installed-skus.json location used by earlier installers
+    // so a recorded SHA is never missed. Returns null only when no file records
+    // it anywhere; the updater then reports "update available" (it cannot verify
+    // the build is current). Always normalized to lowercase.
     private static string? ReadInstalledPayloadSha(string appRoot)
     {
-        string? installRoot = Path.GetDirectoryName(
-            appRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        string path = Path.Combine(installRoot ?? appRoot, "installed-skus.json");
+        string trimmedAppRoot = appRoot.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string? installRoot = Path.GetDirectoryName(trimmedAppRoot);
+        foreach (string path in new[]
+        {
+            Path.Combine(installRoot ?? appRoot, "installed-skus.json"),
+            Path.Combine(trimmedAppRoot, "installed-skus.json"),
+        })
+        {
+            string? sha = TryReadPayloadSha(path, appRoot);
+            if (sha is not null) { return sha; }
+        }
+        return null;
+    }
+
+    private static string? TryReadPayloadSha(string path, string appRoot)
+    {
         try
         {
             if (!File.Exists(path))
             {
-                LogUpdateCheck(appRoot, $"installed-skus.json NOT FOUND at {path} -> installedPayloadSha256=null (falls back to version-only)");
+                LogUpdateCheck(appRoot, $"installed-skus.json NOT FOUND at {path}");
                 return null;
             }
             using FileStream fs = File.OpenRead(path);
@@ -3257,7 +3273,10 @@ internal static class Program
                 p.ValueKind == System.Text.Json.JsonValueKind.String)
             {
                 string? s = p.GetString();
-                string? result = string.IsNullOrWhiteSpace(s) ? null : s;
+                // Normalize to lowercase here so the app NEVER re-uppercases a
+                // recorded SHA (all displayed/compared SHAs must be lowercase).
+                string? result = string.IsNullOrWhiteSpace(s)
+                    ? null : s.Trim().ToLowerInvariant();
                 LogUpdateCheck(appRoot, $"installed-skus.json read OK at {path} -> installedPayloadSha256={result ?? "null"}");
                 return result;
             }

@@ -123,6 +123,19 @@ function availableVersionText(c: UpdateComponentStatus): string {
   return v ? `Version ${v}` : 'Version \u2014';
 }
 
+// Shown when a fingerprint cannot be read (e.g. installed-skus.json absent).
+const NOT_RECORDED = 'Not recorded';
+
+// Normalize a SHA for display/compare: trimmed + lowercase. Every SHA shown on
+// these pages must be lowercase. Null/empty -> null.
+function normSha(sha: string | null | undefined): string | null {
+  if (!sha) {
+    return null;
+  }
+  const t = sha.trim().toLowerCase();
+  return t.length > 0 ? t : null;
+}
+
 export function UpdatesWorkspace() {
   const [phase, setPhase] = useState<LoadPhase>('loading');
   const [version, setVersion] = useState<RuntimeVersionInfo | null>(null);
@@ -168,6 +181,11 @@ export function UpdatesWorkspace() {
     engine?.approvedVersion ?? version?.bundledPax.version ?? NOT_REPORTED;
   const engineStatus = engineStatusLabel(phase, engine);
 
+  // The installed app payload SHA (lowercase), recorded by the installer in
+  // installed-skus.json. null only when no install recorded it.
+  const installedPayloadSha = normSha(version?.installedPayloadSha256 ?? null);
+  const engineSha = normSha(approvedSha);
+
   // Copy-to-clipboard for the Support details card. The text is built from the
   // same live values the card shows (never hardcoded), so a paste into a support
   // chat, email, or Teams message always reflects this build. "Copied!" reverts
@@ -186,10 +204,11 @@ export function UpdatesWorkspace() {
     const rows: Array<[string, string]> = [
       ['App version', appVersion],
       ['Build date', buildDate],
+      ['App fingerprint', installedPayloadSha ?? NOT_RECORDED],
       ['Release channel', channel],
       ['PAX engine', engineStatus],
-      ['Update checking', 'Automatic + manual'],
-      ['Engine fingerprint', approvedSha ?? NOT_REPORTED],
+      ['Engine fingerprint', engineSha ?? NOT_REPORTED],
+      ['Update checking', 'Not available in this build'],
     ];
     const labelWidth = Math.max(...rows.map(([key]) => key.length)) + 2;
     const body = rows
@@ -358,11 +377,15 @@ export function UpdatesWorkspace() {
                         {fromBuilt ? (
                           <p className="upd-compare__built">Built {fromBuilt}</p>
                         ) : null}
-                        {c.installedSha ? (
-                          <p className="upd-compare__sha" title="SHA-256 fingerprint">
-                            {c.installedSha}
-                          </p>
-                        ) : null}
+                        <p
+                          className={
+                            'upd-compare__sha' +
+                            (normSha(c.installedSha) ? '' : ' upd-compare__sha--missing')
+                          }
+                          title="SHA-256 fingerprint"
+                        >
+                          {normSha(c.installedSha) ?? NOT_RECORDED}
+                        </p>
                       </div>
                       <div
                         className={
@@ -374,11 +397,15 @@ export function UpdatesWorkspace() {
                         {toBuilt ? (
                           <p className="upd-compare__built">Built {toBuilt}</p>
                         ) : null}
-                        {c.availableSha ? (
-                          <p className="upd-compare__sha" title="SHA-256 fingerprint">
-                            {c.availableSha}
-                          </p>
-                        ) : null}
+                        <p
+                          className={
+                            'upd-compare__sha' +
+                            (normSha(c.availableSha) ? '' : ' upd-compare__sha--missing')
+                          }
+                          title="SHA-256 fingerprint"
+                        >
+                          {normSha(c.availableSha) ?? NOT_RECORDED}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -422,6 +449,16 @@ export function UpdatesWorkspace() {
               <dt className="settings-kv__key">Build date</dt>
               <dd className="settings-kv__val">{buildDate}</dd>
             </div>
+            <div className="settings-kv__row">
+              <dt className="settings-kv__key">App fingerprint</dt>
+              <dd className="settings-kv__val">
+                {installedPayloadSha ? (
+                  <code className="settings-mono settings-mono--full">{installedPayloadSha}</code>
+                ) : (
+                  <span className="settings-muted">{NOT_RECORDED}</span>
+                )}
+              </dd>
+            </div>
           </dl>
         </article>
 
@@ -449,8 +486,8 @@ export function UpdatesWorkspace() {
             <div className="settings-kv__row">
               <dt className="settings-kv__key">Fingerprint</dt>
               <dd className="settings-kv__val">
-                {approvedSha ? (
-                  <code className="settings-mono settings-mono--full">{approvedSha}</code>
+                {engineSha ? (
+                  <code className="settings-mono settings-mono--full">{engineSha}</code>
                 ) : (
                   NOT_REPORTED
                 )}
@@ -527,6 +564,16 @@ export function UpdatesWorkspace() {
               <dd className="settings-kv__val">{buildDate}</dd>
             </div>
             <div className="settings-kv__row">
+              <dt className="settings-kv__key">App fingerprint</dt>
+              <dd className="settings-kv__val">
+                {installedPayloadSha ? (
+                  <code className="settings-mono settings-mono--full">{installedPayloadSha}</code>
+                ) : (
+                  <span className="settings-muted">{NOT_RECORDED}</span>
+                )}
+              </dd>
+            </div>
+            <div className="settings-kv__row">
               <dt className="settings-kv__key">Release channel</dt>
               <dd className="settings-kv__val">{channel}</dd>
             </div>
@@ -541,8 +588,8 @@ export function UpdatesWorkspace() {
             <div className="settings-kv__row">
               <dt className="settings-kv__key">Engine fingerprint</dt>
               <dd className="settings-kv__val">
-                {approvedSha ? (
-                  <code className="settings-mono settings-mono--full">{approvedSha}</code>
+                {engineSha ? (
+                  <code className="settings-mono settings-mono--full">{engineSha}</code>
                 ) : (
                   NOT_REPORTED
                 )}
