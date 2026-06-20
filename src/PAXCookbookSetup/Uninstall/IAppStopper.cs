@@ -301,6 +301,33 @@ public sealed class RealAppStopper : IAppStopper
             catch { /* best effort */ }
         }
     }
+
+    // Public probe: is ANY PAX Cookbook process for this install currently
+    // running? Used by the apply-update wait-until-clear loop, which RE-SCANS
+    // (rather than trusting a single snapshot) because module discovery can
+    // transiently miss a process that is exiting or under load.
+    public bool AnyAppProcesses(string installRoot)
+    {
+        var appExe = Path.Combine(installRoot, "App", "bin", ProductConstants.AppExeName);
+        var procs = FindAppProcesses(installRoot, appExe);
+        try { return procs.Count > 0; }
+        finally { foreach (var p in procs) { try { p.Dispose(); } catch { } } }
+    }
+
+    // Public force-kill: terminate (process tree) every PAX Cookbook process for
+    // this install, freshly discovered, and give them a moment to exit. Safe to
+    // call repeatedly. Used by the apply-update wait-until-clear loop.
+    public void KillAppProcesses(string installRoot)
+    {
+        var appExe = Path.Combine(installRoot, "App", "bin", ProductConstants.AppExeName);
+        var procs = FindAppProcesses(installRoot, appExe);
+        try
+        {
+            KillAll(procs);
+            WaitForAllExit(procs, 3_000);
+        }
+        finally { foreach (var p in procs) { try { p.Dispose(); } catch { } } }
+    }
 }
 
 // Test stopper: records invocations and returns a configured result.

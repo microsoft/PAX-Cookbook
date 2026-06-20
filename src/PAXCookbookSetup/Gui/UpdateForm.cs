@@ -3,7 +3,6 @@ using System.Drawing;
 using System.Windows.Forms;
 using PAXCookbook.Shared;
 using PAXCookbook.Shared.ExitCodes;
-using PAXCookbookSetup.Uninstall;
 
 namespace PAXCookbookSetup.Gui;
 
@@ -121,7 +120,7 @@ internal sealed class UpdateForm : Form
         var p = new Panel { Padding = new Padding(24) };
         var heading = new Label
         {
-            Text = "PAX Cookbook has been updated successfully.",
+            Text = "PAX Cookbook has been updated.",
             Location = new Point(24, 36), Size = new Size(470, 56),
             Font = new Font("Segoe UI Semibold", 12F, FontStyle.Bold)
         };
@@ -190,28 +189,21 @@ internal sealed class UpdateForm : Form
             try
             {
                 // 1. Stop ALL PAX Cookbook processes (broker daemon + window) and
-                //    WAIT for them to fully exit FIRST, so no installed file stays
-                //    locked when the copy runs. A still-running app holding
-                //    App\bin is what produced "Installation failed (exit code
-                //    50)". The same module-scanning RealAppStopper used by
-                //    install/uninstall is used here; the app also makes a
-                //    good-faith effort to close itself when it launches us.
-                progress("Closing PAX Cookbook\u2026");
-                var stop = new RealAppStopper().TryStop(_installRoot, 30_000);
-                _log.Write("update-gui-appstop", fields: new Dictionary<string, object?>
-                {
-                    ["invoked"] = stop.Invoked,
-                    ["exeFound"] = stop.ExeFound,
-                    ["exited"] = stop.Exited,
-                    ["detail"] = stop.Detail,
-                });
+                //    do not continue until they are GONE and App\bin is actually
+                //    writable. A still-running app holding App\bin is what
+                //    produced "Installation failed (exit code 50)"; this
+                //    re-scans + force-kills and then waits for the file lock to
+                //    release, so the copy can never hit a locked file. The app
+                //    also hard-exits itself when it launches us (belt and
+                //    suspenders).
+                UpdateAppStop.WaitUntilClear(_installRoot, _log, progress);
 
                 var shellOps = ShellOperationsFactory.Build();
                 // Reuses the proven fresh-install path: download the latest
-                // payload from GitHub (verified against versions.json), stop the
-                // running app (again, as a backstop), copy + verify the new
-                // files. Progress callbacks drive the status line
-                // ("Downloading\u2026", "Installing\u2026", "Finishing up\u2026").
+                // payload from GitHub (verified against versions.json), then copy
+                // + verify the new files (the app is already stopped above).
+                // Progress callbacks drive the status line ("Downloading\u2026",
+                // "Verifying download\u2026", "Installing\u2026", "Finishing up\u2026").
                 result = await WizardInstallRunner.RunAsync(
                     _installRoot, payloadRootOverride: null, progress, _log, shellOps);
             }

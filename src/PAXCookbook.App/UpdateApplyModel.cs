@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading;
 
 namespace PAXCookbook.App;
 
@@ -96,6 +97,30 @@ internal static class UpdateApplyModel
             try { pid = proc.Id; } catch { /* may have already exited */ }
             LogApply(installRoot, $"updater launched OK (pid={pid?.ToString() ?? "unknown"}). "
                 + "The updater wizard will download, stop and replace the app, then show a finish screen.");
+
+            // Hard-exit THIS process shortly after the 202 flushes. The broker
+            // that served this request loads App\bin\PAX Cookbook.dll and so
+            // LOCKS it; the only reliable way to release that lock fast enough
+            // for the updater's copy is to terminate ourselves — Environment.Exit
+            // tears the process down instantly (no graceful Kestrel/WebView2
+            // shutdown that can linger with background threads or a wedged
+            // WebView2 dispose). This is the permanent fix for the recurring
+            // "exit code 50" locked-file failure. A short delay lets the 202
+            // reach the UI first; the detached updater does its own
+            // stop-and-wait-until-clear as a backstop (covering the separate
+            // window process) and re-registers shortcuts/ARP after copying.
+            // Stale broker.port / workspace.lock are handled on the next launch.
+            LogApply(installRoot, "scheduling hard self-exit so App\\bin locks release for the updater");
+            var exitThread = new Thread(() =>
+            {
+                try { Thread.Sleep(700); } catch { /* ignore */ }
+                Environment.Exit(0);
+            })
+            {
+                IsBackground = true,
+                Name = "PAXCookbook.UpdateSelfExit",
+            };
+            exitThread.Start();
 
             return (202, new
             {

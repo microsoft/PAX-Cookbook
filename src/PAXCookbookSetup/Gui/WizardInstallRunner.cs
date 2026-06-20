@@ -98,13 +98,14 @@ public static class WizardInstallRunner
                 string.Equals(src.Origin, "local-cache", StringComparison.Ordinal) ||
                 string.Equals(src.Origin, "downloaded", StringComparison.Ordinal))
             {
+                progress("Verifying download…");
                 var v = PayloadManifestVerifier.Verify(payloadRoot, m);
                 if (!v.Ok)
                     return Fail(SetupExitCodes.InstallFailed,
                         "Installation payload failed verification: " + string.Join("; ", v.Errors));
             }
 
-            progress("Installing application files…");
+            progress("Installing files…");
             var parsed = new ParsedArgs(
                 Verb: "install", InstallRootOverride: installRoot, PayloadRoot: payloadRoot,
                 Force: false, ReinstallSameVersion: false, AllowDowngrade: false,
