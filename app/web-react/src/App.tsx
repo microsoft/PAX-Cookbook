@@ -13,6 +13,7 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactEl
 import { SHELL_SECTIONS } from './shell/sections';
 import { consultNavigationGuard } from './shell/navigationGuard';
 import { shellSectionHash, type ShellSectionId } from './shell/shellNav';
+import { setUpdatesBadge } from './shell/shellNav';
 import {
   clearImportTicketFromUrl,
   consumeImport,
@@ -107,14 +108,14 @@ function App() {
   const autoUpdateCheckedRef = useRef(false);
   useEffect(() => {
     setUpdateResultListener((result) => {
-      if (result.status === 'updates-available' && result.components.length > 0) {
-        setUpdateModal({
-          open: true,
-          components: result.components,
-          applying: false,
-          error: null,
-        });
-      }
+      // The startup auto-check is deliberately NON-intrusive: it never pops the
+      // "Updates available" modal. When an update is found it only lights a
+      // subtle dot on the Settings nav item so the user can open Updates when
+      // ready; the Updates page runs its own check and owns the apply flow. The
+      // dot is cleared when the Updates page is opened.
+      setUpdatesBadge(
+        result.status === 'updates-available' && result.components.length > 0,
+      );
     });
     // Auto-check once on startup. Fire-and-forget: any failure to reach GitHub
     // resolves to a silent skip (no error, no modal).

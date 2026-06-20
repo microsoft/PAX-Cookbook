@@ -629,6 +629,124 @@ button {
   line-height: var(--lh-base);
 }
 
+/* Update-status banner shown at the top of the Updates page. */
+.upd-status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-4) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--c-border, rgba(0, 0, 0, 0.12));
+  border-radius: var(--r-md, 10px);
+  background: var(--c-surface, #fff);
+}
+
+.upd-status__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.upd-status__title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 700;
+  color: var(--c-ink-strong);
+}
+
+.upd-status__sub,
+.upd-status__text {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+  line-height: var(--lh-base);
+}
+
+.upd-status__icon {
+  flex: 0 0 auto;
+  font-size: var(--fs-18);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* Up to date — green callout. */
+.upd-status--ok {
+  border-color: var(--c-green, #1a7f37);
+  background: var(--c-green-soft, rgba(26, 127, 55, 0.08));
+}
+
+.upd-status--ok .upd-status__icon,
+.upd-status--ok .upd-status__title {
+  color: var(--c-green-strong, #1a7f37);
+}
+
+/* Update available — accent callout. */
+.upd-status--avail {
+  border-color: var(--c-blue, #0a6ed1);
+  background: var(--c-blue-soft, rgba(10, 110, 209, 0.08));
+}
+
+/* Couldn't check — soft warning. */
+.upd-status--warn {
+  border-color: var(--c-amber, #b25e02);
+  background: var(--c-amber-soft, rgba(178, 94, 2, 0.08));
+}
+
+.upd-status__list {
+  margin: 0;
+  padding-left: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.upd-status__list-item {
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+  line-height: var(--lh-base);
+}
+
+.upd-status__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-1);
+}
+
+.upd-status__hint {
+  font-size: var(--fs-13);
+  color: var(--c-ink-soft, #57606a);
+}
+
+.upd-status__error {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--c-red-strong, #b42318);
+}
+
+.upd-status__spinner {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--c-border, rgba(0, 0, 0, 0.2));
+  border-top-color: var(--c-blue, #0a6ed1);
+  border-radius: 50%;
+  animation: upd-status-spin 0.7s linear infinite;
+}
+
+@keyframes upd-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upd-status__spinner {
+    animation: none;
+  }
+}
+
 .keys-mode-row {
   flex-direction: column;
   align-items: stretch;

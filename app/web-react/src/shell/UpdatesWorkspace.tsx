@@ -19,8 +19,9 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
-import { runUpdateCheck } from '../host/updateController';
-import { getLastCheckedUtc } from '../host/updateCheck';
+import { checkForUpdates, getLastCheckedUtc, type UpdateComponent } from '../host/updateCheck';
+import { applyUpdate } from '../host/brokerBridge';
+import { setUpdatesBadge } from './shellNav';
 import {
   getRuntimeVersion,
   getPaxEngineState,
@@ -70,6 +71,21 @@ function formatLastCheckedLabel(iso: string | null): string | null {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+// One readable line per available component, e.g. "PAX Cookbook app — new build
+// available" or "PAX engine — 1.11.6 → 1.11.7".
+function updateComponentLabel(c: UpdateComponent): string {
+  if (c.newBuildOnly) {
+    return `${c.name} — new build available`;
+  }
+  if (c.fromVersion && c.toVersion) {
+    return `${c.name} — ${c.fromVersion} → ${c.toVersion}`;
+  }
+  if (c.toVersion) {
+    return `${c.name} — ${c.toVersion}`;
+  }
+  return c.name;
 }
 
 export function UpdatesWorkspace() {
@@ -157,23 +173,72 @@ export function UpdatesWorkspace() {
     copyResetRef.current = window.setTimeout(() => setCopied(false), 2000);
   }
 
-  // Manual update check. The shell owns the "Updates available" modal; here we
-  // only surface the no-update / offline outcome inline and the last-checked
-  // time. The auto-check on startup keeps `lastChecked` fresh on its own.
-  const [checkState, setCheckState] = useState<'idle' | 'checking' | 'uptodate' | 'unavailable'>('idle');
+  // Update check. The Updates page runs its own check (when it opens and on
+  // demand) and shows the result inline — a green "up to date" banner, or the
+  // available update with an Update now button. It calls checkForUpdates
+  // directly (not the shell controller) so it never re-lights the startup nav
+  // dot; opening this page instead CLEARS that dot.
+  const [checkState, setCheckState] =
+    useState<'idle' | 'checking' | 'uptodate' | 'available' | 'unavailable'>('idle');
+  const [components, setComponents] = useState<UpdateComponent[]>([]);
   const [lastChecked, setLastChecked] = useState<string | null>(() => getLastCheckedUtc());
-  async function handleCheckForUpdates() {
+  const [applying, setApplying] = useState(false);
+  const applyingRef = useRef(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  async function runCheck() {
+    setApplyError(null);
     setCheckState('checking');
-    const result = await runUpdateCheck();
+    const result = await checkForUpdates();
     setLastChecked(getLastCheckedUtc());
     if (result.status === 'up-to-date') {
+      setComponents([]);
       setCheckState('uptodate');
-    } else if (result.status === 'unavailable') {
-      setCheckState('unavailable');
+    } else if (result.status === 'updates-available') {
+      setComponents(result.components);
+      setCheckState('available');
     } else {
-      // Updates available — the shell modal takes over; clear inline status.
-      setCheckState('idle');
+      setComponents([]);
+      setCheckState('unavailable');
     }
+  }
+
+  // Auto-check when the page opens, and clear the Settings nav dot — the user is
+  // now looking at Updates.
+  useEffect(() => {
+    setUpdatesBadge(false);
+    void runCheck();
+    return () => {
+      applyingRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleApplyUpdate() {
+    setApplying(true);
+    applyingRef.current = true;
+    setApplyError(null);
+    // Safety net mirroring the shell: a successful apply closes the app within a
+    // few seconds (the installer stops it to replace files). If it has NOT
+    // closed after 60s the update almost certainly failed silently — surface a
+    // clear, recoverable message instead of an indefinite spinner.
+    const timeoutId = window.setTimeout(() => {
+      if (applyingRef.current) {
+        applyingRef.current = false;
+        setApplying(false);
+        setApplyError(
+          'Update may have failed. Try again, or reinstall manually from the PAX Cookbook GitHub Release.',
+        );
+      }
+    }, 60000);
+    const res = await applyUpdate();
+    if (!res.ok) {
+      window.clearTimeout(timeoutId);
+      applyingRef.current = false;
+      setApplying(false);
+      setApplyError('Could not start the update. Make sure you are online, then try again.');
+    }
+    // On success (202) the installer closes the app shortly; leave "Updating…".
   }
   const lastCheckedLabel = formatLastCheckedLabel(lastChecked);
 
@@ -186,6 +251,57 @@ export function UpdatesWorkspace() {
         helpTopic="cookbookUpdates"
         accent="var(--c-slate)"
       />
+
+      {checkState === 'checking' ? (
+        <div className="upd-status upd-status--checking" role="status">
+          <span className="upd-status__spinner" aria-hidden="true" />
+          <span className="upd-status__text">Checking for updates…</span>
+        </div>
+      ) : checkState === 'uptodate' ? (
+        <div className="upd-status upd-status--ok" role="status">
+          <span className="upd-status__icon" aria-hidden="true">✓</span>
+          <div className="upd-status__body">
+            <p className="upd-status__title">PAX Cookbook is up to date</p>
+            <p className="upd-status__sub">
+              Your app (v{appVersion}) and PAX engine (v{approvedVersion}) are current.
+              No updates needed.
+            </p>
+          </div>
+        </div>
+      ) : checkState === 'available' ? (
+        <div className="upd-status upd-status--avail" role="status">
+          <div className="upd-status__body">
+            <p className="upd-status__title">An update is available</p>
+            <ul className="upd-status__list">
+              {components.map((c) => (
+                <li key={c.name} className="upd-status__list-item">
+                  {updateComponentLabel(c)}
+                </li>
+              ))}
+            </ul>
+            {applyError ? <p className="upd-status__error">{applyError}</p> : null}
+            <div className="upd-status__actions">
+              <button
+                type="button"
+                className="dvw-settings__updates-btn"
+                onClick={() => void handleApplyUpdate()}
+                disabled={applying}
+              >
+                {applying ? 'Updating…' : 'Update now'}
+              </button>
+              <span className="upd-status__hint">
+                PAX Cookbook will close to finish updating, then you can reopen it.
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : checkState === 'unavailable' ? (
+        <div className="upd-status upd-status--warn" role="status">
+          <span className="upd-status__text">
+            Couldn&rsquo;t check for updates just now. Make sure you are online, then try again.
+          </span>
+        </div>
+      ) : null}
 
       <div className="card-grid settings-grid">
         <article className="card settings-card">
@@ -256,19 +372,12 @@ export function UpdatesWorkspace() {
             <button
               type="button"
               className="dvw-settings__updates-btn"
-              onClick={() => void handleCheckForUpdates()}
+              onClick={() => void runCheck()}
               disabled={checkState === 'checking'}
             >
               {checkState === 'checking' ? 'Checking\u2026' : 'Check for updates'}
             </button>
           </div>
-          {checkState === 'uptodate' ? (
-            <p className="settings-note">PAX Cookbook is up to date.</p>
-          ) : checkState === 'unavailable' ? (
-            <p className="settings-note">
-              Couldn&rsquo;t check for updates just now. Make sure you are online, then try again.
-            </p>
-          ) : null}
           {lastCheckedLabel ? (
             <p className="settings-note">Last checked: {lastCheckedLabel}</p>
           ) : null}

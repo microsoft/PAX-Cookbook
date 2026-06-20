@@ -536,6 +536,30 @@ internal static class WebViewShell
 
         Directory.CreateDirectory(userDataFolder);
 
+        // Coordinate the FIRST navigation with the window settling into its
+        // final maximized, foreground state. The browser-owned Windows Hello
+        // unlock prompt (raised on the first protected page) is positioned
+        // relative to the foreground window at the instant it is shown. If React
+        // loads and raises that prompt BEFORE the force-show maximize lands, the
+        // system credential dialog is placed against the not-yet-settled window
+        // and then visibly jumps to the corner when the maximize completes a
+        // moment later. Deferring the first navigation until BOTH the WebView2
+        // core is ready AND the window has been force-shown maximized and
+        // activated guarantees React — and the Hello prompt — only ever loads
+        // against the final window. Whichever of the two completes last performs
+        // the single navigation. Both run on the UI thread; the interlock is a
+        // belt-and-suspenders guard against a double navigation.
+        bool webCoreReady = false;
+        bool windowSettled = false;
+        int firstNavigationDone = 0;
+        void TryStartFirstNavigation()
+        {
+            if (!webCoreReady || !windowSettled) { return; }
+            if (Interlocked.Exchange(ref firstNavigationDone, 1) != 0) { return; }
+            try { web.CoreWebView2?.Navigate(url); }
+            catch { /* Non-fatal: a navigation failure leaves the shell blank; the user can relaunch. */ }
+        }
+
         form.Load += async (_, _) =>
         {
             try
@@ -597,7 +621,12 @@ internal static class WebViewShell
                     }
                 };
 
-                web.CoreWebView2.Navigate(url);
+                // Do not navigate here directly. The first navigation is gated
+                // on the window having reached its final maximized, foreground
+                // state (see TryStartFirstNavigation) so the Windows Hello unlock
+                // prompt is never positioned against a mid-maximize window.
+                webCoreReady = true;
+                TryStartFirstNavigation();
             }
             catch (Exception ex)
             {
@@ -787,6 +816,15 @@ internal static class WebViewShell
             {
                 // Non-fatal: force-show is a best-effort correction.
             }
+
+            // The window has now reached its final maximized, foreground state
+            // (or the best-effort attempt has completed). Release the deferred
+            // first navigation so React — and the Windows Hello unlock prompt it
+            // raises — only loads against the settled window. Set unconditionally
+            // even if a show call above threw, so a transient failure can never
+            // leave the shell permanently blank.
+            windowSettled = true;
+            TryStartFirstNavigation();
         };
         forceShowTimer.Start();
 

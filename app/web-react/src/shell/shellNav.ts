@@ -76,6 +76,27 @@ export function requestShellSection(section: ShellSectionId): void {
   }
 }
 
+/**
+ * Show or hide the small "updates available" dot on the legacy shell's Settings
+ * nav item. The startup auto-check turns it on (a non-intrusive cue that draws
+ * the user toward Updates); opening the Updates page turns it off. Same-origin
+ * parent-DOM poke, guarded so a standalone render — or a shell without the badge
+ * element — is a harmless no-op.
+ */
+export function setUpdatesBadge(show: boolean): void {
+  if (!isEmbedded()) {
+    return;
+  }
+  try {
+    const badge = window.parent.document.getElementById('nav-settings-badge');
+    if (badge) {
+      badge.hidden = !show;
+    }
+  } catch {
+    // Cross-origin or detached parent — nothing we can safely do.
+  }
+}
+
 /** Open the legacy shell's help panel by activating its existing button. */
 export function openShellHelp(): void {
   if (!isEmbedded()) {

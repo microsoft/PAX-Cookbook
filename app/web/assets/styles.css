@@ -4569,6 +4569,19 @@ body.ux-redesign .nav-icon {
 body.ux-redesign .nav-item:hover .nav-icon { color: var(--ux-nav-active-text); }
 body.ux-redesign .nav-label { white-space: nowrap; }
 
+/* "Updates available" cue on the Settings nav item. The embedded React app
+   lights it from its startup update check and clears it when the Updates page
+   is opened (see setUpdatesBadge). Hidden by default. */
+body.ux-redesign .nav-item .nav-badge {
+    margin-left: auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ux-nav-accent, #0a6ed1);
+    flex-shrink: 0;
+}
+.nav-badge[hidden] { display: none; }
+
 /* Rail foot block. Holds only the decorative kitchen art that anchors the
    foot of the rail; there is no separator line and no version or history
    markers. It sits directly below the update link as one cohesive footer. */

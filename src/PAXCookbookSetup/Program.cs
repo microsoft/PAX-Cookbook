@@ -344,6 +344,28 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
             }
         }
 
+        // Stale-state safety for upgrades / install-over-existing: remove any
+        // pre-existing installed-skus.json BEFORE running the verb. It is a
+        // generated sidecar (never part of the payload/manifest), so an old one
+        // from a prior install would otherwise survive the copy untouched. The
+        // writer below rewrites it with the SHA of the payload just installed.
+        // Guaranteeing it is either freshly-correct or absent (never stale)
+        // means the in-app updater can never read a stale SHA and falsely report
+        // "updates available" after a clean install over an existing one.
+        if (parsed.Verb == "install" || parsed.Verb == "update" || parsed.Verb == "repair")
+        {
+            try
+            {
+                string staleSkus = Path.Combine(installRoot, "App", "installed-skus.json");
+                if (File.Exists(staleSkus)) File.Delete(staleSkus);
+            }
+            catch (Exception ex)
+            {
+                log.Write("installed-skus-prewipe-failed", "warn",
+                    new Dictionary<string, object?> { ["detail"] = ex.Message });
+            }
+        }
+
         int verbRc = parsed.Verb switch
         {
             "install" => InstallVerb.Run(parsed, m, payloadRoot, installRoot, log,
@@ -356,13 +378,20 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
 
         // Record what was installed (payload SHA + app version) for the in-app
         // self-updater. Best-effort: a failure never fails an otherwise-good
-        // install/update.
+        // install/update. This is the LAST write into the install tree, so the
+        // SHA it records always reflects the payload that was just copied.
         if (verbRc == SetupExitCodes.Ok &&
             (parsed.Verb == "install" || parsed.Verb == "update" || parsed.Verb == "repair"))
         {
             try
             {
                 InstalledSkusWriter.Write(installRoot, m.AppVersion, downloadedZip);
+                log.Write("installed-skus-written", fields: new Dictionary<string, object?>
+                {
+                    ["appVersion"] = m.AppVersion,
+                    ["payloadSource"] = src.Origin,
+                    ["payloadShaRecorded"] = downloadedZip is not null,
+                });
             }
             catch (Exception ex)
             {
