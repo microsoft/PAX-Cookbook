@@ -3240,24 +3240,52 @@ internal static class Program
     // updater then falls back to version/build-timestamp comparison.
     private static string? ReadInstalledPayloadSha(string appRoot)
     {
+        string path = Path.Combine(appRoot, "installed-skus.json");
         try
         {
-            string path = Path.Combine(appRoot, "installed-skus.json");
-            if (!File.Exists(path)) { return null; }
+            if (!File.Exists(path))
+            {
+                LogUpdateCheck(appRoot, $"installed-skus.json NOT FOUND at {path} -> installedPayloadSha256=null (falls back to version-only)");
+                return null;
+            }
             using FileStream fs = File.OpenRead(path);
             using var doc = System.Text.Json.JsonDocument.Parse(fs);
             if (doc.RootElement.TryGetProperty("payloadSha256", out var p) &&
                 p.ValueKind == System.Text.Json.JsonValueKind.String)
             {
                 string? s = p.GetString();
-                return string.IsNullOrWhiteSpace(s) ? null : s;
+                string? result = string.IsNullOrWhiteSpace(s) ? null : s;
+                LogUpdateCheck(appRoot, $"installed-skus.json read OK at {path} -> installedPayloadSha256={result ?? "null"}");
+                return result;
             }
+            LogUpdateCheck(appRoot, $"installed-skus.json at {path} has no payloadSha256 -> null");
+        }
+        catch (Exception ex)
+        {
+            LogUpdateCheck(appRoot, $"installed-skus.json read FAILED at {path}: {ex.Message} -> null");
+        }
+        return null;
+    }
+
+    // Best-effort append-only diagnostic for the in-app update check, so a
+    // mis-compare can be traced from disk (the React side also logs to the
+    // console). Never throws.
+    private static void LogUpdateCheck(string appRoot, string line)
+    {
+        try
+        {
+            string? installRoot = Path.GetDirectoryName(
+                appRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            string dir = Path.Combine(installRoot ?? appRoot, "Logs");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(
+                Path.Combine(dir, "update-check.log"),
+                $"[{DateTime.UtcNow:o}] {line}{Environment.NewLine}");
         }
         catch
         {
-            // Absent or unreadable — treated as unknown.
+            /* logging is best-effort */
         }
-        return null;
     }
 
     // GET /api/v1/setup/acquire-pax/state is served by EngineAcquisition

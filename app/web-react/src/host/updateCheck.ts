@@ -201,26 +201,32 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
     });
   }
 
-  // Engine tier-1: version; tier-2: SHA (known on both sides).
-  if (isNewer(remoteEngineVer, installedEngineVer)) {
-    components.push({
-      name: 'PAX engine',
-      fromVersion: installedEngineVer,
-      toVersion: remoteEngineVer,
-      newBuildOnly: false,
-    });
-  } else if (
-    sameVersion(remoteEngineVer, installedEngineVer) &&
-    !!remoteEngineSha &&
-    !!installedEngineSha &&
-    remoteEngineSha.toLowerCase() !== installedEngineSha.toLowerCase()
-  ) {
-    components.push({
-      name: 'PAX engine',
-      fromVersion: installedEngineVer,
-      toVersion: remoteEngineVer,
-      newBuildOnly: true,
-    });
+  // Engine tier-1: version; tier-2: SHA. Only compared once the engine is
+  // actually acquired — on a fresh install the engine is not yet acquired, and
+  // the engine is immutable per release anyway (its SHA always matches the
+  // published one), so skipping it here removes any chance of a false positive.
+  const engineAcquired = eng.ok && eng.data ? eng.data.isAcquired : false;
+  if (engineAcquired) {
+    if (isNewer(remoteEngineVer, installedEngineVer)) {
+      components.push({
+        name: 'PAX engine',
+        fromVersion: installedEngineVer,
+        toVersion: remoteEngineVer,
+        newBuildOnly: false,
+      });
+    } else if (
+      sameVersion(remoteEngineVer, installedEngineVer) &&
+      !!remoteEngineSha &&
+      !!installedEngineSha &&
+      remoteEngineSha.toLowerCase() !== installedEngineSha.toLowerCase()
+    ) {
+      components.push({
+        name: 'PAX engine',
+        fromVersion: installedEngineVer,
+        toVersion: remoteEngineVer,
+        newBuildOnly: true,
+      });
+    }
   }
 
   return {

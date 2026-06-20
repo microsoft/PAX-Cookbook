@@ -5,13 +5,13 @@
     "builtAtUtc": "2026-05-22T00:00:00Z",
     "payload": {
       "filename": "PAX_Cookbook_Payload.zip",
-      "sha256": "cae02c8f91cde1f35e65529c4fcab2a52cb09c18cf32a57bcf351737a42a3d3c",
-      "size": 20346210
+      "sha256": "3ab28c481c6c76ce58e97b7115479172086688f331809371f70445d9fc9b234f",
+      "size": 20346714
     },
     "setup": {
       "filename": "PAX_Cookbook_Setup.exe",
-      "sha256": "1ab610398edcee98502c3ec97b8928389e4f05dd8766aa54f970f6f6334b63d8",
-      "size": 72150738
+      "sha256": "a01f1449bd4e6295e60412d4c61b1be573c3370638a6ee81b2abd3aab330afd4",
+      "size": 72150728
     },
     "engine": {
       "version": "1.11.7",

@@ -52,16 +52,25 @@ internal static class UpdateApplyModel
         }
 
         string dotnet = DotNetLaunch.DotNetExePath();
+        string cmd = $"\"{dotnet}\" \"{setupDll}\" install --quiet";
+        LogApply(installRoot, "apply requested; launching updater: " + cmd);
 
         try
         {
+            // Run the INSTALL verb, not UPDATE: the update verb no-ops on a
+            // same-version target (every self-update is 1.0.0 -> 1.0.0, only the
+            // payload SHA changes) and never stops the running app. The install
+            // verb always stops every PAX Cookbook process (IAppStopper) and
+            // copies the freshly downloaded payload over the install — exactly
+            // the "install over a running app" path. --quiet keeps it
+            // non-interactive and skips the prerequisite wizard.
+            //
             // UseShellExecute=true launches the updater THROUGH the shell, so it
-            // is re-parented away from this broker. That matters: the updater
-            // (via the installer's IAppStopper) stops every PAX Cookbook process,
-            // and if the updater were a child of this broker, that process-tree
-            // stop would kill the updater itself mid-update. Detaching lets the
-            // updater outlive the broker it is replacing. The window is hidden so
-            // no console flashes.
+            // is re-parented away from this broker. That matters: the installer
+            // stops every PAX Cookbook process (a process-tree kill), and if the
+            // updater were a child of this broker it would kill itself
+            // mid-update. Detaching lets it outlive the broker it is replacing.
+            // The window is hidden so no console flashes.
             var psi = new ProcessStartInfo
             {
                 FileName = dotnet,
@@ -70,21 +79,24 @@ internal static class UpdateApplyModel
                 WorkingDirectory = installRoot,
             };
             psi.ArgumentList.Add(setupDll);
-            psi.ArgumentList.Add("update");
+            psi.ArgumentList.Add("install");
             psi.ArgumentList.Add("--quiet");
 
             Process? proc = Process.Start(psi);
-            LogApply(installRoot, proc is null
-                ? "update launch returned null process"
-                : $"update launched (pid={proc.Id}): \"{dotnet}\" \"{setupDll}\" update --quiet");
             if (proc is null)
             {
+                LogApply(installRoot, "ERROR: Process.Start returned null");
                 return (500, new
                 {
                     error = "updater_launch_failed",
                     message = "Could not start the PAX Cookbook updater.",
                 });
             }
+
+            int? pid = null;
+            try { pid = proc.Id; } catch { /* may have already exited */ }
+            LogApply(installRoot, $"updater launched OK (pid={pid?.ToString() ?? "unknown"}). "
+                + "The installer will now stop and replace the app.");
 
             return (202, new
             {
@@ -95,7 +107,7 @@ internal static class UpdateApplyModel
         }
         catch (Exception ex)
         {
-            LogApply(installRoot, "update launch FAILED: " + ex.Message);
+            LogApply(installRoot, "ERROR: updater launch threw: " + ex.Message);
             return (500, new
             {
                 error = "updater_launch_failed",
