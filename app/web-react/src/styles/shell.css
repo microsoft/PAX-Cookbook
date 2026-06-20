@@ -466,6 +466,18 @@ button {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 }
 
+/* Updates page: the remaining three cards (Update checking, Before updating,
+   Support details) sit in a single row, collapsing on narrow widths. */
+.upd-cards-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .upd-cards-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-card {
   display: flex;
   flex-direction: column;

@@ -39,7 +39,6 @@ import {
 
 type LoadPhase = 'loading' | 'ready' | 'error';
 
-const APPROVED_ENGINE_NAME = 'PAX Purview Audit Log Processor';
 const NOT_REPORTED = 'Not reported by this build';
 
 function engineStatusLabel(
@@ -177,8 +176,6 @@ export function UpdatesWorkspace() {
   const buildDate = formatBuildTimestamp(version?.buildTimestamp ?? null) ?? NOT_REPORTED;
 
   const approvedSha = engine?.approvedSha256 ?? version?.bundledPax.sha256 ?? null;
-  const approvedVersion =
-    engine?.approvedVersion ?? version?.bundledPax.version ?? NOT_REPORTED;
   const engineStatus = engineStatusLabel(phase, engine);
 
   // The installed app payload SHA (lowercase), recorded by the installer in
@@ -432,73 +429,7 @@ export function UpdatesWorkspace() {
         )
       ) : null}
 
-      <div className="card-grid settings-grid">
-        <article className="card settings-card">
-          <div className="card__top">
-            <h3 className="card__title">Installed app</h3>
-          </div>
-          <p className="card__body">
-            The version of PAX Cookbook installed on this PC.
-          </p>
-          <dl className="settings-kv">
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">App version</dt>
-              <dd className="settings-kv__val">{appVersion}</dd>
-            </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Build date</dt>
-              <dd className="settings-kv__val">{buildDate}</dd>
-            </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">App fingerprint</dt>
-              <dd className="settings-kv__val">
-                {installedPayloadSha ? (
-                  <code className="settings-mono settings-mono--full">{installedPayloadSha}</code>
-                ) : (
-                  <span className="settings-muted">{NOT_RECORDED}</span>
-                )}
-              </dd>
-            </div>
-          </dl>
-        </article>
-
-        <article className="card settings-card">
-          <div className="card__top">
-            <h3 className="card__title">PAX Engine</h3>
-          </div>
-          <p className="card__body">
-            PAX Cookbook manages and verifies the audit engine for you. Its version
-            and fingerprint are shown so you can confirm this build.
-          </p>
-          <dl className="settings-kv">
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Status</dt>
-              <dd className="settings-kv__val">{engineStatus}</dd>
-            </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Approved engine</dt>
-              <dd className="settings-kv__val">{APPROVED_ENGINE_NAME}</dd>
-            </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Engine version</dt>
-              <dd className="settings-kv__val">{approvedVersion}</dd>
-            </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Fingerprint</dt>
-              <dd className="settings-kv__val">
-                {engineSha ? (
-                  <code className="settings-mono settings-mono--full">{engineSha}</code>
-                ) : (
-                  NOT_REPORTED
-                )}
-              </dd>
-            </div>
-          </dl>
-          <p className="settings-note">
-            PAX Cookbook checks this fingerprint and verifies the engine before it is used.
-          </p>
-        </article>
-
+      <div className="card-grid settings-grid upd-cards-row">
         <article className="card settings-card">
           <div className="card__top">
             <h3 className="card__title">Update checking</h3>
