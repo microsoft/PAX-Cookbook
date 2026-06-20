@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using PAXCookbook.Shared;
 using PAXCookbook.Shared.ExitCodes;
+using PAXCookbookSetup.Uninstall;
 
 namespace PAXCookbookSetup.Gui;
 
@@ -188,12 +189,29 @@ internal sealed class UpdateForm : Form
             WizardInstallResult result;
             try
             {
+                // 1. Stop ALL PAX Cookbook processes (broker daemon + window) and
+                //    WAIT for them to fully exit FIRST, so no installed file stays
+                //    locked when the copy runs. A still-running app holding
+                //    App\bin is what produced "Installation failed (exit code
+                //    50)". The same module-scanning RealAppStopper used by
+                //    install/uninstall is used here; the app also makes a
+                //    good-faith effort to close itself when it launches us.
+                progress("Closing PAX Cookbook\u2026");
+                var stop = new RealAppStopper().TryStop(_installRoot, 30_000);
+                _log.Write("update-gui-appstop", fields: new Dictionary<string, object?>
+                {
+                    ["invoked"] = stop.Invoked,
+                    ["exeFound"] = stop.ExeFound,
+                    ["exited"] = stop.Exited,
+                    ["detail"] = stop.Detail,
+                });
+
                 var shellOps = ShellOperationsFactory.Build();
                 // Reuses the proven fresh-install path: download the latest
                 // payload from GitHub (verified against versions.json), stop the
-                // running app, copy + verify the new files. Progress callbacks
-                // drive the status line ("Downloading\u2026", "Installing\u2026",
-                // "Finishing up\u2026").
+                // running app (again, as a backstop), copy + verify the new
+                // files. Progress callbacks drive the status line
+                // ("Downloading\u2026", "Installing\u2026", "Finishing up\u2026").
                 result = await WizardInstallRunner.RunAsync(
                     _installRoot, payloadRootOverride: null, progress, _log, shellOps);
             }

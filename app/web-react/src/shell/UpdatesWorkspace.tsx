@@ -19,8 +19,13 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
-import { checkForUpdates, getLastCheckedUtc, type UpdateComponent } from '../host/updateCheck';
-import { applyUpdate } from '../host/brokerBridge';
+import {
+  checkForUpdates,
+  getLastCheckedUtc,
+  type UpdateComponentStatus,
+} from '../host/updateCheck';
+import { applyUpdate, shutdownBroker } from '../host/brokerBridge';
+import { postCloseDecision } from '../host/closeHandoff';
 import { setUpdatesBadge } from './shellNav';
 import {
   getRuntimeVersion,
@@ -104,18 +109,18 @@ function formatBuiltDate(raw: string | null | undefined): string | null {
 }
 
 // Version line for the "Installed" column.
-function installedVersionText(c: UpdateComponent): string {
-  return c.fromVersion ? `Version ${c.fromVersion}` : 'Current version';
+function installedVersionText(c: UpdateComponentStatus): string {
+  return c.installedVersion ? `Version ${c.installedVersion}` : 'Current version';
 }
 
 // Version line for the "Available" column. A same-version rebuild reads
 // "Version 1.0.0 — new build"; a real version bump reads "Version 1.0.1".
-function availableVersionText(c: UpdateComponent): string {
-  const v = c.toVersion ?? c.fromVersion;
-  if (c.newBuildOnly) {
+function availableVersionText(c: UpdateComponentStatus): string {
+  const v = c.availableVersion ?? c.installedVersion;
+  if (c.hasUpdate && c.newBuildOnly) {
     return v ? `Version ${v} — new build` : 'New build';
   }
-  return v ? `Version ${v}` : 'New version';
+  return v ? `Version ${v}` : 'Version \u2014';
 }
 
 export function UpdatesWorkspace() {
@@ -210,7 +215,7 @@ export function UpdatesWorkspace() {
   // dot; opening this page instead CLEARS that dot.
   const [checkState, setCheckState] =
     useState<'idle' | 'checking' | 'uptodate' | 'available' | 'unavailable'>('idle');
-  const [components, setComponents] = useState<UpdateComponent[]>([]);
+  const [allComponents, setAllComponents] = useState<UpdateComponentStatus[]>([]);
   const [lastChecked, setLastChecked] = useState<string | null>(() => getLastCheckedUtc());
   const [applying, setApplying] = useState(false);
   const applyingRef = useRef(false);
@@ -221,14 +226,12 @@ export function UpdatesWorkspace() {
     setCheckState('checking');
     const result = await checkForUpdates();
     setLastChecked(getLastCheckedUtc());
+    setAllComponents(result.allComponents);
     if (result.status === 'up-to-date') {
-      setComponents([]);
       setCheckState('uptodate');
     } else if (result.status === 'updates-available') {
-      setComponents(result.components);
       setCheckState('available');
     } else {
-      setComponents([]);
       setCheckState('unavailable');
     }
   }
@@ -268,8 +271,18 @@ export function UpdatesWorkspace() {
       applyingRef.current = false;
       setApplying(false);
       setApplyError('Could not start the update. Make sure you are online, then try again.');
+      return;
     }
-    // On success (202) the updater window takes over and closes this app shortly.
+    // Success (202): the updater process is launched. Make a good-faith effort
+    // to exit THIS app so no installed file stays locked when the updater copies
+    // files — stop the broker and ask the native shell to close the window. Wait
+    // a moment first so the updater window is visible before this one vanishes;
+    // the updater's own RealAppStopper is the backstop if this doesn't finish.
+    window.setTimeout(() => {
+      try { void shutdownBroker(); } catch { /* best-effort */ }
+      try { postCloseDecision('cookbook:close-app'); } catch { /* best-effort */ }
+    }, 1500);
+    // The updater window takes over and this app exits shortly.
   }
   const lastCheckedLabel = formatLastCheckedLabel(lastChecked);
 
@@ -288,85 +301,98 @@ export function UpdatesWorkspace() {
           <span className="upd-status__spinner" aria-hidden="true" />
           <span className="upd-status__text">Checking for updates…</span>
         </div>
-      ) : checkState === 'uptodate' ? (
-        <div className="upd-status upd-status--ok" role="status">
-          <span className="upd-status__icon" aria-hidden="true">✓</span>
-          <div className="upd-status__body">
-            <p className="upd-status__title">PAX Cookbook is up to date</p>
-            <p className="upd-status__sub">
-              Your app (v{appVersion}) and PAX engine (v{approvedVersion}) are current.
-              No updates needed.
-            </p>
-          </div>
-        </div>
-      ) : checkState === 'available' ? (
-        <div className="upd-status upd-status--avail" role="status">
-          <div className="upd-status__body">
-            {applying ? (
-              <>
-                <p className="upd-status__title">Updating PAX Cookbook…</p>
-                <div className="upd-status__applying">
-                  <span className="upd-status__spinner" aria-hidden="true" />
-                  <span className="upd-status__text">
-                    Starting the updater — a PAX Cookbook Updater window will open and show progress.
-                  </span>
-                </div>
-                <p className="upd-status__hint">Do not close this window.</p>
-                {applyError ? <p className="upd-status__error">{applyError}</p> : null}
-              </>
-            ) : (
-              <>
-                <p className="upd-status__title">An update is available</p>
-                <div className="upd-compare">
-                  {components.map((c) => {
-                    const fromBuilt = formatBuiltDate(c.fromBuild);
-                    const toBuilt = formatBuiltDate(c.toBuild);
-                    return (
-                      <div className="upd-compare__item" key={c.name}>
-                        <p className="upd-compare__name">{c.name}</p>
-                        <div className="upd-compare__cols">
-                          <div className="upd-compare__col">
-                            <p className="upd-compare__col-head">Installed</p>
-                            <p className="upd-compare__line">{installedVersionText(c)}</p>
-                            {fromBuilt ? (
-                              <p className="upd-compare__built">Built {fromBuilt}</p>
-                            ) : null}
-                          </div>
-                          <div className="upd-compare__col">
-                            <p className="upd-compare__col-head">Available</p>
-                            <p className="upd-compare__line">{availableVersionText(c)}</p>
-                            {toBuilt ? (
-                              <p className="upd-compare__built">Built {toBuilt}</p>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {applyError ? <p className="upd-status__error">{applyError}</p> : null}
-                <div className="upd-status__actions">
-                  <button
-                    type="button"
-                    className="dvw-settings__updates-btn"
-                    onClick={() => void handleApplyUpdate()}
-                  >
-                    Update now
-                  </button>
-                </div>
-                <p className="upd-status__hint">
-                  Your recipes and settings are not affected by updates.
-                </p>
-              </>
-            )}
-          </div>
-        </div>
       ) : checkState === 'unavailable' ? (
         <div className="upd-status upd-status--warn" role="status">
           <span className="upd-status__text">
             Couldn&rsquo;t check for updates just now. Make sure you are online, then try again.
           </span>
         </div>
+      ) : checkState === 'available' || checkState === 'uptodate' ? (
+        applying ? (
+          <div className="upd-status upd-status--avail" role="status">
+            <div className="upd-status__body">
+              <p className="upd-status__title">Updating PAX Cookbook…</p>
+              <div className="upd-status__applying">
+                <span className="upd-status__spinner" aria-hidden="true" />
+                <span className="upd-status__text">
+                  Starting the updater — a PAX Cookbook Updater window will open and show progress.
+                </span>
+              </div>
+              <p className="upd-status__hint">Do not close this window.</p>
+              {applyError ? <p className="upd-status__error">{applyError}</p> : null}
+            </div>
+          </div>
+        ) : (
+          <div className="upd-block">
+            {checkState === 'uptodate' ? (
+              <div className="upd-status upd-status--ok" role="status">
+                <span className="upd-status__icon" aria-hidden="true">✓</span>
+                <div className="upd-status__body">
+                  <p className="upd-status__title">PAX Cookbook is up to date</p>
+                  <p className="upd-status__sub">
+                    Your app and PAX engine are current. No updates needed.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="upd-status__title upd-status__title--avail" role="status">
+                An update is available
+              </p>
+            )}
+
+            <div className="upd-compare upd-compare--standalone">
+              {allComponents.map((c) => {
+                const fromBuilt = formatBuiltDate(c.installedBuild);
+                const toBuilt = formatBuiltDate(c.availableBuild);
+                return (
+                  <div className="upd-compare__item" key={c.name}>
+                    <p className="upd-compare__name">{c.name}</p>
+                    <div className="upd-compare__cols">
+                      <div
+                        className={
+                          'upd-compare__col' + (c.hasUpdate ? ' upd-compare__col--old' : '')
+                        }
+                      >
+                        <p className="upd-compare__col-head">Installed</p>
+                        <p className="upd-compare__line">{installedVersionText(c)}</p>
+                        {fromBuilt ? (
+                          <p className="upd-compare__built">Built {fromBuilt}</p>
+                        ) : null}
+                      </div>
+                      <div
+                        className={
+                          'upd-compare__col' + (c.hasUpdate ? ' upd-compare__col--new' : '')
+                        }
+                      >
+                        <p className="upd-compare__col-head">Available</p>
+                        <p className="upd-compare__line">{availableVersionText(c)}</p>
+                        {toBuilt ? (
+                          <p className="upd-compare__built">Built {toBuilt}</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {checkState === 'available' ? (
+              <div className="upd-block__actions">
+                {applyError ? <p className="upd-status__error">{applyError}</p> : null}
+                <button
+                  type="button"
+                  className="dvw-settings__updates-btn"
+                  onClick={() => void handleApplyUpdate()}
+                >
+                  Update now
+                </button>
+                <p className="upd-status__hint">
+                  Your recipes and settings are not affected by updates.
+                </p>
+              </div>
+            ) : null}
+          </div>
+        )
       ) : null}
 
       <div className="card-grid settings-grid">

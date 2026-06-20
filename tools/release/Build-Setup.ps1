@@ -73,6 +73,14 @@ if ([string]::IsNullOrWhiteSpace($channel)) { $channel = 'stable' }
 if ([string]::IsNullOrWhiteSpace($AppVersion))   { $AppVersion   = $canonicalVersion }
 if ([string]::IsNullOrWhiteSpace($SetupVersion)) { $SetupVersion = $canonicalVersion }
 
+# The single UTC instant for THIS build. Stamped (in two formats) into both the
+# staged VERSION.json (cookbook.buildTimestamp, dashed) and versions.json
+# (current.builtAtUtc, ISO) so the app's reported build date and the published
+# "available" build date are the SAME real time. (Previously builtAtUtc was read
+# from the source VERSION.json's static releaseTimestamp, so the "Available"
+# build date showed a stale placeholder date.)
+$buildUtc = (Get-Date).ToUniversalTime()
+
 $out = Join-Path $root 'artifacts\setup'
 $distDir = Join-Path $root 'dist\setup'
 $logFile = Join-Path $out 'build.log'
@@ -170,7 +178,7 @@ Invoke-Step '[3/7] stage payload tree' {
     # on every build. The broker reads cookbook.buildTimestamp at runtime and the
     # Settings page shows it as the build date.
     $stagedVersionJson = Join-Path $appDest 'VERSION.json'
-    $buildTimestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd-HH-mm-ss-UTC')
+    $buildTimestamp = $buildUtc.ToString('yyyy-MM-dd-HH-mm-ss-UTC')
     $vj = Get-Content -LiteralPath $stagedVersionJson -Raw | ConvertFrom-Json
     if ($null -eq $vj.cookbook) { throw "staged VERSION.json missing cookbook object: $stagedVersionJson" }
     if ($vj.cookbook.PSObject.Properties.Name -contains 'buildTimestamp') {
@@ -427,18 +435,13 @@ Invoke-Step 'update versions.json manifest' {
             }
         } catch { }
     }
-    # Read the build/release timestamp as the RAW JSON string (ConvertFrom-Json
-    # coerces ISO dates to [datetime], which would stringify in a different
-    # format than the app reports from the same VERSION.json field, causing a
-    # spurious "new build" in the timestamp-fallback comparison). The app's
-    # buildTimestamp falls back to cookbook.releaseTimestamp, so match that.
-    $builtAtUtc = ''
-    $vjRaw = Get-Content -LiteralPath $versionJson -Raw
-    if ($vjRaw -match '"buildTimestamp"\s*:\s*"([^"]+)"') {
-        $builtAtUtc = $Matches[1]
-    } elseif ($vjRaw -match '"releaseTimestamp"\s*:\s*"([^"]+)"') {
-        $builtAtUtc = $Matches[1]
-    }
+    # The published "available" build date. Use the SAME real build instant that
+    # was stamped into the staged VERSION.json (cookbook.buildTimestamp), in ISO
+    # 8601 UTC. The in-app updater uses this only for DISPLAY (the up-to-date
+    # decision is by payload SHA, not by timestamp), so a real instant here makes
+    # the "Available" card show the actual build time instead of a stale
+    # placeholder.
+    $builtAtUtc = $buildUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
     $vm = [ordered]@{
         schemaVersion = 1
         current = [ordered]@{

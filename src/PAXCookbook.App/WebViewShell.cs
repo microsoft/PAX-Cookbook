@@ -828,7 +828,7 @@ internal static class WebViewShell
             // prompt) — covers the animation reliably across systems without
             // feeling slow. A non-blocking one-shot timer is used so the UI
             // thread keeps pumping during the wait.
-            var settleTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            var settleTimer = new System.Windows.Forms.Timer { Interval = 300 };
             settleTimer.Tick += (_, _) =>
             {
                 settleTimer.Stop();

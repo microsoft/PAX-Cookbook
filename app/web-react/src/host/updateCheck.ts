@@ -34,8 +34,26 @@ export interface UpdateComponent {
 export interface UpdateCheckResult {
   status: 'up-to-date' | 'updates-available' | 'unavailable';
   components: UpdateComponent[];
+  /**
+   * Both components (app + engine) ALWAYS, each flagged with whether it has an
+   * update, so the Updates page can show the full picture every time.
+   */
+  allComponents: UpdateComponentStatus[];
   /** ISO timestamp of when the check reached GitHub (null when unavailable). */
   checkedAtUtc: string | null;
+}
+
+// Per-component status shown on the Updates page whether or not it has an
+// update. installed/available build dates are populated for the app only (the
+// engine ships in the payload and has no separate build stamp).
+export interface UpdateComponentStatus {
+  name: string;
+  installedVersion: string | null;
+  availableVersion: string | null;
+  installedBuild: string | null;
+  availableBuild: string | null;
+  hasUpdate: boolean;
+  newBuildOnly: boolean;
 }
 
 function parseVersion(v: string | null | undefined): number[] | null {
@@ -111,11 +129,11 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       cache: 'no-store',
     });
     if (!res.ok) {
-      return { status: 'unavailable', components: [], checkedAtUtc: null };
+      return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
     }
     remote = await res.json();
   } catch {
-    return { status: 'unavailable', components: [], checkedAtUtc: null };
+    return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
   }
 
   const checkedAtUtc = new Date().toISOString();
@@ -150,8 +168,6 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
     (eng.ok && eng.data ? eng.data.approvedSha256 : null) ??
     (ver.ok && ver.data ? ver.data.bundledPax.sha256 : null);
 
-  const components: UpdateComponent[] = [];
-
   // Diagnostics — visible in the dev console so a mis-compare can be traced
   // (the values that drive "installed" vs "remote"). No secrets are logged.
   try {
@@ -171,71 +187,77 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
     /* console may be unavailable */
   }
 
-  // App tier-1: version. The payload also carries the installed Setup DLL, so a
-  // payload change is an app change.
-  if (isNewer(remoteApp, installedApp)) {
-    components.push({
-      name: 'PAX Cookbook app',
-      fromVersion: installedApp,
-      toVersion: remoteApp,
-      newBuildOnly: false,
-      fromBuild: installedBuildTs,
-      toBuild: remoteBuiltAt,
-    });
-  } else if (
+  // App update? A version bump, or a same-version rebuild detected via the
+  // installer-recorded payload SHA.
+  const appNewBuildOnly =
+    !isNewer(remoteApp, installedApp) &&
     sameVersion(remoteApp, installedApp) &&
     !!installedPayloadSha &&
     !!remotePayloadSha &&
-    installedPayloadSha.toLowerCase() !== remotePayloadSha.toLowerCase()
-  ) {
-    // Same version, but the installer-recorded payload SHA differs — a real
-    // same-version rebuild. We ONLY trust the recorded payload SHA here; the
-    // build-timestamp fallback was removed because the shipped VERSION.json
-    // timestamp and versions.json builtAtUtc can come from different sources,
-    // which produced false "new build available" prompts on a fresh install.
-    // When the payload SHA has not been recorded yet (installs predating it),
-    // a same-version rebuild is simply not flagged until the next version bump.
+    installedPayloadSha.toLowerCase() !== remotePayloadSha.toLowerCase();
+  const appHasUpdate = isNewer(remoteApp, installedApp) || appNewBuildOnly;
+
+  // Engine update? Only once the engine is actually acquired — on a fresh
+  // install it is not yet acquired, and the engine is immutable per release
+  // anyway (its SHA always matches the published one), so this is rare.
+  const engineAcquired = eng.ok && eng.data ? eng.data.isAcquired : false;
+  const engineNewBuildOnly =
+    engineAcquired &&
+    !isNewer(remoteEngineVer, installedEngineVer) &&
+    sameVersion(remoteEngineVer, installedEngineVer) &&
+    !!remoteEngineSha &&
+    !!installedEngineSha &&
+    remoteEngineSha.toLowerCase() !== installedEngineSha.toLowerCase();
+  const engineHasUpdate =
+    engineAcquired &&
+    (isNewer(remoteEngineVer, installedEngineVer) || engineNewBuildOnly);
+
+  const components: UpdateComponent[] = [];
+  if (appHasUpdate) {
     components.push({
       name: 'PAX Cookbook app',
       fromVersion: installedApp,
       toVersion: remoteApp,
-      newBuildOnly: true,
+      newBuildOnly: appNewBuildOnly,
       fromBuild: installedBuildTs,
       toBuild: remoteBuiltAt,
     });
   }
-
-  // Engine tier-1: version; tier-2: SHA. Only compared once the engine is
-  // actually acquired — on a fresh install the engine is not yet acquired, and
-  // the engine is immutable per release anyway (its SHA always matches the
-  // published one), so skipping it here removes any chance of a false positive.
-  const engineAcquired = eng.ok && eng.data ? eng.data.isAcquired : false;
-  if (engineAcquired) {
-    if (isNewer(remoteEngineVer, installedEngineVer)) {
-      components.push({
-        name: 'PAX engine',
-        fromVersion: installedEngineVer,
-        toVersion: remoteEngineVer,
-        newBuildOnly: false,
-      });
-    } else if (
-      sameVersion(remoteEngineVer, installedEngineVer) &&
-      !!remoteEngineSha &&
-      !!installedEngineSha &&
-      remoteEngineSha.toLowerCase() !== installedEngineSha.toLowerCase()
-    ) {
-      components.push({
-        name: 'PAX engine',
-        fromVersion: installedEngineVer,
-        toVersion: remoteEngineVer,
-        newBuildOnly: true,
-      });
-    }
+  if (engineHasUpdate) {
+    components.push({
+      name: 'PAX engine',
+      fromVersion: installedEngineVer,
+      toVersion: remoteEngineVer,
+      newBuildOnly: engineNewBuildOnly,
+    });
   }
+
+  // Always present both components for the full-picture comparison view.
+  const allComponents: UpdateComponentStatus[] = [
+    {
+      name: 'PAX Cookbook app',
+      installedVersion: installedApp,
+      availableVersion: remoteApp,
+      installedBuild: installedBuildTs,
+      availableBuild: remoteBuiltAt,
+      hasUpdate: appHasUpdate,
+      newBuildOnly: appNewBuildOnly,
+    },
+    {
+      name: 'PAX engine',
+      installedVersion: installedEngineVer,
+      availableVersion: remoteEngineVer,
+      installedBuild: null,
+      availableBuild: null,
+      hasUpdate: engineHasUpdate,
+      newBuildOnly: engineNewBuildOnly,
+    },
+  ];
 
   return {
     status: components.length > 0 ? 'updates-available' : 'up-to-date',
     components,
+    allComponents,
     checkedAtUtc,
   };
 }
