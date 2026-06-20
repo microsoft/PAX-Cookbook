@@ -101,13 +101,15 @@ static int Run(string[] argv)
             // Visible in-place update wizard, launched by the running app's
             // broker ("Update now"). It runs in its OWN detached process and
             // reuses the proven download + install path with visible progress,
-            // ending on a completion screen (Open / Close). It does NOT go
-            // through self-handoff: PayloadCopier only writes App\ files (the
-            // manifest is App-scoped), so the installed Setup DLL this process
-            // runs from is never a copy target and is never locked.
+            // The visible in-place update wizard, launched by the running app's
+            // broker ("Update now"). It MUST go through self-handoff exactly
+            // like uninstall: PayloadCopier overwrites the installed Setup\
+            // files (PAXCookbook.Shared.dll, the Setup DLL's siblings), which
+            // THIS running Setup process loads and therefore LOCKS. Relaunching
+            // from a %TEMP% copy (which loads its DLLs from temp) frees those
+            // locks so the copy can replace every file in the install root —
+            // App\bin AND Setup\ — without "the file is in use" (exit 50).
             case "apply-update":
-                return UpdateGuiHost.Run(installRoot, log);
-
             case "uninstall":
             case "install":
             case "update":
@@ -182,6 +184,12 @@ static int Run(string[] argv)
                     rc = parsed.GuiUninstall
                         ? UninstallGuiHost.Run(installRoot, parsed, log)
                         : UninstallVerb.Run(installRoot, parsed, log, Console.Out);
+                }
+                else if (parsed.Verb == "apply-update")
+                {
+                    // Runs from the %TEMP% handoff copy now, so the install-root
+                    // Setup\ files are free to be overwritten by the copy below.
+                    rc = UpdateGuiHost.Run(installRoot, log);
                 }
                 else
                 {
