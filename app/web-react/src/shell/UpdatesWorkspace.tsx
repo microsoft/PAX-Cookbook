@@ -358,6 +358,11 @@ export function UpdatesWorkspace() {
                         {fromBuilt ? (
                           <p className="upd-compare__built">Built {fromBuilt}</p>
                         ) : null}
+                        {c.installedSha ? (
+                          <p className="upd-compare__sha" title="SHA-256 fingerprint">
+                            {c.installedSha}
+                          </p>
+                        ) : null}
                       </div>
                       <div
                         className={
@@ -368,6 +373,11 @@ export function UpdatesWorkspace() {
                         <p className="upd-compare__line">{availableVersionText(c)}</p>
                         {toBuilt ? (
                           <p className="upd-compare__built">Built {toBuilt}</p>
+                        ) : null}
+                        {c.availableSha ? (
+                          <p className="upd-compare__sha" title="SHA-256 fingerprint">
+                            {c.availableSha}
+                          </p>
                         ) : null}
                       </div>
                     </div>

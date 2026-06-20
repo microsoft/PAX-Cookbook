@@ -52,6 +52,9 @@ export interface UpdateComponentStatus {
   availableVersion: string | null;
   installedBuild: string | null;
   availableBuild: string | null;
+  /** Full SHA-256 fingerprint of the installed/available component (verification). */
+  installedSha: string | null;
+  availableSha: string | null;
   hasUpdate: boolean;
   newBuildOnly: boolean;
 }
@@ -240,6 +243,8 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       availableVersion: remoteApp,
       installedBuild: installedBuildTs,
       availableBuild: remoteBuiltAt,
+      installedSha: installedPayloadSha,
+      availableSha: remotePayloadSha,
       hasUpdate: appHasUpdate,
       newBuildOnly: appNewBuildOnly,
     },
@@ -249,6 +254,8 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       availableVersion: remoteEngineVer,
       installedBuild: null,
       availableBuild: null,
+      installedSha: installedEngineSha,
+      availableSha: remoteEngineSha,
       hasUpdate: engineHasUpdate,
       newBuildOnly: engineNewBuildOnly,
     },

@@ -805,6 +805,19 @@ button {
   color: var(--c-ink-soft, #57606a);
 }
 
+/* Full SHA-256 fingerprint, small and muted, for verification. Wraps so the
+   whole value is visible without truncation. */
+.upd-compare__sha {
+  margin: 4px 0 0 0;
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", "Consolas", monospace);
+  font-size: var(--fs-11, 11px);
+  line-height: 1.35;
+  color: var(--c-ink-soft, #57606a);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
 .upd-status__applying {
   display: flex;
   align-items: center;
