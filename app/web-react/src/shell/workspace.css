@@ -2310,30 +2310,44 @@
   min-width: 0;
 }
 
-/* Cap the bake history at roughly 7 visible rows and scroll the rest with a
-   thin, app-styled scrollbar. Scoped to the Bakes history list via
-   bk-history-list so the shared .tt-list (Taste Tests) is untouched. */
-.bk-history-list {
-  max-height: 28rem;
+/* The left Bakes column stacks two fixed-size cards: Bake history on top and
+   Upcoming bakes below, each capped to five visible rows. */
+.bk-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+/* Cap the bake history and the upcoming-bakes list at five visible rows and
+   scroll the rest with a thin, app-styled scrollbar. Scoped to these two lists
+   so the shared .tt-list (Taste Tests) is untouched. */
+.bk-history-list,
+.bk-upcoming-list {
+  max-height: 20rem;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--c-border-strong) transparent;
 }
 
-.bk-history-list::-webkit-scrollbar {
+.bk-history-list::-webkit-scrollbar,
+.bk-upcoming-list::-webkit-scrollbar {
   width: 8px;
 }
 
-.bk-history-list::-webkit-scrollbar-track {
+.bk-history-list::-webkit-scrollbar-track,
+.bk-upcoming-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.bk-history-list::-webkit-scrollbar-thumb {
+.bk-history-list::-webkit-scrollbar-thumb,
+.bk-upcoming-list::-webkit-scrollbar-thumb {
   background: var(--c-border-strong);
   border-radius: 999px;
 }
 
-.bk-history-list::-webkit-scrollbar-thumb:hover {
+.bk-history-list::-webkit-scrollbar-thumb:hover,
+.bk-upcoming-list::-webkit-scrollbar-thumb:hover {
   background: var(--c-muted, var(--c-border-strong));
 }
 
@@ -2352,6 +2366,51 @@
 .bk-status--interrupted { color: var(--c-red, #c62828); }
 .bk-status--canceled,
 .bk-status--unknown { color: var(--c-muted); }
+.bk-status--scheduled { color: var(--c-slate, var(--c-muted)); }
+
+/* Scheduled-bake (Upcoming bakes) detail panel. */
+.bk-sched-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--c-slate-soft, rgba(100, 116, 139, 0.12));
+  color: var(--c-slate, var(--c-muted));
+  border: 1px solid var(--c-slate-edge, rgba(100, 116, 139, 0.25));
+}
+
+.bk-sched-badge--daily {
+  background: var(--c-green-soft, rgba(22, 163, 74, 0.1));
+  color: var(--c-green, #2e7d32);
+  border-color: var(--c-green-edge, rgba(22, 163, 74, 0.25));
+}
+
+.bk-sched-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+/* Transient "skipped" confirmation toast. */
+.bk-toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-6, 2rem);
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(28rem, calc(100vw - 2rem));
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--c-ink, #1f2933);
+  color: var(--c-on-ink, #ffffff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  font-size: 0.9rem;
+  text-align: center;
+}
 
 .bk-detail {
   display: flex;

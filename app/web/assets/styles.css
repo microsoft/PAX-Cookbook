@@ -18,7 +18,6 @@
  *   #recipe-status (+ .empty / .error state classes)
  *   #recipe-table  #recipe-table-body
  *   #broker-host   #token-status (+ .ok / .miss)
- *   #reload-button
  *   .col-name .col-status .col-time .col-id .col-actions
  */
 

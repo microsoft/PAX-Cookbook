@@ -22,13 +22,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   getCook,
   getCookLog,
+  getRecipe,
   listCooks,
+  listUpcomingScheduled,
+  skipNextScheduledBake,
+  deleteScheduledTask,
   openFile,
   openPath,
   stopCook,
   type CookDetailBody,
   type CookOutputSummary,
   type CookSummary,
+  type RecipeDetailBody,
+  type UpcomingScheduledBake,
 } from '../host/brokerBridge';
 import { SectionHeader } from './components/SectionHeader';
 import { StatusCard } from './StatusCard';
@@ -49,6 +55,7 @@ import {
   takePendingBakeSelect,
 } from './shellNav';
 import { userScrolledAway } from './bakesLogScroll';
+import { usePolling } from '../host/usePolling';
 
 type ListPhase = 'loading' | 'loaded' | 'error' | 'locked';
 type DetailPhase = 'idle' | 'loading' | 'loaded' | 'error' | 'locked';
@@ -333,6 +340,132 @@ function bakeBannerCopy(
   return { headline: statusText, detail: '' };
 }
 
+// ---------------------------------------------------------------------------
+// Scheduled-bake (Upcoming bakes) presentation helpers.
+// ---------------------------------------------------------------------------
+
+const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+type ScheduleRecurrence = UpcomingScheduledBake['recurrence'];
+
+// A clock time ("7:00 AM") in the user's locale from an hour/minute pair.
+function formatClockTime(hour: number, minute: number): string {
+  const d = new Date();
+  d.setHours(hour, minute, 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+// Short schedule badge — "Daily" / "Weekly" / "Scheduled".
+function scheduleBadge(kind: string): string {
+  const k = (kind ?? '').toLowerCase();
+  if (k === 'daily') {
+    return 'Daily';
+  }
+  if (k === 'weekly') {
+    return 'Weekly';
+  }
+  return 'Scheduled';
+}
+
+// Frequency sentence — "Every day at 7:00 AM" / "Every Monday, Friday at 9:00 AM".
+function formatFrequency(rec: ScheduleRecurrence): string {
+  const time = formatClockTime(rec.hour, rec.minute);
+  const k = (rec.kind ?? '').toLowerCase();
+  if (k === 'daily') {
+    return `Every day at ${time}`;
+  }
+  if (k === 'weekly') {
+    const days = (rec.daysOfWeek ?? []).filter((d) => d >= 0 && d <= 6);
+    if (days.length === 0 || days.length === 7) {
+      return `Every day at ${time}`;
+    }
+    const names = days
+      .slice()
+      .sort((a, b) => a - b)
+      .map((d) => WEEKDAY_NAMES[d]);
+    return `Every ${names.join(', ')} at ${time}`;
+  }
+  return time;
+}
+
+// Friendly next-run label — "Today at 7:00 AM" / "Tomorrow at 7:00 AM" /
+// "Monday, Jun 22 at 7:00 AM".
+function formatNextRun(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    return iso;
+  }
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (d.toDateString() === now.toDateString()) {
+    return `Today at ${time}`;
+  }
+  if (d.toDateString() === tomorrow.toDateString()) {
+    return `Tomorrow at ${time}`;
+  }
+  const date = d.toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  });
+  return `${date} at ${time}`;
+}
+
+const AUTH_MODE_FRIENDLY: Record<string, string> = {
+  devicecode: 'Device code sign-in',
+  appregistration: 'Entra ID app registration',
+  managedidentity: 'Managed identity',
+  agent365: 'Agent 365',
+  interactive: 'Interactive sign-in',
+};
+
+function friendlyAuthMode(raw: string): string {
+  const key = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return AUTH_MODE_FRIENDLY[key] ?? raw;
+}
+
+// Best-effort "where results are saved" from a saved recipe document. Falls back
+// to a safe generic line when the destination field is absent or unrecognized.
+function extractOutputDestination(recipe: Record<string, unknown> | undefined): string {
+  if (!recipe) {
+    return 'As configured in the recipe';
+  }
+  const destinations = recipe.destinations as
+    | { fact?: { path?: unknown }; userInfo?: { path?: unknown } }
+    | undefined;
+  const factPath = destinations?.fact?.path;
+  if (typeof factPath === 'string' && factPath.trim().length > 0) {
+    return factPath.trim();
+  }
+  const single = recipe.outputPath ?? recipe.destination;
+  if (typeof single === 'string' && single.trim().length > 0) {
+    return single.trim();
+  }
+  return 'As configured in the recipe';
+}
+
+// Best-effort "which sign-in is used" from a saved recipe document.
+function extractSignIn(recipe: Record<string, unknown> | undefined): string {
+  if (!recipe) {
+    return 'As configured in the recipe';
+  }
+  const mode = recipe.authMode;
+  if (typeof mode === 'string' && mode.trim().length > 0) {
+    return friendlyAuthMode(mode.trim());
+  }
+  return 'As configured in the recipe';
+}
+
 export function BakesWorkspace() {
   const [cooks, setCooks] = useState<CookSummary[]>([]);
   const [listPhase, setListPhase] = useState<ListPhase>('loading');
@@ -367,6 +500,23 @@ export function BakesWorkspace() {
   // turns it off so they can read earlier output. Checked by default.
   const [autoScroll, setAutoScroll] = useState(true);
   const logPreRef = useRef<HTMLPreElement | null>(null);
+
+  // --- Upcoming bakes (scheduled) ---
+  const [upcoming, setUpcoming] = useState<UpcomingScheduledBake[]>([]);
+  const [upcomingPhase, setUpcomingPhase] =
+    useState<'loading' | 'loaded' | 'error' | 'locked'>('loading');
+  // The selected scheduled bake. Mutually exclusive with selectedCookId — only
+  // one detail (history OR schedule) is shown at a time.
+  const [selectedSchedule, setSelectedSchedule] = useState<UpcomingScheduledBake | null>(null);
+  const selectedScheduleRef = useRef<string | null>(null);
+  // The selected schedule's recipe document (for Output + Sign-in).
+  const [scheduleRecipe, setScheduleRecipe] = useState<RecipeDetailBody | null>(null);
+  // Transient confirmation toast after "Skip next bake".
+  const [skipToast, setSkipToast] = useState<string | null>(null);
+  const [skipBusy, setSkipBusy] = useState(false);
+  // "Cancel all future bakes" confirmation modal target + in-flight flag.
+  const [cancelTarget, setCancelTarget] = useState<UpcomingScheduledBake | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   const mounted = useRef(true);
   const selectedCookIdRef = useRef<string | null>(null);
@@ -497,6 +647,9 @@ export function BakesWorkspace() {
 
   const selectCook = useCallback(
     (cookId: string) => {
+      // A history detail replaces any scheduled detail (only one shows).
+      setSelectedSchedule(null);
+      selectedScheduleRef.current = null;
       setSelectedCookId(cookId);
       selectedCookIdRef.current = cookId;
       setCanceling(false);
@@ -506,6 +659,100 @@ export function BakesWorkspace() {
     },
     [loadDetail, loadLog],
   );
+
+  const loadUpcoming = useCallback(async (background = false) => {
+    if (!background) {
+      setUpcomingPhase('loading');
+    }
+    const res = await listUpcomingScheduled();
+    if (!mounted.current) {
+      return;
+    }
+    if (res.ok && res.data) {
+      setUpcoming(Array.isArray(res.data.scheduled) ? res.data.scheduled : []);
+      setUpcomingPhase('loaded');
+    } else if (res.status === 423) {
+      setUpcomingPhase('locked');
+    } else if (!background) {
+      setUpcoming([]);
+      setUpcomingPhase('error');
+    }
+  }, []);
+
+  // Select a scheduled bake — replaces any history detail and loads the recipe
+  // document so the panel can show its output destination + sign-in.
+  const selectSchedule = useCallback((entry: UpcomingScheduledBake) => {
+    setSelectedCookId(null);
+    selectedCookIdRef.current = null;
+    setDetail(null);
+    setDetailPhase('idle');
+    setSelectedSchedule(entry);
+    selectedScheduleRef.current = entry.recipeId;
+    setScheduleRecipe(null);
+    void (async () => {
+      const res = await getRecipe(entry.recipeId);
+      if (!mounted.current || selectedScheduleRef.current !== entry.recipeId) {
+        return;
+      }
+      if (res.ok && res.data) {
+        setScheduleRecipe(res.data);
+      }
+    })();
+  }, []);
+
+  // "Skip next bake" — skip only the next occurrence; the schedule stays active.
+  const skipNext = useCallback(
+    async (entry: UpcomingScheduledBake) => {
+      setSkipBusy(true);
+      const res = await skipNextScheduledBake(entry.recipeId);
+      if (!mounted.current) {
+        return;
+      }
+      setSkipBusy(false);
+      setSkipToast(
+        res.ok
+          ? 'Next bake skipped. The schedule will resume after that.'
+          : 'Could not skip the next bake. Try again.',
+      );
+      window.setTimeout(() => {
+        if (mounted.current) {
+          setSkipToast(null);
+        }
+      }, 4000);
+      if (res.ok) {
+        void loadUpcoming(true);
+      }
+    },
+    [loadUpcoming],
+  );
+
+  // "Cancel all future bakes" (confirmed) — remove the whole schedule + OS task.
+  const confirmCancelAll = useCallback(async () => {
+    const entry = cancelTarget;
+    if (!entry) {
+      return;
+    }
+    setCancelBusy(true);
+    const res = await deleteScheduledTask(entry.recipeId);
+    if (!mounted.current) {
+      return;
+    }
+    setCancelBusy(false);
+    setCancelTarget(null);
+    if (res.ok) {
+      setSelectedSchedule((cur) => (cur && cur.recipeId === entry.recipeId ? null : cur));
+      if (selectedScheduleRef.current === entry.recipeId) {
+        selectedScheduleRef.current = null;
+      }
+      void loadUpcoming(true);
+    }
+  }, [cancelTarget, loadUpcoming]);
+
+  // "Open recipe" — open the recipe in the builder for editing.
+  const openScheduleRecipe = useCallback((recipeId: string) => {
+    rememberPendingSelect(recipeId);
+    requestShellSection('recipes');
+  }, []);
 
   const copyLog = useCallback(async () => {
     if (!logText) {
@@ -601,9 +848,27 @@ export function BakesWorkspace() {
     }
   }, [canceling, loadDetail, loadLog]);
 
-  useEffect(() => {
-    void loadCooks();
+  // Steady background polling so the history list and the upcoming-bakes list
+  // stay current even when nothing is running (a scheduled bake can start and
+  // finish without the user touching anything). The first call of each is a
+  // foreground load (shows the loading state); every later call is a quiet,
+  // merge-in-place background refresh that never disrupts the selection, scroll,
+  // or a failed cycle. The faster 2.5s live-tail poll below stays in charge of
+  // an actively running bake's detail + log.
+  const cooksFirstRef = useRef(true);
+  const upcomingFirstRef = useRef(true);
+  const pollCooks = useCallback(async () => {
+    const background = !cooksFirstRef.current;
+    cooksFirstRef.current = false;
+    await loadCooks(background);
   }, [loadCooks]);
+  const pollUpcoming = useCallback(async () => {
+    const background = !upcomingFirstRef.current;
+    upcomingFirstRef.current = false;
+    await loadUpcoming(background);
+  }, [loadUpcoming]);
+  usePolling(pollCooks, 15000);
+  usePolling(pollUpcoming, 60000);
 
   // One-shot: when the editor has just started a bake it stashes the new
   // cookId, then routes here. Once the history list has loaded, focus that
@@ -761,6 +1026,7 @@ export function BakesWorkspace() {
       />
 
       <div className="dvw-bakes__cols">
+        <div className="bk-left-col">
         {/* Left: real bake history read from the broker */}
         <section className="dvw-card tt-pane bk-pane" aria-label="Bake history">
           <header className="tt-pane__head">
@@ -888,8 +1154,124 @@ export function BakesWorkspace() {
           ) : null}
         </section>
 
+        {/* Upcoming scheduled bakes */}
+        <section className="dvw-card tt-pane bk-pane bk-upcoming" aria-label="Upcoming bakes">
+          <header className="tt-pane__head">
+            <h2 className="tt-pane__title">Upcoming bakes</h2>
+          </header>
+
+          {upcomingPhase === 'loading' ? (
+            <div className="bk-status-block" role="status">
+              <p className="tt-muted">Loading scheduled bakes…</p>
+            </div>
+          ) : null}
+
+          {upcomingPhase === 'error' ? (
+            <div className="bk-status-block" role="status">
+              <p className="tt-muted">Scheduled bakes couldn’t be loaded right now.</p>
+            </div>
+          ) : null}
+
+          {upcomingPhase === 'locked' ? (
+            <div className="bk-status-block" role="status">
+              <p className="tt-muted">PAX Cookbook is locked. Unlock it to see scheduled bakes.</p>
+            </div>
+          ) : null}
+
+          {upcomingPhase === 'loaded' && upcoming.length > 0 ? (
+            <ul className="tt-list bk-upcoming-list" role="listbox" aria-label="Upcoming bakes">
+              {upcoming.map((entry) => {
+                const selected = selectedSchedule?.recipeId === entry.recipeId;
+                return (
+                  <li key={entry.recipeId} className="tt-list__item">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      className={'tt-list__row' + (selected ? ' tt-list__row--selected' : '')}
+                      onClick={() => selectSchedule(entry)}
+                    >
+                      <span className="tt-list__icon bk-status--scheduled" aria-hidden="true">
+                        <IconClock />
+                      </span>
+                      <span className="tt-list__text">
+                        <span className="tt-list__name">{entry.name || entry.recipeId}</span>
+                        <span className="tt-list__meta">{formatNextRun(entry.nextRunAt)}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+
+          {upcomingPhase === 'loaded' && upcoming.length === 0 ? (
+            <div className="tt-empty bk-empty">
+              <IconClock className="tt-empty__icon" />
+              <p className="tt-empty__body">
+                No upcoming bakes scheduled.
+                <br />
+                Set up a schedule from the recipe builder to automate your bakes.
+              </p>
+            </div>
+          ) : null}
+        </section>
+        </div>
+
         {/* Center: selected bake detail, outputs, and log */}
         <section className="dvw-card tt-pane tt-pane--main bk-pane" aria-label="Bake detail">
+          {selectedSchedule ? (
+            <div className="bk-detail bk-sched-detail">
+              <header className="bk-detail__head">
+                <div className="bk-detail__title-row">
+                  <h2 className="tt-result__title">
+                    {selectedSchedule.name || selectedSchedule.recipeId}
+                  </h2>
+                  <span
+                    className={
+                      'bk-sched-badge bk-sched-badge--' +
+                      (selectedSchedule.recurrence.kind || '').toLowerCase()
+                    }
+                  >
+                    {scheduleBadge(selectedSchedule.recurrence.kind)}
+                  </span>
+                </div>
+              </header>
+
+              <div className="bk-meta">
+                <MetaRow label="Next run" value={formatNextRun(selectedSchedule.nextRunAt)} />
+                <MetaRow label="Frequency" value={formatFrequency(selectedSchedule.recurrence)} />
+                <MetaRow label="Output" value={extractOutputDestination(scheduleRecipe?.recipe)} />
+                <MetaRow label="Sign-in" value={extractSignIn(scheduleRecipe?.recipe)} />
+              </div>
+
+              <div className="bk-sched-actions">
+                <button
+                  type="button"
+                  className="dvw-btn dvw-btn--ghost"
+                  onClick={() => void skipNext(selectedSchedule)}
+                  disabled={skipBusy}
+                >
+                  {skipBusy ? 'Skipping…' : 'Skip next bake'}
+                </button>
+                <button
+                  type="button"
+                  className="dvw-btn dvw-btn--danger-ghost"
+                  onClick={() => setCancelTarget(selectedSchedule)}
+                >
+                  Cancel all future bakes
+                </button>
+                <button
+                  type="button"
+                  className="dvw-btn"
+                  onClick={() => openScheduleRecipe(selectedSchedule.recipeId)}
+                >
+                  <IconCode className="dvw-btn__icon" />
+                  <span>Open recipe</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
           {detailPhase === 'loading' ? (
             <div className="bk-status-block" role="status">
               <p className="tt-muted">Loading bake detail…</p>
@@ -908,7 +1290,7 @@ export function BakesWorkspace() {
             </div>
           ) : null}
 
-          {detailPhase === 'idle' ? (
+          {detailPhase === 'idle' && !selectedSchedule ? (
             <div className="tt-empty bk-empty">
               <IconList className="tt-empty__icon" />
               <h2 className="tt-empty__title">No bake selected</h2>
@@ -1317,6 +1699,56 @@ export function BakesWorkspace() {
           ) : null}
         </section>
       </div>
+
+      {skipToast ? (
+        <div className="bk-toast" role="status" aria-live="polite">
+          {skipToast}
+        </div>
+      ) : null}
+
+      {cancelTarget ? (
+        <div className="close-modal" role="presentation">
+          <div
+            className="close-modal__scrim"
+            role="presentation"
+            onClick={() => (cancelBusy ? undefined : setCancelTarget(null))}
+          />
+          <div
+            className="close-modal__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cancel-sched-title"
+            aria-describedby="cancel-sched-body"
+          >
+            <h2 id="cancel-sched-title" className="close-modal__title">
+              Cancel all future bakes?
+            </h2>
+            <p id="cancel-sched-body" className="close-modal__body">
+              This will cancel all future scheduled bakes for{' '}
+              <strong>{cancelTarget.name || cancelTarget.recipeId}</strong>. You can set up a
+              new schedule anytime from the recipe builder.
+            </p>
+            <div className="close-modal__actions">
+              <button
+                type="button"
+                className="close-modal__btn"
+                onClick={() => setCancelTarget(null)}
+                disabled={cancelBusy}
+              >
+                Keep schedule
+              </button>
+              <button
+                type="button"
+                className="close-modal__btn close-modal__btn--danger"
+                onClick={() => void confirmCancelAll()}
+                disabled={cancelBusy}
+              >
+                {cancelBusy ? 'Canceling…' : 'Cancel schedule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

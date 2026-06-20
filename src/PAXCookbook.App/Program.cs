@@ -1001,9 +1001,26 @@ internal static class Program
                 return Results.Json(new { error = "invalid_recipe_id", recipeId = id },
                     statusCode: StatusCodes.Status400BadRequest);
             }
+            // Cleanup case 1: capture the recipe's schedule BEFORE the save so the
+            // save flow can detect an unchecked-schedule transition and remove the
+            // now-orphaned Windows Scheduled Task. Read-only; never fails the save.
+            RecipeReadModel.ScheduleInfo? priorSchedule =
+                RecipeReadModel.ReadRecipeSchedule(workspacePath, id);
             object? updateBody = await JsonModel.ReadBodyAsync(context);
             (int status, object responseBody) =
                 RecipeUpdateModel.Handle(workspacePath, versionInfo, id, updateBody);
+            if (status >= 200 && status < 300 && priorSchedule is not null && priorSchedule.Enabled)
+            {
+                RecipeReadModel.ScheduleInfo? nowSchedule =
+                    RecipeReadModel.ReadRecipeSchedule(workspacePath, id);
+                if (nowSchedule is null || !nowSchedule.Enabled)
+                {
+                    // The recipe was saved without an enabled schedule: remove the
+                    // orphaned OS task (best-effort; the save already succeeded).
+                    RecipeScheduleModel.UnregisterTaskForRecipe(
+                        workspacePath, appRoot!, id, priorSchedule.ScheduledTaskId);
+                }
+            }
             return Results.Json(responseBody, statusCode: status);
         });
 
@@ -1019,6 +1036,16 @@ internal static class Program
             {
                 return Results.Json(new { error = "invalid_recipe_id", recipeId = id },
                     statusCode: StatusCodes.Status400BadRequest);
+            }
+            // Cleanup case 2: if a scheduled task exists for this recipe, remove it
+            // BEFORE the recipe is deleted so no orphaned task keeps firing for a
+            // recipe that no longer exists. Best-effort; never blocks the delete.
+            RecipeReadModel.ScheduleInfo? schedule =
+                RecipeReadModel.ReadRecipeSchedule(workspacePath, id);
+            if (schedule is not null && !string.IsNullOrWhiteSpace(schedule.ScheduledTaskId))
+            {
+                RecipeScheduleModel.UnregisterTaskForRecipe(
+                    workspacePath, appRoot!, id, schedule.ScheduledTaskId);
             }
             (int status, object responseBody) =
                 RecipeDeleteModel.Handle(workspacePath, id);
@@ -1497,6 +1524,15 @@ internal static class Program
             return context.Response.WriteAsync(log.Text);
         });
 
+        // Upcoming-schedule read surface. A read-only projection of every active
+        // recipe's enabled schedule plus its computed next local fire time. The
+        // pre-update bake check calls this to avoid stopping a bake that is about
+        // to start. Same auth posture as the cook GETs (Bearer enforced upstream,
+        // not on the lock-bypass allow-list); it never touches the scheduler,
+        // never shells the registrar, never runs PAX, and never reads a secret.
+        app.MapGet("/api/v1/schedule/upcoming",
+            () => Results.Json(RecipeReadModel.ListUpcomingScheduled(workspacePath), statusCode: StatusCodes.Status200OK));
+
         app.MapPost("/api/v1/recipes/{id}/cook", CookStartHandler);
         app.MapPost("/api/v1/recipes/{id}/cook/scheduled", CookStartScheduledHandler);
         app.MapPost("/api/v1/cooks/{id}/stop", CookStopHandler);
@@ -1608,6 +1644,23 @@ internal static class Program
             (int status, object body) = RecipeScheduleModel.GetScheduledTask(
                 workspacePath, appRoot!, id,
                 registrarPathOverride: null, taskFolderOverride: null, pwshOverride: null);
+            return Results.Json(body, statusCode: status);
+        });
+
+        // Skip-next-bake (Bakes "Upcoming bakes" panel). Records that the recipe's
+        // single next scheduled run should be skipped by writing a skip-marker file
+        // the cook supervisor consumes at fire time. It does NOT touch the OS task
+        // or the schedule block, so the schedule keeps firing and only this one
+        // occurrence is skipped. State-changing POST: Bearer + CSRF + the broker
+        // lock are enforced upstream; it never runs PAX and reads no secret.
+        app.MapPost("/api/v1/recipes/{id}/scheduled-task/skip-next", (string id) =>
+        {
+            if (!RecipeReadModel.IsValidRecipeId(id))
+            {
+                return Results.Json(new { error = "invalid_recipe_id", recipeId = id },
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+            (int status, object body) = RecipeScheduleModel.SkipNextScheduledRun(workspacePath, id);
             return Results.Json(body, statusCode: status);
         });
 
@@ -2240,6 +2293,16 @@ internal static class Program
         //    means this returns only AFTER the cook has fully finalized.
         (int status, object body) = RecipeReadModel.StartScheduledCook(
             workspacePath, versionInfo, engine, recipeId, cookMinFreeBytes, cookPwshPathOverride);
+
+        // Skip-next marker matched: the operator chose to skip this single run.
+        // It is a clean no-op (no cook row, no PAX), the marker was consumed, and
+        // the schedule keeps firing on its normal cadence — so exit 0.
+        if (status == 200 &&
+            string.Equals(ReadStringMember(body, "error"), "bake_skipped", StringComparison.Ordinal))
+        {
+            Console.WriteLine($"X7_SCHEDULED_RUN=skipped recipeId={recipeId} trigger=scheduled");
+            return 0;
+        }
 
         // d. Any non-201 is a refusal BEFORE/INSTEAD of a successful run
         //    (recipe_not_scheduled, recipe_invalid, acquisitionRequired,

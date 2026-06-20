@@ -244,6 +244,8 @@ internal static class RecipeScheduleModel
             return (500, new { error = "schedule_persist_failed", recipeId, detail = ex.Message });
         }
 
+        // The schedule is gone; sweep any skip-next marker so it cannot linger.
+        ScheduleSkipMarker.Clear(workspacePath, recipeId);
         return (200, new { recipeId, schedule = (object?)null });
     }
 
@@ -287,6 +289,81 @@ internal static class RecipeScheduleModel
             osTask,
             drift = storedEnabled != osPresent,
         });
+    }
+
+    // =================================================================
+    // Skip-next-bake + task cleanup (Bakes "Upcoming bakes" panel)
+    // =================================================================
+
+    // POST /api/v1/recipes/{id}/scheduled-task/skip-next — record that the recipe's
+    // NEXT scheduled run should be skipped. Writes a skip-marker file (consumed by
+    // the cook supervisor at fire time); does NOT touch the OS task or the schedule
+    // block, so the schedule keeps firing and only this one occurrence is skipped.
+    // Refuses (409) when the recipe has no enabled schedule.
+    public static (int Status, object Body) SkipNextScheduledRun(
+        string workspacePath,
+        string recipeId)
+    {
+        if (!RecipeReadModel.IsValidRecipeId(recipeId))
+        {
+            return (400, new { error = "invalid_recipe_id", recipeId });
+        }
+
+        RecipeReadModel.ScheduleInfo? schedule = RecipeReadModel.ReadRecipeSchedule(workspacePath, recipeId);
+        if (schedule is null || !schedule.Enabled)
+        {
+            return (409, new
+            {
+                error = "recipe_not_scheduled",
+                recipeId,
+                message = "This recipe has no enabled schedule, so there is no upcoming bake to skip.",
+            });
+        }
+
+        DateTimeOffset? next = RecipeReadModel.ComputeNextRun(schedule, DateTimeOffset.Now);
+        if (next is null)
+        {
+            return (409, new
+            {
+                error = "no_upcoming_run",
+                recipeId,
+                message = "This schedule has no computable next run to skip.",
+            });
+        }
+
+        string skippedRunAt = ScheduleSkipMarker.Write(workspacePath, recipeId, next.Value);
+        return (200, new { recipeId, skippedRunAt });
+    }
+
+    // Best-effort unregister of a recipe's Windows Scheduled Task — the single
+    // cleanup primitive shared by all three paths that must remove an orphaned
+    // task: (1) a recipe saved without a schedule, (2) a recipe deleted, and
+    // (3) "Cancel all future bakes". Idempotent (a missing task succeeds via the
+    // registrar's no_task_present exit 0) and never throws; it also clears any
+    // skip marker so nothing stale lingers. It does NOT rewrite the recipe file
+    // (callers own the schedule-block / row state).
+    public static void UnregisterTaskForRecipe(
+        string workspacePath,
+        string appRoot,
+        string recipeId,
+        string? scheduledTaskId,
+        string? registrarPathOverride = null,
+        string? taskFolderOverride = null,
+        string? pwshOverride = null)
+    {
+        try
+        {
+            RunRegistrar(
+                "unregister", workspacePath, recipeId, scheduledTaskId ?? string.Empty,
+                recurrenceJson: null,
+                registrarPathOverride, taskFolderOverride, pwshOverride, appRoot);
+        }
+        catch
+        {
+            // Best-effort: a cleanup failure must never fail the save/delete that
+            // triggered it.
+        }
+        ScheduleSkipMarker.Clear(workspacePath, recipeId);
     }
 
     // =================================================================

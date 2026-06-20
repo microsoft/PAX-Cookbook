@@ -24,7 +24,12 @@ import {
   getLastCheckedUtc,
   type UpdateComponentStatus,
 } from '../host/updateCheck';
-import { applyUpdate, shutdownBroker } from '../host/brokerBridge';
+import {
+  applyUpdate,
+  shutdownBroker,
+  listCooks,
+  listUpcomingScheduled,
+} from '../host/brokerBridge';
 import { postCloseDecision } from '../host/closeHandoff';
 import { setUpdatesBadge } from './shellNav';
 import {
@@ -135,6 +140,54 @@ function normSha(sha: string | null | undefined): string | null {
   return t.length > 0 ? t : null;
 }
 
+// Which pre-update bake warning to show, if any.
+type BakeGate = 'running' | 'scheduled';
+
+// A scheduled bake counts as "imminent" when it is set to start within this
+// window from now. Updating now would prevent it from running on time.
+const SCHEDULED_SOON_MS = 10 * 60 * 1000;
+
+// Pre-update bake check. Quick (one or two read-only broker calls) and
+// fail-open: if any call fails or times out the check is skipped and the caller
+// proceeds with the update, because a failed bake check must never block an
+// update. Returns the warning to show, or null when nothing is running or due
+// soon. Order matters: a currently-running bake takes precedence over a
+// scheduled one.
+async function detectBakeGate(): Promise<BakeGate | null> {
+  try {
+    const cooks = await listCooks({ timeoutMs: 5000 });
+    if (cooks.ok && cooks.data) {
+      const running = cooks.data.cooks.some(
+        (c) => (c.status ?? '').trim().toLowerCase() === 'running',
+      );
+      if (running) {
+        return 'running';
+      }
+    }
+
+    const upcoming = await listUpcomingScheduled({ timeoutMs: 5000 });
+    if (upcoming.ok && upcoming.data) {
+      const now = Date.now();
+      const soon = upcoming.data.scheduled.some((s) => {
+        const t = new Date(s.nextRunAt).getTime();
+        if (Number.isNaN(t)) {
+          return false;
+        }
+        const delta = t - now;
+        return delta <= SCHEDULED_SOON_MS && delta >= -1000;
+      });
+      if (soon) {
+        return 'scheduled';
+      }
+    }
+
+    return null;
+  } catch {
+    // Fail-open: never block an update because the bake check itself failed.
+    return null;
+  }
+}
+
 export function UpdatesWorkspace() {
   const [phase, setPhase] = useState<LoadPhase>('loading');
   const [version, setVersion] = useState<RuntimeVersionInfo | null>(null);
@@ -236,6 +289,10 @@ export function UpdatesWorkspace() {
   const [applying, setApplying] = useState(false);
   const applyingRef = useRef(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  // Pre-update bake warning (running / scheduled-soon), or null when none.
+  const [bakeGate, setBakeGate] = useState<BakeGate | null>(null);
+  // Guards the bake check itself against re-entry from a double-click.
+  const gateBusyRef = useRef(false);
 
   async function runCheck() {
     setApplyError(null);
@@ -263,7 +320,33 @@ export function UpdatesWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Entry point for both "Update now" buttons. Before any update is applied,
+  // run a quick pre-update bake check: warn if a bake is currently running, or
+  // if one is scheduled to start within the next few minutes. The check is
+  // fail-open (a failed broker call never blocks the update). When nothing is
+  // running or due soon, the update starts immediately with no extra click.
   async function handleApplyUpdate() {
+    if (applyingRef.current || gateBusyRef.current) {
+      return;
+    }
+    gateBusyRef.current = true;
+    let gate: BakeGate | null = null;
+    try {
+      gate = await detectBakeGate();
+    } finally {
+      gateBusyRef.current = false;
+    }
+    if (gate) {
+      setBakeGate(gate);
+      return;
+    }
+    startApply();
+  }
+
+  // Applies the update: launches the PAX Cookbook Updater, then makes a
+  // good-faith effort to exit this app so no installed file stays locked.
+  async function startApply() {
+    setBakeGate(null);
     setApplying(true);
     applyingRef.current = true;
     setApplyError(null);
@@ -542,6 +625,48 @@ export function UpdatesWorkspace() {
           </dl>
         </article>
       </div>
+
+      {bakeGate ? (
+        <div className="close-modal" role="presentation">
+          <div
+            className="close-modal__scrim"
+            role="presentation"
+            onClick={() => setBakeGate(null)}
+          />
+          <div
+            className="close-modal__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bake-gate-title"
+            aria-describedby="bake-gate-body"
+          >
+            <h2 id="bake-gate-title" className="close-modal__title">
+              {bakeGate === 'running' ? 'A bake is currently running' : 'A bake is scheduled soon'}
+            </h2>
+            <p id="bake-gate-body" className="close-modal__body">
+              {bakeGate === 'running'
+                ? 'Updating now will stop the running bake. Any partial results may be lost.'
+                : 'A scheduled bake is set to run within the next few minutes. Updating now will prevent it from running on time.'}
+            </p>
+            <div className="close-modal__actions">
+              <button
+                type="button"
+                className="close-modal__btn"
+                onClick={() => setBakeGate(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="close-modal__btn close-modal__btn--danger"
+                onClick={() => void startApply()}
+              >
+                Update anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

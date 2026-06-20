@@ -682,6 +682,66 @@ export function listCooks(
   return request<CookListBody>('GET', COOKS_PATH, undefined, options);
 }
 
+/** One enabled scheduled bake with its computed next local fire time. */
+export interface UpcomingScheduledBake {
+  recipeId: string;
+  name: string;
+  /** ISO 8601 next local fire time (with offset). */
+  nextRunAt: string;
+  /** The schedule's recurrence, for frequency display ("Every day at 7:00 AM"). */
+  recurrence: {
+    kind: string;
+    hour: number;
+    minute: number;
+    daysOfWeek?: number[] | null;
+  };
+}
+
+/** Body of GET /api/v1/schedule/upcoming. */
+export interface UpcomingScheduleBody {
+  /** Broker's clock at projection time (ISO 8601). */
+  now: string;
+  /** Every active recipe whose schedule is enabled, with its next fire time. */
+  scheduled: UpcomingScheduledBake[];
+}
+
+/**
+ * GET /api/v1/schedule/upcoming — read-only projection of enabled scheduled
+ * bakes plus each one's computed next local fire time. Used by the pre-update
+ * bake check to warn before an update would stop or pre-empt a bake. Never
+ * touches the scheduler, never runs PAX, never reads a secret.
+ */
+export function listUpcomingScheduled(
+  options: RecipeRequestOptions = {},
+): Promise<BrokerResponse<UpcomingScheduleBody>> {
+  return request<UpcomingScheduleBody>('GET', '/api/v1/schedule/upcoming', undefined, options);
+}
+
+/** Body of POST /api/v1/recipes/{id}/scheduled-task/skip-next. */
+export interface SkipNextBody {
+  recipeId: string;
+  /** ISO 8601 run time that was marked to be skipped. */
+  skippedRunAt: string;
+}
+
+/**
+ * POST /api/v1/recipes/{id}/scheduled-task/skip-next — skip the recipe's single
+ * next scheduled run. Writes a skip marker the cook supervisor consumes at fire
+ * time; the OS task and the schedule are left intact, so the schedule keeps
+ * firing and only this one occurrence is skipped.
+ */
+export function skipNextScheduledBake(
+  recipeId: string,
+  options: RecipeRequestOptions = {},
+): Promise<BrokerResponse<SkipNextBody>> {
+  return request<SkipNextBody>(
+    'POST',
+    '/api/v1/recipes/' + encodeURIComponent(recipeId) + '/scheduled-task/skip-next',
+    {},
+    options,
+  );
+}
+
 /** GET /api/v1/cooks/{cookId} — fetch one cook's recorded detail. */
 export function getCook(
   cookId: string,

@@ -43,6 +43,14 @@
     var OVERLAY_ID    = 'cookbook-lock-overlay';
     var BODY_CLASS    = 'cookbook-lock-active';
 
+    // Background lock-state poll cadence. The broker's inactivity sweep can lock
+    // the session at any moment with no page interaction; without this poll the
+    // overlay would only appear on the next page-driven fetch that hits 423,
+    // leaving the app looking unlocked and interactive after it is already
+    // locked. /broker/lock-state is loopback + allowlisted-when-locked, so a poll
+    // every few seconds is cheap; this makes the lock appear in near real time.
+    var LOCK_POLL_MS  = 12000;
+
     // Module-scoped state. A second event firing while the overlay is
     // already up does NOT remount it -- we just refresh the message.
     // Two events of the same kind coalesce to one render.
@@ -2257,6 +2265,16 @@
         });
     }
 
+    // Recurring lock-state poll. Fires every LOCK_POLL_MS so an inactivity-sweep
+    // lock surfaces the overlay in near real time instead of waiting for the
+    // user's next click to hit a 423. While the overlay is already up the unlock
+    // flow owns the transition, so the poll skips (re-probing would re-render the
+    // locked view and could disrupt an in-progress Windows Hello prompt).
+    function pollLockState() {
+        if (state.mounted) { return; }
+        probeLockStateOnce();
+    }
+
     // ----------------------------------------------------------------
     // UX-1H5 -- Copy diagnostics + WebAuthn probe ladder
     // ----------------------------------------------------------------
@@ -2687,6 +2705,9 @@
         } else {
             document.addEventListener('DOMContentLoaded', probeLockStateOnce, { once: true });
         }
+        // Keep probing so an inactivity-sweep lock shows the overlay immediately,
+        // not just on the next page-driven 423.
+        try { window.setInterval(pollLockState, LOCK_POLL_MS); } catch (e) {}
     }
 
     // Diagnostics-only surface. NOT meant for page modules.

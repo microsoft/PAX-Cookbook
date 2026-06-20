@@ -7,7 +7,7 @@
  * Tips). It reads the saved recipe list (read-only) to populate the recent and
  * attention panels; it never runs PAX, bakes, schedules, or reads a secret.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listRecipes, listCooks, getCook, openPath, openFile } from '../host/brokerBridge';
 import type {
   RecipeSummary,
@@ -15,6 +15,7 @@ import type {
   CookDetailBody,
   CookOutputSummary,
 } from '../host/brokerBridge';
+import { usePolling } from '../host/usePolling';
 import {
   requestShellSection,
   rememberPendingSelect,
@@ -404,78 +405,76 @@ export function DesktopHome() {
   const [importError, setImportError] = useState<string | null>(null);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let cancelled = false;
-    setPhase('loading');
-    void listRecipes()
-      .then(res => {
-        if (cancelled) {
-          return;
-        }
-        if (res.ok && res.data) {
-          setRecipes(res.data.recipes ?? []);
-          setPhase('loaded');
-        } else {
-          setPhase('error');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPhase('error');
-        }
-      });
+    mountedRef.current = true;
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
   }, []);
 
-  // Load cook history (read-only) for the Last Bake card, the per-recipe
-  // last-run status, and the Recent Outputs list. The newest cooks' details
-  // (output files + dashboard target) are fetched in parallel; all of it is
-  // best-effort and additive — a failure just leaves a section empty.
-  useEffect(() => {
-    let cancelled = false;
-    setCooksPhase('loading');
-    void listCooks()
-      .then(async res => {
-        if (cancelled) {
-          return;
+  // Load everything the Home surface shows — recent recipes plus cook history
+  // for the Last Bake card, per-recipe last-run status, and Recent Outputs.
+  // A foreground load (background=false) shows the loading states; a background
+  // poll refresh is quiet and merge-in-place: it never flips back to 'loading',
+  // never clears existing data, and silently skips a failed cycle, so a
+  // transient broker hiccup never blanks the page while the user is reading it.
+  const loadHome = useCallback(async (background = false) => {
+    if (!background) {
+      setPhase('loading');
+      setCooksPhase('loading');
+    }
+    const [recipesRes, cooksRes] = await Promise.all([
+      listRecipes().catch(() => null),
+      listCooks().catch(() => null),
+    ]);
+    if (!mountedRef.current) {
+      return;
+    }
+
+    if (recipesRes && recipesRes.ok && recipesRes.data) {
+      setRecipes(recipesRes.data.recipes ?? []);
+      setPhase('loaded');
+    } else if (!background) {
+      setPhase('error');
+    }
+
+    if (cooksRes && cooksRes.ok && cooksRes.data) {
+      const list = cooksRes.data.cooks ?? [];
+      setCooks(list);
+      setCooksPhase('loaded');
+      const top = list.slice(0, 5);
+      const details = await Promise.all(
+        top.map(c =>
+          getCook(c.cookId)
+            .then(d => (d.ok && d.data ? d.data : null))
+            .catch(() => null),
+        ),
+      );
+      if (!mountedRef.current) {
+        return;
+      }
+      const map: Record<string, CookDetailBody> = {};
+      for (const d of details) {
+        if (d) {
+          map[d.cookId] = d;
         }
-        if (!res.ok || !res.data) {
-          setCooksPhase('error');
-          return;
-        }
-        const list = res.data.cooks ?? [];
-        setCooks(list);
-        setCooksPhase('loaded');
-        const top = list.slice(0, 5);
-        const details = await Promise.all(
-          top.map(c =>
-            getCook(c.cookId)
-              .then(d => (d.ok && d.data ? d.data : null))
-              .catch(() => null),
-          ),
-        );
-        if (cancelled) {
-          return;
-        }
-        const map: Record<string, CookDetailBody> = {};
-        for (const d of details) {
-          if (d) {
-            map[d.cookId] = d;
-          }
-        }
-        setDetailByCook(map);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCooksPhase('error');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+      }
+      setDetailByCook(map);
+    } else if (!background) {
+      setCooksPhase('error');
+    }
   }, []);
+
+  // Poll the Home surface every 30 seconds. The first call is a foreground load
+  // (shows the loading states); later calls are quiet background refreshes.
+  const homeFirstRef = useRef(true);
+  const pollHome = useCallback(async () => {
+    const background = !homeFirstRef.current;
+    homeFirstRef.current = false;
+    await loadHome(background);
+  }, [loadHome]);
+  usePolling(pollHome, 30000);
 
   useEffect(() => {
     if (!importMenuOpen) {

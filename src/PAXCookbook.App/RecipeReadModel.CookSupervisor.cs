@@ -233,6 +233,23 @@ internal static partial class RecipeReadModel
                     message = "This recipe has no enabled schedule; a scheduled run is not authorized.",
                 });
             }
+
+            // Skip-next-bake marker (operator chose to skip this one run from the
+            // Bakes "Upcoming bakes" panel). Checked here, BEFORE any folder, row,
+            // or child is created, so a skipped run is a clean no-op that leaves
+            // the OS task and the schedule untouched — only THIS occurrence is
+            // skipped, and the marker is consumed so the next run proceeds. The
+            // marker carries no secret (constraint 14) and never starts PAX.
+            if (ScheduleSkipMarker.ShouldSkipAndConsume(workspacePath, recipeId, DateTimeOffset.Now))
+            {
+                return (200, new
+                {
+                    status = "skipped",
+                    error = "bake_skipped",
+                    recipeId,
+                    message = "This scheduled run was skipped at the operator's request; the schedule continues.",
+                });
+            }
         }
 
         // CK-3: the bounded App-registration 501 boundary is gone. App-registration

@@ -1354,36 +1354,6 @@
             });
         }
 
-        // Topbar Reload button. The static button starts enabled so it
-        // is usable even before any page has mounted (e.g. the lock-
-        // overlay state, or while a page is still being torn down). A
-        // mounted page module may install its own click handler that
-        // performs an in-place data refresh; in that case it sets
-        // window.PaxTopbar.pageReloadBound = true on mount and clears
-        // the flag on teardown. The handler below runs alongside any
-        // page-installed handler (addEventListener composes) and bails
-        // when the page has claimed the click, so the Reload button
-        // never double-fires (page data refresh AND full document
-        // reload) for the same click. With no page claim, fall back
-        // to a safe full document reload.
-        var reloadBtn = byId('reload-button');
-        if (reloadBtn) {
-            reloadBtn.disabled = false;
-            reloadBtn.addEventListener('click', function () {
-                if (window.PaxTopbar && window.PaxTopbar.pageReloadBound) {
-                    return;
-                }
-                try {
-                    window.location.reload();
-                } catch (_e) {
-                    // window.location.reload() is synchronous and does
-                    // not normally throw; swallow defensively so a
-                    // browser-side oddity cannot wedge the UI in a
-                    // broken state on click.
-                }
-            });
-        }
-
         document.addEventListener('click', onDocumentClick, false);
         document.addEventListener('keydown', onKeyDown, false);
     }

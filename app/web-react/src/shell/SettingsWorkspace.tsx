@@ -14,11 +14,12 @@
  * is sent only on save and is never returned (the surface shows only whether a
  * token is configured). No tenant data is ever shown or transmitted.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
 import { ContextualHelpButton } from '../components/ContextualHelpButton';
 import { StatusCard } from './StatusCard';
 import { openShellHelp, requestPantryUserGuide, requestShellSection } from './shellNav';
+import { usePolling } from '../host/usePolling';
 import { CopyButton } from '../features/mini-kitchen/components/CopyButton';
 import {
   getRuntimeVersion,
@@ -481,49 +482,68 @@ export function SettingsWorkspace() {
     requestShellSection('updates');
   }
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let cancelled = false;
-    setPhase('loading');
-    void Promise.all([
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Load the read-only status block (version, PAX engine, health, app-lock,
+  // Windows Hello). A foreground load (background=false) shows the loading
+  // state; a background poll refresh is quiet and merge-in-place: it never flips
+  // back to 'loading', never clears a value that previously read, and silently
+  // skips a failed cycle so a transient broker hiccup never blanks the cards.
+  // The Startup auto-start toggle is deliberately NOT polled — it is a user
+  // control, and a background refresh must never fight a toggle in progress.
+  const loadStatus = useCallback(async (background = false) => {
+    if (!background) {
+      setPhase('loading');
+    }
+    const [v, e, h, l, p] = await Promise.all([
       getRuntimeVersion(),
       getPaxEngineState(),
       getHealth(),
       getLockState(),
       getSignInProtection(),
-    ])
-      .then(([v, e, h, l, p]) => {
-        if (cancelled) {
-          return;
-        }
-        if (v.ok) {
-          setVersion(v.data);
-        }
-        if (e.ok) {
-          setEngine(e.data);
-        }
-        if (h.ok) {
-          setHealth(h.data);
-        }
-        if (l.ok) {
-          setLock(l.data);
-        }
-        if (p.ok) {
-          setProtect(p.data);
-        }
-        // The page is ready when any core read (version/engine/health) lands.
-        // The lock/Hello reads are additive: if they fail, the Security rows
-        // fall back to "Not reported" rather than failing the whole page.
-        setPhase(v.ok || e.ok || h.ok ? 'ready' : 'error');
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPhase('error');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+    ]).catch(() => [null, null, null, null, null] as const);
+    if (!mountedRef.current) {
+      return;
+    }
+    if (v && v.ok) {
+      setVersion(v.data);
+    }
+    if (e && e.ok) {
+      setEngine(e.data);
+    }
+    if (h && h.ok) {
+      setHealth(h.data);
+    }
+    if (l && l.ok) {
+      setLock(l.data);
+    }
+    if (p && p.ok) {
+      setProtect(p.data);
+    }
+    // The page is ready when any core read (version/engine/health) lands. On a
+    // background cycle, never downgrade a page that already rendered.
+    const anyCore = Boolean((v && v.ok) || (e && e.ok) || (h && h.ok));
+    if (!background) {
+      setPhase(anyCore ? 'ready' : 'error');
+    } else if (anyCore) {
+      setPhase('ready');
+    }
   }, []);
+
+  // Poll the status block every 60 seconds (first call foreground, rest quiet).
+  const statusFirstRef = useRef(true);
+  const pollStatus = useCallback(async () => {
+    const background = !statusFirstRef.current;
+    statusFirstRef.current = false;
+    await loadStatus(background);
+  }, [loadStatus]);
+  usePolling(pollStatus, 60000);
 
   const appVersion =
     version?.cookbookVersion ?? health?.appVersion ?? NOT_REPORTED;
