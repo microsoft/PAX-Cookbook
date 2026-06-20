@@ -344,7 +344,7 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
             }
         }
 
-        return parsed.Verb switch
+        int verbRc = parsed.Verb switch
         {
             "install" => InstallVerb.Run(parsed, m, payloadRoot, installRoot, log,
                                          shellOps: BuildShellOperations(),
@@ -353,6 +353,25 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
             "repair"  => RepairVerb.Run(parsed, m, payloadRoot, installRoot, log, shellOps: BuildShellOperations()),
             _         => SetupExitCodes.UsageError
         };
+
+        // Record what was installed (payload SHA + app version) for the in-app
+        // self-updater. Best-effort: a failure never fails an otherwise-good
+        // install/update.
+        if (verbRc == SetupExitCodes.Ok &&
+            (parsed.Verb == "install" || parsed.Verb == "update" || parsed.Verb == "repair"))
+        {
+            try
+            {
+                InstalledSkusWriter.Write(installRoot, m.AppVersion, downloadedZip);
+            }
+            catch (Exception ex)
+            {
+                log.Write("installed-skus-write-failed", "warn",
+                    new Dictionary<string, object?> { ["detail"] = ex.Message });
+            }
+        }
+
+        return verbRc;
     }
     finally
     {

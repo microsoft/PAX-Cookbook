@@ -821,7 +821,7 @@ internal static class Program
         // only. None of them mutate broker state, touch SQLite, acquire the PAX
         // engine, or invoke the PAX script.
         app.MapGet("/api/v1/runtime/version",
-            () => Results.Json(BuildRuntimeVersionPayload(versionInfo, port), statusCode: StatusCodes.Status200OK));
+            () => Results.Json(BuildRuntimeVersionPayload(versionInfo, port, appRoot), statusCode: StatusCodes.Status200OK));
 
         // Engine acquisition state (X14). Reports manifest-driven acquisition
         // state by reading install-state.json metadata and re-hashing the
@@ -1286,6 +1286,16 @@ internal static class Program
         {
             object? autostartBody = await JsonModel.ReadBodyAsync(context);
             (int status, object body) = AutoStartSettingsModel.Set(autostartBody, workspacePath, appRoot);
+            return Results.Json(body, statusCode: status);
+        });
+
+        // POST /api/v1/updates/apply — start an in-place update by handing off to
+        // the installed Setup's `update` verb (which downloads the latest payload,
+        // stops every PAX Cookbook process, and copies the new files). Bearer +
+        // CSRF + broker-lock gates run upstream; NOT lock-bypass.
+        app.MapPost("/api/v1/updates/apply", () =>
+        {
+            (int status, object body) = UpdateApplyModel.Apply(appRoot);
             return Results.Json(body, statusCode: status);
         });
 
@@ -2980,6 +2990,13 @@ internal static class Program
                     string? s = bt.GetString();
                     if (!string.IsNullOrWhiteSpace(s)) { buildTimestamp = s; }
                 }
+                if (buildTimestamp is null &&
+                    cookbook.TryGetProperty("releaseTimestamp", out var rt) &&
+                    rt.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    string? s = rt.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) { buildTimestamp = s; }
+                }
             }
 
             if (root.TryGetProperty("paxScript", out var pax) && pax.ValueKind == System.Text.Json.JsonValueKind.Object)
@@ -3182,13 +3199,17 @@ internal static class Program
 
     // GET /api/v1/runtime/version — read-only runtime metadata. Values are read
     // verbatim from app\VERSION.json at startup; nothing is recomputed.
-    private static object BuildRuntimeVersionPayload(VersionInfo v, int port)
+    private static object BuildRuntimeVersionPayload(VersionInfo v, int port, string appRoot)
     {
         return new
         {
             cookbookVersion = v.CookbookVersion,
             releaseChannel = v.ReleaseChannel,
             buildTimestamp = v.BuildTimestamp,
+            // The SHA-256 of the payload zip this build was installed from, recorded
+            // by the installer in installed-skus.json. Null on installs that predate
+            // the self-update feature; the updater falls back to version/timestamp.
+            installedPayloadSha256 = ReadInstalledPayloadSha(appRoot),
             bundledPax = new
             {
                 version = v.PaxVersion,
@@ -3211,6 +3232,32 @@ internal static class Program
                 deferredSections = new[] { "manifest", "host", "paths", "updateReadiness" },
             },
         };
+    }
+
+    // The SHA-256 of the payload zip this build was installed from, recorded by
+    // the installer in <appRoot>\installed-skus.json. Returns null when the file
+    // is absent (installs predating the self-update feature) or unreadable; the
+    // updater then falls back to version/build-timestamp comparison.
+    private static string? ReadInstalledPayloadSha(string appRoot)
+    {
+        try
+        {
+            string path = Path.Combine(appRoot, "installed-skus.json");
+            if (!File.Exists(path)) { return null; }
+            using FileStream fs = File.OpenRead(path);
+            using var doc = System.Text.Json.JsonDocument.Parse(fs);
+            if (doc.RootElement.TryGetProperty("payloadSha256", out var p) &&
+                p.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                string? s = p.GetString();
+                return string.IsNullOrWhiteSpace(s) ? null : s;
+            }
+        }
+        catch
+        {
+            // Absent or unreadable — treated as unknown.
+        }
+        return null;
     }
 
     // GET /api/v1/setup/acquire-pax/state is served by EngineAcquisition

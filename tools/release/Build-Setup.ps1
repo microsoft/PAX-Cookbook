@@ -427,14 +427,32 @@ Invoke-Step 'update versions.json manifest' {
             }
         } catch { }
     }
+    # Read the build/release timestamp as the RAW JSON string (ConvertFrom-Json
+    # coerces ISO dates to [datetime], which would stringify in a different
+    # format than the app reports from the same VERSION.json field, causing a
+    # spurious "new build" in the timestamp-fallback comparison). The app's
+    # buildTimestamp falls back to cookbook.releaseTimestamp, so match that.
+    $builtAtUtc = ''
+    $vjRaw = Get-Content -LiteralPath $versionJson -Raw
+    if ($vjRaw -match '"buildTimestamp"\s*:\s*"([^"]+)"') {
+        $builtAtUtc = $Matches[1]
+    } elseif ($vjRaw -match '"releaseTimestamp"\s*:\s*"([^"]+)"') {
+        $builtAtUtc = $Matches[1]
+    }
     $vm = [ordered]@{
         schemaVersion = 1
         current = [ordered]@{
             version = $AppVersion
+            builtAtUtc = $builtAtUtc
             payload = [ordered]@{
                 filename = 'PAX_Cookbook_Payload.zip'
                 sha256   = $payloadHash
                 size     = $payloadSize
+            }
+            setup = [ordered]@{
+                filename = 'PAX_Cookbook_Setup.exe'
+                sha256   = $finalHash
+                size     = $finalSize
             }
             engine = [ordered]@{
                 version = $versionInfo.paxScript.version
@@ -444,7 +462,7 @@ Invoke-Step 'update versions.json manifest' {
         }
     }
     $vm | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $versionsPath -Encoding UTF8
-    Log "  versions.json updated: payload sha=$payloadHash size=$payloadSize engine=$($versionInfo.paxScript.version)"
+    Log "  versions.json updated: payload sha=$payloadHash setup sha=$finalHash engine=$($versionInfo.paxScript.version) builtAtUtc=$builtAtUtc"
 }
 
 # ---------------------------------------------------------------------

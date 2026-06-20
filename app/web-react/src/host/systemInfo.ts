@@ -33,6 +33,8 @@ export interface RuntimeVersionInfo {
   cookbookVersion: string | null;
   releaseChannel: string | null;
   buildTimestamp: string | null;
+  /** SHA-256 of the payload zip this build was installed from (installer-recorded); null on older installs. */
+  installedPayloadSha256: string | null;
   bundledPax: {
     version: string | null;
     sha256: string | null;
@@ -202,6 +204,7 @@ export async function getRuntimeVersion(): Promise<ReadResult<RuntimeVersionInfo
       cookbookVersion: str(data.cookbookVersion),
       releaseChannel: str(data.releaseChannel),
       buildTimestamp: str(data.buildTimestamp),
+      installedPayloadSha256: str(data.installedPayloadSha256),
       bundledPax: {
         version: str(pax.version),
         sha256: str(pax.sha256),

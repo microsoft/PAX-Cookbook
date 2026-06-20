@@ -18,7 +18,8 @@ import { useEffect, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
 import { ContextualHelpButton } from '../components/ContextualHelpButton';
 import { StatusCard } from './StatusCard';
-import { openShellHelp, requestShellSection, requestPantryUserGuide } from './shellNav';
+import { openShellHelp, requestPantryUserGuide } from './shellNav';
+import { runUpdateCheck } from '../host/updateController';
 import { CopyButton } from '../features/mini-kitchen/components/CopyButton';
 import {
   getRuntimeVersion,
@@ -474,6 +475,22 @@ export function SettingsWorkspace() {
   const [lock, setLock] = useState<LockStateInfo | null>(null);
   const [protect, setProtect] = useState<SignInProtectionInfo | null>(null);
 
+  // Manual update check. The shell owns the "Updates available" modal; here we
+  // only surface the up-to-date / offline outcome inline.
+  const [updateCheckState, setUpdateCheckState] =
+    useState<'idle' | 'checking' | 'uptodate' | 'unavailable'>('idle');
+  async function handleCheckForUpdates() {
+    setUpdateCheckState('checking');
+    const result = await runUpdateCheck();
+    if (result.status === 'up-to-date') {
+      setUpdateCheckState('uptodate');
+    } else if (result.status === 'unavailable') {
+      setUpdateCheckState('unavailable');
+    } else {
+      setUpdateCheckState('idle');
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     setPhase('loading');
@@ -605,10 +622,16 @@ export function SettingsWorkspace() {
             <button
               type="button"
               className="dvw-settings__updates-btn"
-              onClick={() => requestShellSection('updates')}
+              onClick={() => void handleCheckForUpdates()}
+              disabled={updateCheckState === 'checking'}
             >
-              Check for updates
+              {updateCheckState === 'checking' ? 'Checking\u2026' : 'Check for updates'}
             </button>
+            {updateCheckState === 'uptodate' ? (
+              <span className="dvw-settings__updates-label">PAX Cookbook is up to date.</span>
+            ) : updateCheckState === 'unavailable' ? (
+              <span className="dvw-settings__updates-label">Couldn&rsquo;t check just now — are you online?</span>
+            ) : null}
           </div>
         </section>
 

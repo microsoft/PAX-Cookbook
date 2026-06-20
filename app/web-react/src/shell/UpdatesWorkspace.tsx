@@ -19,6 +19,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
+import { runUpdateCheck } from '../host/updateController';
+import { getLastCheckedUtc } from '../host/updateCheck';
 import {
   getRuntimeVersion,
   getPaxEngineState,
@@ -51,6 +53,23 @@ function engineStatusLabel(
     return 'Needs attention';
   }
   return 'Not installed';
+}
+
+function formatLastCheckedLabel(iso: string | null): string | null {
+  if (!iso) {
+    return null;
+  }
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    return null;
+  }
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 export function UpdatesWorkspace() {
@@ -118,7 +137,7 @@ export function UpdatesWorkspace() {
       ['Build date', buildDate],
       ['Release channel', channel],
       ['PAX engine', engineStatus],
-      ['Update checking', 'Not available in this build'],
+      ['Update checking', 'Automatic + manual'],
       ['Engine fingerprint', approvedSha ?? NOT_REPORTED],
     ];
     const labelWidth = Math.max(...rows.map(([key]) => key.length)) + 2;
@@ -138,6 +157,26 @@ export function UpdatesWorkspace() {
     copyResetRef.current = window.setTimeout(() => setCopied(false), 2000);
   }
 
+  // Manual update check. The shell owns the "Updates available" modal; here we
+  // only surface the no-update / offline outcome inline and the last-checked
+  // time. The auto-check on startup keeps `lastChecked` fresh on its own.
+  const [checkState, setCheckState] = useState<'idle' | 'checking' | 'uptodate' | 'unavailable'>('idle');
+  const [lastChecked, setLastChecked] = useState<string | null>(() => getLastCheckedUtc());
+  async function handleCheckForUpdates() {
+    setCheckState('checking');
+    const result = await runUpdateCheck();
+    setLastChecked(getLastCheckedUtc());
+    if (result.status === 'up-to-date') {
+      setCheckState('uptodate');
+    } else if (result.status === 'unavailable') {
+      setCheckState('unavailable');
+    } else {
+      // Updates available — the shell modal takes over; clear inline status.
+      setCheckState('idle');
+    }
+  }
+  const lastCheckedLabel = formatLastCheckedLabel(lastChecked);
+
   return (
     <section aria-labelledby="view-updates">
       <SectionHeader
@@ -152,7 +191,6 @@ export function UpdatesWorkspace() {
         <article className="card settings-card">
           <div className="card__top">
             <h3 className="card__title">Installed app</h3>
-            <span className="chip chip--local">Internal build</span>
           </div>
           <p className="card__body">
             The version of PAX Cookbook installed on this PC.
@@ -172,7 +210,6 @@ export function UpdatesWorkspace() {
         <article className="card settings-card">
           <div className="card__top">
             <h3 className="card__title">PAX Engine</h3>
-            <span className="chip chip--local">Managed by PAX Cookbook</span>
           </div>
           <p className="card__body">
             PAX Cookbook manages and verifies the audit engine for you. Its version
@@ -210,25 +247,31 @@ export function UpdatesWorkspace() {
         <article className="card settings-card">
           <div className="card__top">
             <h3 className="card__title">Update checking</h3>
-            <span className="chip chip--local">Internal testing</span>
           </div>
           <p className="card__body">
-            This build doesn’t check for updates online. To move to a newer version,
-            run the PAX Cookbook installer you were given.
+            PAX Cookbook checks for updates automatically when you open it. You can
+            also check manually at any time.
           </p>
-          <dl className="settings-kv">
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">Online update check</dt>
-              <dd className="settings-kv__val">Not available in this build</dd>
-            </div>
-            <div className="settings-kv__row">
-              <dt className="settings-kv__key">How to update</dt>
-              <dd className="settings-kv__val">Run the installer you were given</dd>
-            </div>
-          </dl>
-          <p className="settings-note">
-            Your saved recipes stay on this PC when you install a newer build.
-          </p>
+          <div className="dvw-settings__updates">
+            <button
+              type="button"
+              className="dvw-settings__updates-btn"
+              onClick={() => void handleCheckForUpdates()}
+              disabled={checkState === 'checking'}
+            >
+              {checkState === 'checking' ? 'Checking\u2026' : 'Check for updates'}
+            </button>
+          </div>
+          {checkState === 'uptodate' ? (
+            <p className="settings-note">PAX Cookbook is up to date.</p>
+          ) : checkState === 'unavailable' ? (
+            <p className="settings-note">
+              Couldn&rsquo;t check for updates just now. Make sure you are online, then try again.
+            </p>
+          ) : null}
+          {lastCheckedLabel ? (
+            <p className="settings-note">Last checked: {lastCheckedLabel}</p>
+          ) : null}
         </article>
 
         <article className="card settings-card">
@@ -236,17 +279,14 @@ export function UpdatesWorkspace() {
             <h3 className="card__title">Before updating</h3>
           </div>
           <p className="card__body">
-            A couple of things worth knowing before you install a newer internal build.
+            PAX Cookbook handles updates automatically.
           </p>
           <ul className="upd-list">
             <li className="upd-list__item">
-              Close PAX Cookbook before you run the internal release package.
+              Your saved recipes stay on this PC and are not affected by updates.
             </li>
             <li className="upd-list__item">
-              Your saved recipes stay on this PC and are not removed by installing a newer build.
-            </li>
-            <li className="upd-list__item">
-              The PAX engine is re-verified by fingerprint after an update before it is used.
+              The PAX engine is re-verified by fingerprint after every update before it is used.
             </li>
           </ul>
         </article>

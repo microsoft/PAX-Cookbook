@@ -1652,3 +1652,24 @@ export function shutdownBroker(
 ): Promise<BrokerResponse<ShutdownResult>> {
   return request<ShutdownResult>('POST', SHUTDOWN_PATH, undefined, options);
 }
+
+const UPDATES_APPLY_PATH = '/api/v1/updates/apply';
+
+/** Body of POST /api/v1/updates/apply. */
+export interface ApplyUpdateResult {
+  ok?: boolean;
+  message?: string;
+}
+
+/**
+ * POST /api/v1/updates/apply — start an in-place update. The broker hands off to
+ * the installed Setup's `update` verb, which downloads the latest payload from
+ * the GitHub Release, stops every PAX Cookbook process, and copies the new
+ * files. The app then closes to finish; a pre-copy failure leaves the existing
+ * install intact. Bearer + CSRF + lock gated like every other route.
+ */
+export function applyUpdate(
+  options: RecipeRequestOptions = {},
+): Promise<BrokerResponse<ApplyUpdateResult>> {
+  return request<ApplyUpdateResult>('POST', UPDATES_APPLY_PATH, undefined, options);
+}

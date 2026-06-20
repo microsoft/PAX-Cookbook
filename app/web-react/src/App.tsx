@@ -27,7 +27,10 @@ import {
   postCloseDecision,
   subscribeHostCloseRequest,
 } from './host/closeHandoff';
-import { listCooks, shutdownBroker } from './host/brokerBridge';
+import { listCooks, shutdownBroker, applyUpdate } from './host/brokerBridge';
+import { setUpdateResultListener, runUpdateCheck } from './host/updateController';
+import type { UpdateComponent } from './host/updateCheck';
+import { UpdateAvailableModal } from './components/UpdateAvailableModal';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
 
 // Embedded content-only mode. When the React surface is hosted inside the
@@ -91,6 +94,67 @@ function App() {
   // "stay" restores the legacy hash (which re-posts `mk-nav` for that section);
   // consuming it keeps the builder mounted instead of remounting it.
   const suppressNavSectionRef = useRef<string | null>(null);
+
+  // Self-update. The shell owns the "Updates available" modal; the startup
+  // auto-check runs once, and Settings/Updates can trigger a manual check via
+  // the update controller, whose result is relayed to the listener below.
+  const [updateModal, setUpdateModal] = useState<{
+    open: boolean;
+    components: UpdateComponent[];
+    applying: boolean;
+    error: string | null;
+  }>({ open: false, components: [], applying: false, error: null });
+  const autoUpdateCheckedRef = useRef(false);
+  useEffect(() => {
+    setUpdateResultListener((result) => {
+      if (result.status === 'updates-available' && result.components.length > 0) {
+        setUpdateModal({
+          open: true,
+          components: result.components,
+          applying: false,
+          error: null,
+        });
+      }
+    });
+    // Auto-check once on startup. Fire-and-forget: any failure to reach GitHub
+    // resolves to a silent skip (no error, no modal).
+    if (!autoUpdateCheckedRef.current) {
+      autoUpdateCheckedRef.current = true;
+      void runUpdateCheck();
+    }
+    return () => setUpdateResultListener(null);
+  }, []);
+  const handleUpdateNow = () => {
+    setUpdateModal((m) => ({ ...m, applying: true, error: null }));
+    void (async () => {
+      const res = await applyUpdate();
+      if (!res.ok) {
+        setUpdateModal((m) => ({
+          ...m,
+          applying: false,
+          error: 'Could not start the update. Make sure you are online, then try again.',
+        }));
+      }
+      // On success the installer closes the app shortly; leave "Updating\u2026".
+    })();
+  };
+  const handleUpdateLater = () => {
+    setUpdateModal({ open: false, components: [], applying: false, error: null });
+  };
+
+  // Scroll the content surface back to the top on every navigation (nav-rail or
+  // in-app link). The scroll container persists across section swaps, so without
+  // this a tall page (e.g. Settings) would open already scrolled down.
+  useEffect(() => {
+    try {
+      window.scrollTo(0, 0);
+      document.scrollingElement?.scrollTo?.(0, 0);
+      document.querySelector('.app-main')?.scrollTo?.(0, 0);
+      document.querySelector('.app-main__content')?.scrollTo?.(0, 0);
+    } catch {
+      /* best-effort: a missing scroller is harmless */
+    }
+  }, [sectionKey]);
 
   // File-open import handoff. When the Windows app launched (or re-activated)
   // PAX Cookbook from a double-clicked .paxlite / .pax file, it navigated here
@@ -382,6 +446,15 @@ function App() {
           onCloseApp={handleCloseApp}
           bakeRunning={bakeRunning}
         />
+
+        <UpdateAvailableModal
+          open={updateModal.open}
+          components={updateModal.components}
+          applying={updateModal.applying}
+          error={updateModal.error}
+          onUpdateNow={handleUpdateNow}
+          onUpdateLater={handleUpdateLater}
+        />
       </div>
     );
   }
@@ -497,6 +570,15 @@ function App() {
         onMinimize={handleCloseMinimize}
         onCloseApp={handleCloseApp}
         bakeRunning={bakeRunning}
+      />
+
+      <UpdateAvailableModal
+        open={updateModal.open}
+        components={updateModal.components}
+        applying={updateModal.applying}
+        error={updateModal.error}
+        onUpdateNow={handleUpdateNow}
+        onUpdateLater={handleUpdateLater}
       />
     </div>
   );
