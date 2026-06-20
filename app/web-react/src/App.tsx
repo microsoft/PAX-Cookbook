@@ -13,7 +13,7 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactEl
 import { SHELL_SECTIONS } from './shell/sections';
 import { consultNavigationGuard } from './shell/navigationGuard';
 import { shellSectionHash, type ShellSectionId } from './shell/shellNav';
-import { setUpdatesBadge } from './shell/shellNav';
+import { setUpdatesBadge, requestShellSection } from './shell/shellNav';
 import {
   clearImportTicketFromUrl,
   consumeImport,
@@ -32,6 +32,7 @@ import { listCooks, shutdownBroker, applyUpdate } from './host/brokerBridge';
 import { setUpdateResultListener, runUpdateCheck } from './host/updateController';
 import type { UpdateComponent } from './host/updateCheck';
 import { UpdateAvailableModal } from './components/UpdateAvailableModal';
+import { StartupUpdateModal } from './components/StartupUpdateModal';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
 
 // Embedded content-only mode. When the React surface is hosted inside the
@@ -106,25 +107,116 @@ function App() {
     error: string | null;
   }>({ open: false, components: [], applying: false, error: null });
   const autoUpdateCheckedRef = useRef(false);
+  // Startup "updates available" modal. The auto-check result is captured here
+  // (whether updates exist + whether the check has completed); a separate effect
+  // waits for Windows Hello unlock and then shows the modal once. sessionStorage
+  // keeps a "Not now" dismissal until the next app restart (the process/window
+  // restart clears it) without nagging mid-session.
+  const STARTUP_MODAL_SUPPRESS_KEY = 'pax.updates.startupModalDismissed';
+  const [startupUpdateOpen, setStartupUpdateOpen] = useState(false);
+  const autoUpdateDoneRef = useRef(false);
+  const autoUpdateHasUpdatesRef = useRef(false);
+  const startupModalResolvedRef = useRef(false);
   useEffect(() => {
     setUpdateResultListener((result) => {
-      // The startup auto-check is deliberately NON-intrusive: it never pops the
-      // "Updates available" modal. When an update is found it only lights a
-      // subtle dot on the Settings nav item so the user can open Updates when
-      // ready; the Updates page runs its own check and owns the apply flow. The
-      // dot is cleared when the Updates page is opened.
-      setUpdatesBadge(
-        result.status === 'updates-available' && result.components.length > 0,
-      );
+      // The startup auto-check lights the subtle Settings nav dot (secondary
+      // reminder) AND records whether updates exist so the startup modal effect
+      // can decide. Manual checks from Settings/Updates do NOT reach this
+      // listener (the Updates page calls checkForUpdates directly), so the modal
+      // is startup-only.
+      const hasUpdates =
+        result.status === 'updates-available' && result.components.length > 0;
+      setUpdatesBadge(hasUpdates);
+      autoUpdateHasUpdatesRef.current = hasUpdates;
+      autoUpdateDoneRef.current = true;
     });
     // Auto-check once on startup. Fire-and-forget: any failure to reach GitHub
-    // resolves to a silent skip (no error, no modal).
+    // resolves to a silent skip (status 'unavailable' -> no modal).
     if (!autoUpdateCheckedRef.current) {
       autoUpdateCheckedRef.current = true;
       void runUpdateCheck();
     }
     return () => setUpdateResultListener(null);
   }, []);
+
+  // Show the startup update modal AFTER Windows Hello unlock, once, when the
+  // auto-check found updates and the user has not dismissed it this session.
+  // No updates, a failed check, or a prior "Not now" -> never shown (straight to
+  // the app).
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const tick = async (): Promise<void> => {
+      if (cancelled || startupModalResolvedRef.current) {
+        return;
+      }
+      let dismissed = false;
+      try {
+        dismissed = window.sessionStorage.getItem(STARTUP_MODAL_SUPPRESS_KEY) === '1';
+      } catch {
+        /* sessionStorage disabled — treat as not dismissed */
+      }
+      if (dismissed) {
+        startupModalResolvedRef.current = true;
+        return;
+      }
+      // Wait for the auto-check to finish before deciding.
+      if (!autoUpdateDoneRef.current) {
+        timer = window.setTimeout(() => void tick(), LOCK_POLL_INTERVAL_MS);
+        return;
+      }
+      // Check finished with no updates (or it failed -> 'unavailable') -> done,
+      // no modal.
+      if (!autoUpdateHasUpdatesRef.current) {
+        startupModalResolvedRef.current = true;
+        return;
+      }
+      // Updates exist — hold the modal until Windows Hello unlock completes.
+      let lockState: string | null = null;
+      try {
+        lockState = await fetchLockState();
+      } catch {
+        lockState = null;
+      }
+      if (cancelled) {
+        return;
+      }
+      if (lockState !== 'Unlocked') {
+        timer = window.setTimeout(() => void tick(), LOCK_POLL_INTERVAL_MS);
+        return;
+      }
+      startupModalResolvedRef.current = true;
+      setStartupUpdateOpen(true);
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, []);
+
+  const handleStartupViewUpdates = () => {
+    setStartupUpdateOpen(false);
+    // Production: the embedded surface asks the legacy shell to switch sections.
+    requestShellSection('updates');
+    // Standalone fallback (no legacy shell): drive the React view directly.
+    setActiveId('updates');
+    setNavKey((k) => k + 1);
+  };
+  const handleStartupNotNow = () => {
+    setStartupUpdateOpen(false);
+    // Suppress until the next app restart (clears with the session).
+    try {
+      window.sessionStorage.setItem(STARTUP_MODAL_SUPPRESS_KEY, '1');
+    } catch {
+      /* best-effort */
+    }
+    requestShellSection('home');
+    setActiveId('home');
+    setNavKey((k) => k + 1);
+  };
   const handleUpdateNow = () => {
     setUpdateModal((m) => ({ ...m, applying: true, error: null }));
     // Safety net: a successful apply closes the app within a few seconds (the
@@ -474,6 +566,12 @@ function App() {
           onUpdateNow={handleUpdateNow}
           onUpdateLater={handleUpdateLater}
         />
+
+        <StartupUpdateModal
+          open={startupUpdateOpen}
+          onViewUpdates={handleStartupViewUpdates}
+          onNotNow={handleStartupNotNow}
+        />
       </div>
     );
   }
@@ -598,6 +696,12 @@ function App() {
         error={updateModal.error}
         onUpdateNow={handleUpdateNow}
         onUpdateLater={handleUpdateLater}
+      />
+
+      <StartupUpdateModal
+        open={startupUpdateOpen}
+        onViewUpdates={handleStartupViewUpdates}
+        onNotNow={handleStartupNotNow}
       />
     </div>
   );

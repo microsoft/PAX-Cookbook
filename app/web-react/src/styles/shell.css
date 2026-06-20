@@ -882,6 +882,88 @@ button {
   }
 }
 
+/* Startup "updates available" modal — shown once after Windows Hello unlock.
+   The scrim heavily blurs everything behind so nothing is readable. */
+.startup-update {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6, 24px);
+}
+
+.startup-update__scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--c-ink-strong, #11181c) 38%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.startup-update__dialog {
+  position: relative;
+  width: min(440px, 100%);
+  background: var(--c-card, #fff);
+  border: 1px solid var(--c-border, rgba(0, 0, 0, 0.12));
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg, 0 24px 60px rgba(0, 0, 0, 0.28));
+  padding: var(--sp-6, 24px);
+}
+
+.startup-update__title {
+  margin: 0 0 var(--sp-2, 8px) 0;
+  font-size: var(--fs-18, 18px);
+  font-weight: 700;
+  color: var(--c-ink-strong, #11181c);
+}
+
+.startup-update__body {
+  margin: 0 0 var(--sp-5, 20px) 0;
+  font-size: var(--fs-14, 14px);
+  line-height: var(--lh-base, 1.5);
+  color: var(--c-ink, #2b3137);
+}
+
+.startup-update__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-3, 12px);
+}
+
+.startup-update__btn {
+  padding: var(--sp-2, 8px) var(--sp-4, 16px);
+  border: 1px solid var(--c-border, rgba(0, 0, 0, 0.16));
+  border-radius: var(--r-sm, 6px);
+  background: var(--c-surface, #fff);
+  font: inherit;
+  font-size: var(--fs-14, 14px);
+  font-weight: 600;
+  color: var(--c-ink, #2b3137);
+  cursor: pointer;
+}
+
+.startup-update__btn:hover {
+  background: var(--c-surface-hover, rgba(0, 0, 0, 0.04));
+}
+
+.startup-update__btn--primary {
+  border-color: var(--c-blue, #0a6ed1);
+  background: var(--c-blue, #0a6ed1);
+  color: #fff;
+}
+
+.startup-update__btn--primary:hover {
+  filter: brightness(0.96);
+  background: var(--c-blue, #0a6ed1);
+}
+
+.startup-update__btn:focus-visible {
+  outline: 2px solid var(--c-blue, #0a6ed1);
+  outline-offset: 2px;
+}
+
 .keys-mode-row {
   flex-direction: column;
   align-items: stretch;
