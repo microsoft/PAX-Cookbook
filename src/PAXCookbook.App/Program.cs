@@ -3235,12 +3235,15 @@ internal static class Program
     }
 
     // The SHA-256 of the payload zip this build was installed from, recorded by
-    // the installer in <appRoot>\installed-skus.json. Returns null when the file
-    // is absent (installs predating the self-update feature) or unreadable; the
-    // updater then falls back to version/build-timestamp comparison.
+    // the installer in <installRoot>\installed-skus.json (the install root, the
+    // parent of appRoot, alongside install-state.json). Returns null when the
+    // file is absent (installs predating the self-update feature) or unreadable;
+    // the updater then falls back to version comparison.
     private static string? ReadInstalledPayloadSha(string appRoot)
     {
-        string path = Path.Combine(appRoot, "installed-skus.json");
+        string? installRoot = Path.GetDirectoryName(
+            appRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        string path = Path.Combine(installRoot ?? appRoot, "installed-skus.json");
         try
         {
             if (!File.Exists(path))

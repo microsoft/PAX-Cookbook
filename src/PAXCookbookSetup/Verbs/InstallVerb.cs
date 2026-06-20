@@ -16,7 +16,8 @@ public static class InstallVerb
                           IPayloadOperations? payloadOps = null,
                           IShellOperations? shellOps = null,
                           Action<string>? progress = null,
-                          IAppStopper? appStopper = null)
+                          IAppStopper? appStopper = null,
+                          string? payloadZipPath = null)
     {
         payloadOps ??= DefaultPayloadOperations.Instance;
         appStopper ??= new RealAppStopper();
@@ -60,6 +61,21 @@ public static class InstallVerb
                 log.Write("install-app-stop-error", "warn",
                     new Dictionary<string, object?> { ["detail"] = ex.Message });
             }
+        }
+
+        // Stale-state safety: remove any pre-existing installed-skus.json (a
+        // generated sidecar at the install root, never part of the payload) so a
+        // failed install can never leave a stale payload SHA behind. The success
+        // path rewrites it at the end with the SHA of the payload just installed.
+        try
+        {
+            string staleSkus = Path.Combine(installRoot, "installed-skus.json");
+            if (File.Exists(staleSkus)) { File.Delete(staleSkus); }
+        }
+        catch (Exception ex)
+        {
+            log.Write("installed-skus-prewipe-failed", "warn",
+                new Dictionary<string, object?> { ["detail"] = ex.Message });
         }
 
         var appRoot = Path.Combine(installRoot, "App");
@@ -268,6 +284,22 @@ public static class InstallVerb
                 log.Write("install-shell-failed", "warn",
                     new Dictionary<string, object?> { ["detail"] = ex.Message });
             }
+        }
+
+        // Record what was installed (payload SHA + app version) for the in-app
+        // self-updater. This is the LAST write into the install tree, so the SHA
+        // it records reflects the payload that was just copied. It lives HERE
+        // (the shared GUI-wizard + CLI install chokepoint), not only in the CLI
+        // dispatcher, so a normal double-click install produces the file too.
+        // Best-effort: a failure never fails an otherwise-good install.
+        try
+        {
+            InstalledSkusWriter.Write(installRoot, m.AppVersion, payloadZipPath, log);
+        }
+        catch (Exception ex)
+        {
+            log.Write("installed-skus-write-failed", "warn",
+                new Dictionary<string, object?> { ["detail"] = ex.Message });
         }
 
         log.Write("install-complete", fields: new Dictionary<string, object?>

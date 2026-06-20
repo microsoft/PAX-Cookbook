@@ -112,7 +112,8 @@ public static class WizardInstallRunner
                 RemoveUserData: false, ConfirmRemoveUserData: false, Errors: new List<string>());
 
             int rc = InstallVerb.Run(parsed, m, payloadRoot, installRoot, log,
-                                     shellOps: shellOps, progress: progress);
+                                     shellOps: shellOps, progress: progress,
+                                     payloadZipPath: downloadedZipPath);
             if (rc != SetupExitCodes.Ok)
                 return Fail(rc, $"Installation failed (exit code {rc}). See the Setup log for details.");
 

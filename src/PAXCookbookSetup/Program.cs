@@ -344,19 +344,17 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
             }
         }
 
-        // Stale-state safety for upgrades / install-over-existing: remove any
-        // pre-existing installed-skus.json BEFORE running the verb. It is a
-        // generated sidecar (never part of the payload/manifest), so an old one
-        // from a prior install would otherwise survive the copy untouched. The
-        // writer below rewrites it with the SHA of the payload just installed.
-        // Guaranteeing it is either freshly-correct or absent (never stale)
-        // means the in-app updater can never read a stale SHA and falsely report
-        // "updates available" after a clean install over an existing one.
-        if (parsed.Verb == "install" || parsed.Verb == "update" || parsed.Verb == "repair")
+        // Stale-state safety for update / repair: remove any pre-existing
+        // installed-skus.json BEFORE running the verb so a stale SHA can never
+        // survive. (The install verb handles its own pre-wipe + write internally,
+        // because the GUI wizard reaches InstallVerb WITHOUT going through this
+        // dispatcher.) It is a generated sidecar at the install root, never part
+        // of the payload/manifest.
+        if (parsed.Verb == "update" || parsed.Verb == "repair")
         {
             try
             {
-                string staleSkus = Path.Combine(installRoot, "App", "installed-skus.json");
+                string staleSkus = Path.Combine(installRoot, "installed-skus.json");
                 if (File.Exists(staleSkus)) File.Delete(staleSkus);
             }
             catch (Exception ex)
@@ -370,28 +368,23 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
         {
             "install" => InstallVerb.Run(parsed, m, payloadRoot, installRoot, log,
                                          shellOps: BuildShellOperations(),
-                                         progress: parsed.Quiet ? null : Console.WriteLine),
+                                         progress: parsed.Quiet ? null : Console.WriteLine,
+                                         payloadZipPath: downloadedZip),
             "update"  => UpdateVerb.Run(parsed, m, payloadRoot, installRoot, log, shellOps: BuildShellOperations()),
             "repair"  => RepairVerb.Run(parsed, m, payloadRoot, installRoot, log, shellOps: BuildShellOperations()),
             _         => SetupExitCodes.UsageError
         };
 
-        // Record what was installed (payload SHA + app version) for the in-app
-        // self-updater. Best-effort: a failure never fails an otherwise-good
-        // install/update. This is the LAST write into the install tree, so the
-        // SHA it records always reflects the payload that was just copied.
+        // Record what was installed for update / repair (install records it
+        // inside InstallVerb so the GUI wizard path is covered too). Best-effort:
+        // a failure never fails an otherwise-good update. The writer logs and
+        // self-verifies the install-root file.
         if (verbRc == SetupExitCodes.Ok &&
-            (parsed.Verb == "install" || parsed.Verb == "update" || parsed.Verb == "repair"))
+            (parsed.Verb == "update" || parsed.Verb == "repair"))
         {
             try
             {
-                InstalledSkusWriter.Write(installRoot, m.AppVersion, downloadedZip);
-                log.Write("installed-skus-written", fields: new Dictionary<string, object?>
-                {
-                    ["appVersion"] = m.AppVersion,
-                    ["payloadSource"] = src.Origin,
-                    ["payloadShaRecorded"] = downloadedZip is not null,
-                });
+                InstalledSkusWriter.Write(installRoot, m.AppVersion, downloadedZip, log);
             }
             catch (Exception ex)
             {
