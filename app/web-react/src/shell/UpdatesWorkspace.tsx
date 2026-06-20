@@ -439,14 +439,27 @@ export function UpdatesWorkspace() {
             also check manually at any time.
           </p>
           <div className="dvw-settings__updates">
-            <button
-              type="button"
-              className="dvw-settings__updates-btn"
-              onClick={() => void runCheck()}
-              disabled={checkState === 'checking'}
-            >
-              {checkState === 'checking' ? 'Checking\u2026' : 'Check for updates'}
-            </button>
+            {checkState === 'available' ? (
+              // Updates are available: this button applies them (same flow and
+              // primary color as the "Update now" button at the top of the page).
+              <button
+                type="button"
+                className="dvw-settings__updates-btn"
+                onClick={() => void handleApplyUpdate()}
+                disabled={applying}
+              >
+                {applying ? 'Updating\u2026' : 'Update now'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="dvw-settings__updates-btn"
+                onClick={() => void runCheck()}
+                disabled={checkState === 'checking'}
+              >
+                {checkState === 'checking' ? 'Checking\u2026' : 'Check for updates'}
+              </button>
+            )}
           </div>
           {lastCheckedLabel ? (
             <p className="settings-note">Last checked: {lastCheckedLabel}</p>
