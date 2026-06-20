@@ -179,6 +179,8 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       fromVersion: installedApp,
       toVersion: remoteApp,
       newBuildOnly: false,
+      fromBuild: installedBuildTs,
+      toBuild: remoteBuiltAt,
     });
   } else if (
     sameVersion(remoteApp, installedApp) &&
@@ -198,6 +200,8 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       fromVersion: installedApp,
       toVersion: remoteApp,
       newBuildOnly: true,
+      fromBuild: installedBuildTs,
+      toBuild: remoteBuiltAt,
     });
   }
 

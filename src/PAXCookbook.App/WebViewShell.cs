@@ -817,14 +817,27 @@ internal static class WebViewShell
                 // Non-fatal: force-show is a best-effort correction.
             }
 
-            // The window has now reached its final maximized, foreground state
-            // (or the best-effort attempt has completed). Release the deferred
-            // first navigation so React — and the Windows Hello unlock prompt it
-            // raises — only loads against the settled window. Set unconditionally
-            // even if a show call above threw, so a transient failure can never
-            // leave the shell permanently blank.
-            windowSettled = true;
-            TryStartFirstNavigation();
+            // The window has now been shown maximized and brought to the
+            // foreground, but the maximize ANIMATION needs a beat to finish on
+            // the display before the system positions an owner-anchored dialog
+            // correctly. Releasing the first navigation the instant the show
+            // call returned still let the Windows Hello unlock prompt
+            // occasionally anchor to the mid-animation window and land in the
+            // top-left corner. A short, deliberate delay AFTER the show — before
+            // the first navigation (which loads React and raises the unlock
+            // prompt) — covers the animation reliably across systems without
+            // feeling slow. A non-blocking one-shot timer is used so the UI
+            // thread keeps pumping during the wait.
+            var settleTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            settleTimer.Tick += (_, _) =>
+            {
+                settleTimer.Stop();
+                settleTimer.Dispose();
+                if (form.IsDisposed) { return; }
+                windowSettled = true;
+                TryStartFirstNavigation();
+            };
+            settleTimer.Start();
         };
         forceShowTimer.Start();
 

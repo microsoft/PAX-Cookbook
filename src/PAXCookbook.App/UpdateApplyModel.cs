@@ -52,35 +52,34 @@ internal static class UpdateApplyModel
         }
 
         string dotnet = DotNetLaunch.DotNetExePath();
-        string cmd = $"\"{dotnet}\" \"{setupDll}\" install --quiet";
+        string cmd = $"\"{dotnet}\" \"{setupDll}\" apply-update";
         LogApply(installRoot, "apply requested; launching updater: " + cmd);
 
         try
         {
-            // Run the INSTALL verb, not UPDATE: the update verb no-ops on a
-            // same-version target (every self-update is 1.0.0 -> 1.0.0, only the
-            // payload SHA changes) and never stops the running app. The install
-            // verb always stops every PAX Cookbook process (IAppStopper) and
-            // copies the freshly downloaded payload over the install — exactly
-            // the "install over a running app" path. --quiet keeps it
-            // non-interactive and skips the prerequisite wizard.
+            // Run the apply-update verb: a VISIBLE update wizard that downloads
+            // the latest payload, stops every PAX Cookbook process (IAppStopper)
+            // and copies it over the install — the proven "install over a running
+            // app" path — while showing progress, then ends on a completion
+            // screen with Open / Close. (Unlike the old hidden `install --quiet`,
+            // the entire update is now visible to the user.)
             //
             // UseShellExecute=true launches the updater THROUGH the shell, so it
             // is re-parented away from this broker. That matters: the installer
             // stops every PAX Cookbook process (a process-tree kill), and if the
             // updater were a child of this broker it would kill itself
             // mid-update. Detaching lets it outlive the broker it is replacing.
-            // The window is hidden so no console flashes.
+            // WindowStyle is left Normal so the wizard window shows; the Setup
+            // hides only its own dotnet.exe console at startup, not the window.
             var psi = new ProcessStartInfo
             {
                 FileName = dotnet,
                 UseShellExecute = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
+                WindowStyle = ProcessWindowStyle.Normal,
                 WorkingDirectory = installRoot,
             };
             psi.ArgumentList.Add(setupDll);
-            psi.ArgumentList.Add("install");
-            psi.ArgumentList.Add("--quiet");
+            psi.ArgumentList.Add("apply-update");
 
             Process? proc = Process.Start(psi);
             if (proc is null)
@@ -96,13 +95,13 @@ internal static class UpdateApplyModel
             int? pid = null;
             try { pid = proc.Id; } catch { /* may have already exited */ }
             LogApply(installRoot, $"updater launched OK (pid={pid?.ToString() ?? "unknown"}). "
-                + "The installer will now stop and replace the app.");
+                + "The updater wizard will download, stop and replace the app, then show a finish screen.");
 
             return (202, new
             {
                 ok = true,
-                message = "PAX Cookbook is updating. The app will close to finish, "
-                    + "then you can reopen it.",
+                message = "The PAX Cookbook Updater is opening. It will download the update, "
+                    + "then close PAX Cookbook to finish.",
             });
         }
         catch (Exception ex)

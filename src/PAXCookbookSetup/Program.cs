@@ -52,7 +52,8 @@ static bool IsGuiSetupInvocation(string[] a)
     }
     return a.Length > 0
         && (string.Equals(a[0], "uninstall", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(a[0], "repair", StringComparison.OrdinalIgnoreCase))
+            || string.Equals(a[0], "repair", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(a[0], "apply-update", StringComparison.OrdinalIgnoreCase))
         && Environment.UserInteractive;
 }
 
@@ -96,6 +97,16 @@ static int Run(string[] argv)
         {
             case "status":
                 return StatusVerb.Run(installRoot, log, Console.Out, BuildShellOperations());
+
+            // Visible in-place update wizard, launched by the running app's
+            // broker ("Update now"). It runs in its OWN detached process and
+            // reuses the proven download + install path with visible progress,
+            // ending on a completion screen (Open / Close). It does NOT go
+            // through self-handoff: PayloadCopier only writes App\ files (the
+            // manifest is App-scoped), so the installed Setup DLL this process
+            // runs from is never a copy target and is never locked.
+            case "apply-update":
+                return UpdateGuiHost.Run(installRoot, log);
 
             case "uninstall":
             case "install":

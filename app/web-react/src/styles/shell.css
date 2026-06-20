@@ -747,6 +747,76 @@ button {
   }
 }
 
+/* Side-by-side Installed/Available comparison on the Updates page. */
+.upd-compare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.upd-compare__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.upd-compare__name {
+  margin: 0;
+  font-size: var(--fs-15);
+  font-weight: 700;
+  color: var(--c-ink-strong);
+}
+
+.upd-compare__cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+
+.upd-compare__col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border, rgba(0, 0, 0, 0.12));
+  border-radius: var(--r-sm, 6px);
+  background: var(--c-surface, #fff);
+}
+
+.upd-compare__col-head {
+  margin: 0 0 2px 0;
+  font-size: var(--fs-12);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-ink-soft, #57606a);
+}
+
+.upd-compare__line {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.upd-compare__built {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--c-ink-soft, #57606a);
+}
+
+.upd-status__applying {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+@media (max-width: 640px) {
+  .upd-compare__cols {
+    grid-template-columns: 1fr;
+  }
+}
+
 .keys-mode-row {
   flex-direction: column;
   align-items: stretch;

@@ -25,7 +25,7 @@ public sealed record ParsedArgs(
 public static class ArgParser
 {
     public static readonly HashSet<string> KnownVerbs = new(StringComparer.OrdinalIgnoreCase)
-    { "install", "update", "repair", "status", "uninstall", "version", "help" };
+    { "install", "update", "repair", "status", "uninstall", "version", "help", "apply-update" };
 
     public static ParsedArgs Parse(string[] argv)
     {
