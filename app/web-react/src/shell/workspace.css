@@ -3393,6 +3393,14 @@
   max-width: 920px;
 }
 
+/* The Settings page header (.view-head, which carries the right-aligned
+   "Check for updates" action) is otherwise full-width, so the button overshot
+   the 920px column of the sections below it. Cap the header to the same column
+   so the button's right edge lines up with the section cards' right edge. */
+[aria-labelledby="view-settings"] > .view-head {
+  max-width: 920px;
+}
+
 .dvw-settings__section {
   display: flex;
   flex-direction: column;
