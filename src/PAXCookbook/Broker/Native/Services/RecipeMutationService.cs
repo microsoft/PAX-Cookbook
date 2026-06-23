@@ -64,8 +64,14 @@ public sealed class RecipeMutationService
             ["releaseChannel"]    = _createdBy.ReleaseChannel,
         };
 
-        var verdict = _validator.TestAll(body);
+        var verdict = _validator.TestForSave(body);
         if (!verdict.Ok) return CreateOutcome.ValidationFailed(verdict.Errors);
+
+        // Bake-readiness status for the recipe list badge. A recipe that
+        // passes the FULL validation is "ready"; anything saved as a partial
+        // draft is "draft". Saving is decoupled from baking, so this only
+        // drives the list badge, never the save gate above.
+        var status = _validator.TestAll(body).Ok ? "ready" : "draft";
 
         // File-first, row-second. On row-insert failure delete the file.
         var write = _snapshots.Write(id, body);
@@ -79,7 +85,8 @@ public sealed class RecipeMutationService
                 FilePath:            write.FilePath,
                 FileHash:            write.FileHash,
                 CreatedAt:           now,
-                UpdatedAt:           now));
+                UpdatedAt:           now,
+                Status:              status));
         }
         catch
         {
@@ -140,8 +147,11 @@ public sealed class RecipeMutationService
             body.Remove("createdBy");
         }
 
-        var verdict = _validator.TestAll(body);
+        var verdict = _validator.TestForSave(body);
         if (!verdict.Ok) return UpdateOutcome.ValidationFailed(verdict.Errors);
+
+        // Bake-readiness status for the recipe list badge (see Create).
+        var status = _validator.TestAll(body).Ok ? "ready" : "draft";
 
         // File-first, row-second. Capture rollback bytes.
         var oldBytes = _snapshots.ReadRawBytes(recipeId);
@@ -152,7 +162,8 @@ public sealed class RecipeMutationService
                 recipeId:  recipeId,
                 name:      GetString(body, "identity", "name") ?? "",
                 fileHash:  write.FileHash,
-                updatedAt: now);
+                updatedAt: now,
+                status:    status);
             if (affected != 1)
                 throw new InvalidOperationException("row update affected " + affected + " rows; expected 1");
         }

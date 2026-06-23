@@ -3420,8 +3420,12 @@
   display: none;
 }
 /* Push the status pill ("On" / "Configured") and the chevron to the right edge,
-   leaving the title on the left. */
-.dvw-settings__collapse-summary > .dvw-settings__head-title {
+   leaving the title on the left. The Startup/Notifications summaries wrap their
+   title in .dvw-settings__head-title; the About / Help summaries put the <h3>
+   directly in the summary — both need the title to take the leading space so
+   the chevron lands at the right edge. */
+.dvw-settings__collapse-summary > .dvw-settings__head-title,
+.dvw-settings__collapse-summary > .dvw-keys__section-head {
   margin-right: auto;
 }
 .dvw-settings__collapse-summary::after {
@@ -3441,10 +3445,15 @@
 .dvw-settings__collapse-summary:hover {
   color: var(--c-ink-strong, #0f172a);
 }
-/* Roomier spacing inside an expanded Settings section so the body content
-   (paragraphs, steps, fields) isn't cramped together. */
-.dvw-settings__collapse[open] {
-  gap: var(--sp-5);
+/* A <details> is not a dependable flex container for `gap` across engines (the
+   body content ends up smashed together), so the collapsible Settings sections
+   lay out as block flow and space their body with explicit margins. The summary
+   itself keeps its own flex layout (title + pill + chevron). */
+.dvw-settings__collapse {
+  display: block;
+}
+.dvw-settings__collapse > :not(summary) {
+  margin-top: var(--sp-4);
 }
 .dvw-settings__collapse .settings-steps {
   gap: var(--sp-2);

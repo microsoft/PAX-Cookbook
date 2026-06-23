@@ -412,7 +412,31 @@ internal static class WebViewShell
             }
             catch { /* Non-fatal: the nudge is a best-effort repaint. */ }
         }
-        web.NavigationCompleted += (_, _) => NudgeWebViewRelayout();
+
+        // The stale frame sometimes appears a beat AFTER NavigationCompleted (the
+        // page finishes painting in its un-composited state shortly after the
+        // navigation event). A single immediate nudge can fire too early to catch
+        // it, leaving the jagged text up until some later event happens to force
+        // a repaint (which can be a minute or two). Schedule a few invisible
+        // follow-up nudges so a late stale paint self-corrects within seconds.
+        void ScheduleDelayedNudge(int delayMs)
+        {
+            var t = new System.Windows.Forms.Timer { Interval = delayMs };
+            t.Tick += (_, _) =>
+            {
+                t.Stop();
+                t.Dispose();
+                NudgeWebViewRelayout();
+            };
+            t.Start();
+        }
+        web.NavigationCompleted += (_, _) =>
+        {
+            NudgeWebViewRelayout();
+            ScheduleDelayedNudge(1000);
+            ScheduleDelayedNudge(3000);
+            ScheduleDelayedNudge(8000);
+        };
 
         // Whether the next FormClosing should proceed to teardown rather than be
         // intercepted and routed to the in-app close modal. It is set true only

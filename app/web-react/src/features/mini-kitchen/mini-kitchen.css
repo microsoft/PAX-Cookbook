@@ -6633,6 +6633,16 @@ details[open] > .mk-subcollapse__summary .mk-card__chevron {
   gap: var(--sp-2);
 }
 
+/* Brief inline hint shown under the action bar — the single save requirement
+   ("a name is required") or a save failure. */
+.mk-actionbar__hint {
+  max-width: 820px;
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-base);
+  color: var(--c-amber-strong, #b45309);
+}
+
 /* Step 1 copyable recipe-ID block (relocated from the former summary rail). */
 .mk-recipe-id-block {
   display: flex;

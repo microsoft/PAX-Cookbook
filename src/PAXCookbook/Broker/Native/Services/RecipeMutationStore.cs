@@ -69,9 +69,10 @@ VALUES
     ($recipe_id, $name, NULL, '[]',
      $pax_adapter_version, $recipe_schema_version,
      $source, $source_ref, $file_path, $file_hash,
-     'ready', 0, $created_at, $updated_at);";
+     $status, 0, $created_at, $updated_at);";
         cmd.Parameters.AddWithValue("$recipe_id",             row.RecipeId);
         cmd.Parameters.AddWithValue("$name",                  row.Name);
+        cmd.Parameters.AddWithValue("$status",                row.Status);
         cmd.Parameters.AddWithValue("$pax_adapter_version",   row.PaxAdapterVersion);
         cmd.Parameters.AddWithValue("$recipe_schema_version", row.RecipeSchemaVersion);
         cmd.Parameters.AddWithValue("$source",                row.Source);
@@ -84,7 +85,7 @@ VALUES
     }
 
     // Returns affected row count (expected: 1).
-    public int UpdateNameHashTimestamp(string recipeId, string name, string fileHash, string updatedAt)
+    public int UpdateNameHashTimestamp(string recipeId, string name, string fileHash, string updatedAt, string status)
     {
         using var conn = new SqliteConnection(_connectionString);
         conn.Open();
@@ -93,11 +94,12 @@ VALUES
 UPDATE recipes
 SET name = $name,
     file_hash = $file_hash,
-    status = 'ready',
+    status = $status,
     updated_at = $updated_at
 WHERE recipe_id = $recipe_id AND deleted_at IS NULL;";
         cmd.Parameters.AddWithValue("$name",       name);
         cmd.Parameters.AddWithValue("$file_hash",  fileHash);
+        cmd.Parameters.AddWithValue("$status",     status);
         cmd.Parameters.AddWithValue("$updated_at", updatedAt);
         cmd.Parameters.AddWithValue("$recipe_id",  recipeId);
         return cmd.ExecuteNonQuery();

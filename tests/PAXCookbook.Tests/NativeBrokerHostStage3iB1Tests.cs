@@ -151,14 +151,59 @@ public class NativeBrokerHostStage3iB1Tests
         finally { await host.StopAsync(); }
     }
 
+    [Fact]
+    public async Task PostRecipe_name_only_draft_saves_with_draft_status()
+    {
+        await using var fx = await Stage3iB1Fixture.CreateAsync();
+        await using var host = new NativeBrokerHost(fx.Options)
+            .WithStage3iB1ServiceOverride(fx.BuildBundle(factoryId: FactoryRecipeId));
+        var start = await host.StartAsync();
+        try
+        {
+            using var http = new HttpClient { BaseAddress = new Uri(start.BaseUrl) };
+            // Name-only draft: schema-valid and free of security violations, but
+            // missing the completeness fields a bake needs (date range, output
+            // path). Saving is decoupled from baking, so this must persist.
+            var body = @"{""identity"":{""name"":""Draft only""},""ingredients"":{},""query"":{},""processing"":{},""destinations"":{},""auth"":{""mode"":""WebLogin"",""tenantId"":""11111111-1111-1111-1111-111111111111""}}";
+            using var resp = await http.PostAsync("/api/v1/recipes",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+            Assert.Equal((HttpStatusCode)201, resp.StatusCode);
+
+            // Row persisted, and the list-badge status reflects bake-readiness.
+            var row = fx.GetRecipeRow(FactoryRecipeId);
+            Assert.NotNull(row);
+            Assert.Equal("Draft only", row!.Value.Name);
+            Assert.Equal("draft", fx.GetRecipeStatus(FactoryRecipeId));
+        }
+        finally { await host.StopAsync(); }
+    }
+
+    [Fact]
+    public async Task PostRecipe_complete_recipe_saves_with_ready_status()
+    {
+        await using var fx = await Stage3iB1Fixture.CreateAsync();
+        await using var host = new NativeBrokerHost(fx.Options)
+            .WithStage3iB1ServiceOverride(fx.BuildBundle(factoryId: FactoryRecipeId));
+        var start = await host.StartAsync();
+        try
+        {
+            using var http = new HttpClient { BaseAddress = new Uri(start.BaseUrl) };
+            // MinimalRecipeBody is a fully bake-ready recipe.
+            using var resp = await http.PostAsync("/api/v1/recipes",
+                new StringContent(MinimalRecipeBody(), Encoding.UTF8, "application/json"));
+            Assert.Equal((HttpStatusCode)201, resp.StatusCode);
+            Assert.Equal("ready", fx.GetRecipeStatus(FactoryRecipeId));
+        }
+        finally { await host.StopAsync(); }
+    }
+
     // ============================================================
     //  PUT /api/v1/recipes/{ulid}
     // ============================================================
 
     [Fact]
     public async Task PutRecipe_updates_body_and_file_preserving_provenance()
-    {
-        await using var fx = await Stage3iB1Fixture.CreateAsync();
+    {        await using var fx = await Stage3iB1Fixture.CreateAsync();
         await using var host = new NativeBrokerHost(fx.Options)
             .WithStage3iB1ServiceOverride(fx.BuildBundle());
         var start = await host.StartAsync();
@@ -613,6 +658,22 @@ VALUES ($id, $name, $pax, $schema, 'workspace',
 
         public RecipeRowView? GetRecipeRow(string recipeId) => ReadRow(recipeId, includeDeleted: false);
         public RecipeRowView? GetRecipeRowIncludingDeleted(string recipeId) => ReadRow(recipeId, includeDeleted: true);
+
+        public string? GetRecipeStatus(string recipeId)
+        {
+            var cs = new SqliteConnectionStringBuilder
+            {
+                DataSource = DatabaseFilePath,
+                Mode       = SqliteOpenMode.ReadOnly,
+            }.ToString();
+            using var conn = new SqliteConnection(cs);
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT status FROM recipes WHERE recipe_id = $id;";
+            cmd.Parameters.AddWithValue("$id", recipeId);
+            using var reader = cmd.ExecuteReader();
+            return reader.Read() ? reader.GetString(0) : null;
+        }
 
         private RecipeRowView? ReadRow(string recipeId, bool includeDeleted)
         {

@@ -122,7 +122,6 @@ import { BakeConfirmModal } from './components/BakeConfirmModal';
 import { DiscardConfirmModal } from './components/DiscardConfirmModal';
 import { NavGuardModal } from './components/NavGuardModal';
 import { OpenRecipeConfirmModal } from './components/OpenRecipeConfirmModal';
-import { SaveRequirementsModal } from './components/SaveRequirementsModal';
 import { computeBakeBlockReason } from './lib/bakeGate';
 import './mini-kitchen.css';
 
@@ -292,6 +291,14 @@ export function MiniKitchenBuilderPreview({
     initialDraftState ?? createDefaultMiniKitchenRecipe(),
   );
 
+  // Whether a preset has been explicitly chosen (a preset card, a seeded
+  // template draft, or an opened recipe). A brand-new "New recipe" starts with
+  // NO preset chosen, so Step 1 highlights nothing and keeps all category
+  // sections collapsed until the operator picks a starting point.
+  const [presetChosen, setPresetChosen] = useState<boolean>(
+    () => Boolean(initialDraftState || initialOpenRecipeId),
+  );
+
   // When the editor was opened from a Pantry starting point, this note names
   // the source so the user knows where the pre-filled values came from. It is
   // presentation-only and never affects save or readiness.
@@ -371,9 +378,10 @@ export function MiniKitchenBuilderPreview({
   // Entra user info from a scope that includes it. Holds the pending query
   // change until the user confirms (or cancels, leaving the toggle on).
   const [entraDeselectPending, setEntraDeselectPending] = useState<LiteRecipeQuery | null>(null);
-  // When Save / Update is pressed on an incomplete recipe, this opens the
-  // "needs a few more details" dialog instead of letting the click do nothing.
-  const [saveBlockedOpen, setSaveBlockedOpen] = useState<boolean>(false);
+  // A brief inline hint shown next to the Save button — used for the single
+  // save requirement (a recipe name) and for a save failure. Saving an
+  // incomplete recipe is allowed (draft), so there is no blocking modal.
+  const [saveHint, setSaveHint] = useState<string | null>(null);
 
   // Open-a-different-recipe confirmation. When the builder holds unsaved edits
   // and a saved recipe is clicked, the chosen summary is parked here to show the
@@ -506,6 +514,9 @@ export function MiniKitchenBuilderPreview({
     setReadinessPhase('idle');
     setReadiness(null);
     setReadinessError(null);
+    // Any edit clears a stale save hint (e.g. the user fills in the name after
+    // a "name required" hint).
+    setSaveHint(null);
   }, [state]);
 
   // Record the starting state as the clean baseline for the unsaved-edits
@@ -614,6 +625,7 @@ export function MiniKitchenBuilderPreview({
       }
 
       setState(mapped.state);
+      setPresetChosen(true);
       setSavedRecipeId(summary.recipeId);
       // Editing `state` clears any prior readiness via the effect above; the
       // opened recipe is now the clean baseline for the unsaved-edits prompt.
@@ -837,25 +849,26 @@ export function MiniKitchenBuilderPreview({
 
   // Save (create) or update the recipe. Returns true only when the recipe was
   // actually persisted, so callers like "Save and leave" can continue the
-  // navigation on success and abort it (leaving the user in the builder, with
-  // the save-requirements dialog shown) on a block or failure.
-  async function handleSaveOrUpdate(force = false): Promise<boolean> {
+  // navigation on success and abort it on a block or failure. The ONLY
+  // requirement to save is a recipe name — saving is decoupled from baking, so
+  // an incomplete recipe persists as a draft and the Bake action enforces full
+  // completeness separately.
+  async function handleSaveOrUpdate(): Promise<boolean> {
     if (busy) {
       return false;
     }
+    const hasName = (state.identity.name ?? '').trim().length > 0;
+    if (!hasName) {
+      setSaveHint('A recipe name is required to save.');
+      return false;
+    }
     if (!createBuild.body) {
-      // The recipe can't be serialized at all yet (a fundamental gap). Show what
-      // is missing; there is nothing we can send to save.
-      setSaveBlockedOpen(true);
+      // Building the request body failed structurally (rare for a named
+      // recipe). Surface a brief inline hint rather than blocking silently.
+      setSaveHint('This recipe can\u2019t be saved yet. Check the recipe details above.');
       return false;
     }
-    if (!force && saveRequirements.length > 0) {
-      // Incomplete but serializable. Let the user decide in the requirements
-      // dialog: jump to a missing field, keep editing, or save the recipe as-is
-      // (a draft they can finish — and bake — later).
-      setSaveBlockedOpen(true);
-      return false;
-    }
+    setSaveHint(null);
     setBusy(true);
     setActionStatus({ kind: 'info', text: savedRecipeId ? 'Updating…' : 'Saving…' });
 
@@ -865,10 +878,7 @@ export function MiniKitchenBuilderPreview({
           includeImportMetadata: false,
         });
         if (!updateBody.body) {
-          setActionStatus({
-            kind: 'error',
-            text: 'The recipe still needs some details before it can be updated.',
-          });
+          setSaveHint('The recipe still needs some details before it can be updated.');
           return false;
         }
         const result = await updateRecipe(savedRecipeId, updateBody.body);
@@ -883,16 +893,15 @@ export function MiniKitchenBuilderPreview({
           );
           return true;
         }
-        setActionStatus({
-          kind: 'error',
-          text: describeBrokerFailure(
+        setSaveHint(
+          describeBrokerFailure(
             result.error,
             result.message,
             result.validationErrors,
             result.networkError,
             result.status,
           ),
-        });
+        );
         return false;
       }
       const result = await createRecipe(createBuild.body);
@@ -914,16 +923,15 @@ export function MiniKitchenBuilderPreview({
         );
         return true;
       }
-      setActionStatus({
-        kind: 'error',
-        text: describeBrokerFailure(
+      setSaveHint(
+        describeBrokerFailure(
           result.error,
           result.message,
           result.validationErrors,
           result.networkError,
           result.status,
         ),
-      });
+      );
       return false;
     } finally {
       setBusy(false);
@@ -1280,6 +1288,7 @@ export function MiniKitchenBuilderPreview({
     // Replace the data-scope fields with the preset's defaults but preserve the
     // operator's authentication choice (sign-in mode, Chef's Key, tenant), which
     // is independent of the data scope (see applyPresetSelection).
+    setPresetChosen(true);
     setState(prev => applyPresetSelection(prev, presetId));
   }
   function handleIdentityChange(next: LiteRecipeIdentity) {
@@ -1541,14 +1550,11 @@ export function MiniKitchenBuilderPreview({
   }
 
   // Why Save is unavailable, or null when it is ready — surfaced as the Save
-  // button's title so the disabled state is discoverable on hover, mirroring the
-  // requirements list already shown on the Review step. Adds no new gate; it
-  // reads the existing busy / candidateSaveable conditions.
+  // button's title on hover. Saving only needs a recipe name (an incomplete
+  // recipe persists as a draft), so the only reason Save is unavailable is a
+  // busy in-flight action.
   const saveDisabledReason: string | null = busy
     ? 'Please wait — finishing the current action.'
-    : !candidateSaveable
-    ? describeSaveRequirements(saveRequirements) ||
-      'Finish the required details above to save.'
     : null;
 
   // UX14 R4/R5: render-time "unsaved changes" flag for the pinned action bar.
@@ -1638,7 +1644,7 @@ export function MiniKitchenBuilderPreview({
               {activeStep === 1 ? (
                 <>
                   <PresetPicker
-                    selected={state.ingredients.preset}
+                    selected={presetChosen ? state.ingredients.preset : null}
                     onSelect={handlePresetChange}
                     onImportClick={handleImportClick}
                   />
@@ -2294,12 +2300,13 @@ export function MiniKitchenBuilderPreview({
                 pinned to the bottom of the content column (position: sticky) so
                 it never scrolls away. Save is shown whenever a new recipe is
                 unsaved (so it is always reachable while building) or a saved
-                recipe has unsaved edits; it stays disabled until the recipe is
-                saveable (candidateSaveable), with saveDisabledReason naming the
-                missing fields on hover. Discard shows only when there are
-                unsaved edits. No save or bake safety gate is relaxed: the
-                disabled predicate is unchanged and the bake path (confirm modal
-                + Windows Hello step-up + startCook) is unchanged. */}
+                recipe has unsaved edits. Saving only needs a recipe name (an
+                incomplete recipe persists as a draft), so the Save button is
+                enabled whenever there are unsaved edits; a blank name or a save
+                failure shows a brief inline hint below. Discard shows only when
+                there are unsaved edits. The bake path (confirm modal + Windows
+                Hello step-up + startCook) is unchanged and still enforces full
+                completeness. */}
             <div
               className="mk-actionbar"
               role="group"
@@ -2312,7 +2319,7 @@ export function MiniKitchenBuilderPreview({
                   'mk-preview-boundary__btn' +
                   (isDirty ? ' mk-preview-boundary__btn--primary' : '')
                 }
-                onClick={() => handleSaveOrUpdate(false)}
+                onClick={() => handleSaveOrUpdate()}
                 disabled={busy || !isDirty}
                 aria-disabled={busy || !isDirty}
                 title={
@@ -2381,6 +2388,11 @@ export function MiniKitchenBuilderPreview({
                 </button>
               </div>
             </div>
+            {saveHint ? (
+              <p className="mk-actionbar__hint" role="status">
+                {saveHint}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -2443,22 +2455,6 @@ export function MiniKitchenBuilderPreview({
         <DiscardConfirmModal
           onCancel={cancelDiscardChanges}
           onConfirm={confirmDiscardChanges}
-        />
-      ) : null}
-
-      {saveBlockedOpen ? (
-        <SaveRequirementsModal
-          requirements={saveRequirements}
-          canSaveAnyway={Boolean(createBuild.body)}
-          onGoToStep={step => {
-            setActiveStep(step);
-            setSaveBlockedOpen(false);
-          }}
-          onSaveAnyway={() => {
-            setSaveBlockedOpen(false);
-            void handleSaveOrUpdate(true);
-          }}
-          onClose={() => setSaveBlockedOpen(false)}
         />
       ) : null}
 

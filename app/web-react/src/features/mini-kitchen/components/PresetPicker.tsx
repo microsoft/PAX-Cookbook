@@ -7,7 +7,7 @@ import { DashboardReqTag, type DashboardScope } from './DashboardRequirement';
 import { DashboardRepoPills } from './DashboardRepoPills';
 
 interface PresetPickerProps {
-  selected: PresetId;
+  selected: PresetId | null;
   onSelect: (id: PresetId) => void;
   /** Invoked when the Import card is activated; opens the file picker. */
   onImportClick: () => void;
@@ -49,7 +49,10 @@ const PRESET_CATEGORIES: ReadonlyArray<{
   },
 ];
 
-function categoryForPreset(id: PresetId): string | null {
+function categoryForPreset(id: PresetId | null): string | null {
+  if (!id) {
+    return null;
+  }
   for (const c of PRESET_CATEGORIES) {
     if (c.presetIds.includes(id)) {
       return c.id;

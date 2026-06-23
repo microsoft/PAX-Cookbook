@@ -8,14 +8,13 @@
  * jump straight to that step.
  *
  * Boundaries:
- *   - Presentation only. It performs no save itself, runs no PAX, opens no
- *     broker route, and writes no file. "Go to step" calls the parent's
- *     onGoToStep (which changes the active builder step) and then closes;
- *     "Save anyway" calls the parent's onSaveAnyway (the parent owns the save);
- *     "Keep editing" / "Got it" just close.
+ *   - Presentation only. It saves nothing, runs no PAX, opens no broker route,
+ *     and writes no file. "Go to step" calls the parent's onGoToStep (which
+ *     changes the active builder step) and then closes; "Got it" just closes.
  *   - It is intentionally NOT dismissable by backdrop click or Escape — the
  *     user acknowledges it with a button so the missing-details message is not
- *     skipped past. Every path out closes it, so the user is never trapped.
+ *     skipped past. Every path out (Got it / any Go to step) closes it, so the
+ *     user is never trapped.
  */
 import { useId } from 'react';
 
@@ -27,20 +26,14 @@ interface SaveRequirementsModalProps {
   requirements: readonly SaveRequirement[];
   /** Jump to a builder step (1-based). The parent also closes the dialog. */
   onGoToStep: (step: number) => void;
-  /** Dismiss without navigating and without saving. */
+  /** Dismiss without navigating. */
   onClose: () => void;
-  /** Save the recipe as-is despite the outstanding details (draft save). */
-  onSaveAnyway: () => void;
-  /** Whether saving as-is is possible (a serializable recipe body exists). */
-  canSaveAnyway: boolean;
 }
 
 export function SaveRequirementsModal({
   requirements,
   onGoToStep,
   onClose,
-  onSaveAnyway,
-  canSaveAnyway,
 }: SaveRequirementsModalProps) {
   const headingId = useId();
   const helpId = useId();
@@ -65,7 +58,7 @@ export function SaveRequirementsModal({
           </h2>
           <p id={helpId} className="mk-modal__subtitle">
             {items.length > 0
-              ? 'Add the details below to finish the recipe — or save it as-is for now and come back later. A recipe that’s still missing details can be saved, but it can’t be baked until everything is filled in.'
+              ? 'A recipe can’t be saved until these are filled in. Add the details below — use “Go to step” to jump straight to each one — then save.'
               : 'This recipe has a configuration issue. Please review all steps and try again.'}
           </p>
         </header>
@@ -93,32 +86,13 @@ export function SaveRequirementsModal({
         ) : null}
 
         <div className="mk-modal__actions">
-          {canSaveAnyway ? (
-            <>
-              <button
-                type="button"
-                className="mk-modal__button"
-                onClick={onClose}
-              >
-                Keep editing
-              </button>
-              <button
-                type="button"
-                className="mk-modal__button mk-modal__button--primary"
-                onClick={onSaveAnyway}
-              >
-                Save anyway
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="mk-modal__button mk-modal__button--primary"
-              onClick={onClose}
-            >
-              Got it
-            </button>
-          )}
+          <button
+            type="button"
+            className="mk-modal__button mk-modal__button--primary"
+            onClick={onClose}
+          >
+            Got it
+          </button>
         </div>
       </div>
     </div>

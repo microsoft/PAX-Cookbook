@@ -80,5 +80,6 @@ public sealed record RecipeInsertRow(
     string FileHash,
     string CreatedAt,
     string UpdatedAt,
+    string Status     = "ready",
     string Source     = "new",
     string? SourceRef = null);

@@ -106,6 +106,44 @@ public sealed class RecipeValidator
         return new ValidationVerdict(errors.Count == 0, errors);
     }
 
+    // Relaxed validation for SAVE / draft persistence. A recipe can be saved
+    // at ANY stage of completion as long as it carries a name — saving is
+    // decoupled from baking. This runs:
+    //
+    //   * the structural JSON Schema walk (so a stored draft is well-typed,
+    //     has no unknown properties, and carries identity.name), and
+    //   * the SECURITY gates that reject dangerous content regardless of
+    //     completeness: output-path tier policy (local-disk only; no OneLake /
+    //     Fabric), and the four advanced.extraArguments scans (removed,
+    //     secret-shaped, unsupported, and structurally-owned switches).
+    //
+    // It deliberately SKIPS the completeness / shape gates (date range, fact /
+    // userInfo output mode, auth-profile binding, executionMode x auth matrix,
+    // query shape, activityTypes-under-rollup, m365Usage, userInfo channel,
+    // agentFilter, rollup blockers). Those enforce that a recipe is COMPLETE
+    // ENOUGH TO BAKE, which is the BAKE path's job (CookReadiness + the bake
+    // gating). Every security gate above fires only on content that is actually
+    // present, so an empty/partial draft passes them cleanly.
+    public ValidationVerdict TestForSave(JsonNode? recipe)
+    {
+        var errors = new List<ValidationError>();
+
+        WalkSchema(recipe, RecipeSchemaRoot, instancePath: "", errors);
+
+        if (recipe is not JsonObject obj)
+        {
+            return new ValidationVerdict(errors.Count == 0, errors);
+        }
+
+        ValidateOutputPathTier(obj, errors);
+        ValidateExtraArgumentsRemovedSwitches(obj, errors);
+        ValidateExtraArgumentsSecretShape(obj, errors);
+        ValidateExtraArgumentsUnsupportedSwitches(obj, errors);
+        ValidateExtraArgumentsStructurallyOwned(obj, errors);
+
+        return new ValidationVerdict(errors.Count == 0, errors);
+    }
+
     // ============================================================
     //  Schema walker (JSON Schema 2020-12, subset used by M1)
     // ============================================================
