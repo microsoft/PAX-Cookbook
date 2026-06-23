@@ -43,13 +43,6 @@
     var OVERLAY_ID    = 'cookbook-lock-overlay';
     var BODY_CLASS    = 'cookbook-lock-active';
 
-    // Background lock-state poll cadence. The broker's inactivity sweep can lock
-    // the session at any moment with no page interaction; without this poll the
-    // overlay would only appear on the next page-driven fetch that hits 423,
-    // leaving the app looking unlocked and interactive after it is already
-    // locked. /broker/lock-state is loopback + allowlisted-when-locked, so a poll
-    // every few seconds is cheap; this makes the lock appear in near real time.
-    var LOCK_POLL_MS  = 12000;
 
     // Module-scoped state. A second event firing while the overlay is
     // already up does NOT remount it -- we just refresh the message.
@@ -104,6 +97,12 @@
         var panel = document.createElement('div');
         panel.className = 'lock-overlay-panel';
 
+        var brand = document.createElement('img');
+        brand.className = 'lock-overlay-logo';
+        brand.src = 'images/pax-cookbook-logo-horizontal-blue.png';
+        brand.alt = 'PAX Cookbook';
+        panel.appendChild(brand);
+
         var title = document.createElement('h2');
         title.id = OVERLAY_ID + '-title';
         title.className = 'lock-overlay-title';
@@ -140,7 +139,7 @@
         tertiary.type = 'button';
         tertiary.className = 'btn-ghost lock-overlay-tertiary';
         tertiary.id = OVERLAY_ID + '-tertiary';
-        tertiary.textContent = 'Close app and stop server';
+        tertiary.textContent = 'Close app';
         actions.appendChild(tertiary);
 
         panel.appendChild(actions);
@@ -175,14 +174,18 @@
         var secondary = document.getElementById(OVERLAY_ID + '-secondary');
         var status  = document.getElementById(OVERLAY_ID + '-status');
 
-        title.textContent = 'Verify it\'s you';
+        var firstRunView = !!(state.statusCache && state.statusCache.registered === false);
+        title.textContent = firstRunView ? 'Set up quick verification' : 'Verify it\'s you';
 
         // Empty + repopulate body so coalesced events refresh content.
         while (body.firstChild) { body.removeChild(body.firstChild); }
         var p1 = document.createElement('p');
-        p1.textContent = state.message ||
-            'Confirm it\'s you to continue. Use your fingerprint, face, or ' +
-            'PIN, the same way you unlock this computer.';
+        p1.textContent = state.message || (firstRunView
+            ? 'Set up a quick way to confirm it\'s you before your first ' +
+              'bake. You\'ll use your fingerprint, face, or PIN \u2014 the ' +
+              'same way you unlock this computer.'
+            : 'Confirm it\'s you to continue. Use your fingerprint, face, or ' +
+              'PIN, the same way you unlock this computer.');
         body.appendChild(p1);
 
         // UX-1H7 -- first-run passkey explanation. The current
@@ -217,9 +220,9 @@
         var p2 = document.createElement('p');
         p2.className = 'lock-overlay-fine';
         p2.textContent =
-            'For your privacy, Cookbook pauses access when it has been idle ' +
-            'or manually locked. Your recipes, settings, and workspace stay ' +
-            'on this computer.';
+            'For your privacy, Cookbook confirms it\'s you when it starts up, ' +
+            'when you reopen it, and before each bake. Your recipes, settings, ' +
+            'and workspace stay on this computer.';
         body.appendChild(p2);
 
         // Support / diagnostic details collapsed behind a "Support
@@ -488,16 +491,19 @@
             body.appendChild(details);
         }
 
-        // Primary button copy. The label is identical for first-run
-        // and steady-state because the unlock route is the same in
-        // both cases (no separate bootstrap UX in v1). The 'Try
-        // again' / failure label is set by onPrimaryClick when a
-        // verdict comes back non-Verified.
+        // Primary button copy. First-run setup gets an explicit
+        // "Set up verification" call to action; the returning-user
+        // unlock route uses "Continue". The 'Try again' / failure
+        // label is set by onPrimaryClick when a verdict comes back
+        // non-Verified.
+        var primaryFirstRun = !!(state.statusCache && state.statusCache.registered === false);
         var primaryText;
         if (state.unlockInFlight) {
             primaryText = 'Verifying\u2026';
         } else if (state.lastFailureMessage) {
             primaryText = 'Try again';
+        } else if (primaryFirstRun) {
+            primaryText = 'Set up verification';
         } else {
             primaryText = 'Continue';
         }
@@ -1584,10 +1590,10 @@
         // fall back to the steady-state label.
         var sc          = state.statusCache;
         var isFirstRun  = !!(sc && sc.registered === false);
-        var readyLabel  = isFirstRun ? 'Set up now' : 'Unlock';
+        var readyLabel  = isFirstRun ? 'Set up verification' : 'Continue';
         var readyHint   = isFirstRun
-            ? 'Ready when you are. Select "Set up now" to confirm it\'s you.'
-            : 'Ready when you are. Select "Unlock" to confirm it\'s you.';
+            ? 'Ready when you are. Select "Set up verification" to confirm it\'s you.'
+            : 'Ready when you are. Select "Continue" to confirm it\'s you.';
         if (state.preparedBootstrapStatus === 'ready') {
             if (primary) {
                 primary.disabled    = false;
@@ -2265,15 +2271,9 @@
         });
     }
 
-    // Recurring lock-state poll. Fires every LOCK_POLL_MS so an inactivity-sweep
-    // lock surfaces the overlay in near real time instead of waiting for the
-    // user's next click to hit a 423. While the overlay is already up the unlock
-    // flow owns the transition, so the poll skips (re-probing would re-render the
-    // locked view and could disrupt an in-progress Windows Hello prompt).
-    function pollLockState() {
-        if (state.mounted) { return; }
-        probeLockStateOnce();
-    }
+    // Recurring lock-state poll. Fires only on demand now that the
+    // broker no longer auto-locks on inactivity; an explicit lock or a
+    // time-anomaly relock surfaces via the on-demand 423 path.
 
     // ----------------------------------------------------------------
     // UX-1H5 -- Copy diagnostics + WebAuthn probe ladder
@@ -2705,9 +2705,6 @@
         } else {
             document.addEventListener('DOMContentLoaded', probeLockStateOnce, { once: true });
         }
-        // Keep probing so an inactivity-sweep lock shows the overlay immediately,
-        // not just on the next page-driven 423.
-        try { window.setInterval(pollLockState, LOCK_POLL_MS); } catch (e) {}
     }
 
     // Diagnostics-only surface. NOT meant for page modules.

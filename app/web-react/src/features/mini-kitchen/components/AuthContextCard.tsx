@@ -162,6 +162,23 @@ export function AuthContextCard({ value, onChange }: AuthContextCardProps) {
           })}
         </div>
       </MiniKitchenField>
+      <div className="mk-callout mk-callout--info">
+        <p>
+          <strong>What&rsquo;s a Chef&rsquo;s Key?</strong> A Chef&rsquo;s Key is a saved
+          set of credentials that lets PAX Cookbook connect to your Microsoft 365
+          environment to pull audit data. Instead of signing in every time you bake, a
+          Chef&rsquo;s Key remembers your connection details securely on this computer.
+        </p>
+        <p>
+          Secrets are stored in Windows Credential Manager on this PC &mdash; never sent
+          anywhere else.
+        </p>
+        <p>
+          {isAppReg
+            ? 'For App Registration sign-in (secret or certificate), a Chef\u2019s Key is required \u2014 it carries the credentials this recipe needs to run.'
+            : 'For Interactive Web Login and Device Code, a Chef\u2019s Key is recommended but not required. Without one, you\u2019ll sign in manually each time the recipe runs, and scheduled (unattended) bakes won\u2019t be available.'}
+        </p>
+      </div>
       <MiniKitchenField
         label="Chef's Key"
         htmlFor="mk-auth-chefkey"

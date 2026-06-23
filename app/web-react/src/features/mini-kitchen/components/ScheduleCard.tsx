@@ -1,7 +1,5 @@
-import type { AuthMode } from '../types';
 import { MiniKitchenSectionCard } from './MiniKitchenSectionCard';
 import { MiniKitchenField } from './MiniKitchenField';
-import { schedulingIndicator } from './AuthContextCard';
 import {
   type ScheduleDraft,
   applyScheduleEnabled,
@@ -12,12 +10,6 @@ import {
   isScheduleValid,
   describeSchedule,
 } from '../lib/builderScheduleTransforms';
-
-// The same "bind a Chef's Key" wording schedulingIndicator uses for the
-// interactive modes, reused as the canonical not-schedulable message so every
-// auth mode shows one consistent gate when no Chef's Key is bound.
-const NOT_SCHEDULABLE_TEXT =
-  'Not schedulable \u2014 bind a Chef\u2019s Key to enable scheduling.';
 
 const WEEKDAYS: ReadonlyArray<{ id: number; short: string; long: string }> = [
   { id: 0, short: 'Sun', long: 'Sunday' },
@@ -37,10 +29,10 @@ const FREQUENCIES: ReadonlyArray<{ id: 'daily' | 'weekly'; title: string; desc: 
 interface ScheduleCardProps {
   value: ScheduleDraft;
   onChange: (next: ScheduleDraft) => void;
-  /** The recipe's auth mode — drives the per-mode eligibility wording. */
-  authMode: AuthMode;
   /** True when a Chef's Key is bound; required to enable scheduling. */
   hasBoundChefKey: boolean;
+  /** Navigate to the Authentication step so the user can assign a Chef's Key. */
+  onGoToAuthStep?: () => void;
   /** Optional note from the server (e.g. a schedule-drift advisory). */
   statusNote?: string | null;
 }
@@ -58,16 +50,10 @@ interface ScheduleCardProps {
 export function ScheduleCard({
   value,
   onChange,
-  authMode,
   hasBoundChefKey,
+  onGoToAuthStep,
   statusNote,
 }: ScheduleCardProps) {
-  // One consistent eligibility line: the bind-a-key gate when no key is bound,
-  // otherwise the per-mode "Schedulable …" wording from the Authentication card.
-  const eligibility = hasBoundChefKey
-    ? schedulingIndicator(authMode, true)
-    : { text: NOT_SCHEDULABLE_TEXT, tone: 'warn' as const };
-
   const validity = isScheduleValid(value);
   const showConfig = value.enabled;
 
@@ -78,31 +64,46 @@ export function ScheduleCard({
       subtitle="Run this saved recipe automatically on a recurring schedule."
       helpText="Scheduling configures a per-user Windows task that runs this recipe automatically on the chosen cadence. The schedule is registered when you save the recipe and runs under the bound Chef's Key, so an unattended run needs an App registration key (secret or certificate). For a scheduled bake to actually fire, keep Start PAX Cookbook at login on (Settings \u2192 Startup) so the background broker is running when the scheduled time arrives. Manual bakes are unaffected."
     >
-      <p
-        className={
-          'mk-callout ' +
-          (eligibility.tone === 'ok' ? 'mk-callout--info' : 'mk-callout--warning')
-        }
-      >
-        {eligibility.text}
+      <p className="mk-field__note">
+        Scheduling automates this recipe so it bakes on its own at set times — daily or
+        weekly. PAX Cookbook sets up and manages a Windows scheduled task for you behind
+        the scenes; you never need to open Task Scheduler, and every schedule change is
+        made here in Cookbook.
       </p>
 
-      <MiniKitchenField label="Run on a schedule" htmlFor="mk-schedule-enabled">
-        <span className="mk-schedule__toggle">
-          <input
-            type="checkbox"
-            id="mk-schedule-enabled"
-            className="mk-schedule__toggle-input"
-            checked={value.enabled}
-            disabled={!hasBoundChefKey}
-            title={!hasBoundChefKey ? NOT_SCHEDULABLE_TEXT : undefined}
-            onChange={e => onChange(applyScheduleEnabled(value, e.target.checked))}
-          />
-          <span className="mk-schedule__toggle-text">
-            Enable a recurring scheduled run for this recipe.
-          </span>
-        </span>
-      </MiniKitchenField>
+      {!hasBoundChefKey ? (
+        <div className="mk-callout mk-callout--warning">
+          <p>
+            Scheduled bakes run unattended, so they need a Chef&rsquo;s Key for sign-in —
+            an interactive sign-in can&rsquo;t be used for automatic runs. Assign a
+            Chef&rsquo;s Key on the Authentication step to turn scheduling on.
+          </p>
+          {onGoToAuthStep ? (
+            <button
+              type="button"
+              className="mk-preview-boundary__btn"
+              onClick={onGoToAuthStep}
+            >
+              Go to Authentication (Step 2)
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          <MiniKitchenField label="Run on a schedule" htmlFor="mk-schedule-enabled">
+            <span className="mk-schedule__toggle">
+              <input
+                type="checkbox"
+                id="mk-schedule-enabled"
+                className="mk-schedule__toggle-input"
+                checked={value.enabled}
+                onChange={e => onChange(applyScheduleEnabled(value, e.target.checked))}
+              />
+              <span className="mk-schedule__toggle-text">
+                Enable a recurring scheduled run for this recipe.
+              </span>
+            </span>
+          </MiniKitchenField>
 
       {showConfig ? (
         <>
@@ -225,6 +226,8 @@ export function ScheduleCard({
           )}
         </>
       ) : null}
+        </>
+      )}
 
       {statusNote ? <p className="settings-note">{statusNote}</p> : null}
     </MiniKitchenSectionCard>

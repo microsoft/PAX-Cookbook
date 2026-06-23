@@ -3,7 +3,7 @@
   "channel": "stable",
   "releaseTimestamp": null,
   "latestCookbook": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "packageUrl": "<TODO_RELEASE_URL_PACKAGE_ZIP>",
     "sha256": "<TODO_RELEASE_ZIP_SHA256>",
     "releaseNotesUrl": "<TODO_RELEASE_NOTES_URL>"

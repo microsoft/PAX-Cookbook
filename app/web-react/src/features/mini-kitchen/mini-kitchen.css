@@ -854,6 +854,61 @@
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+/* Collapsible template categories (one open at a time). */
+.mk-preset-cats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.mk-preset-cat {
+  border: 1px solid var(--c-border, #e2e8f0);
+  border-radius: var(--r-lg, 12px);
+  background: var(--c-elev-1, #f8fafc);
+  overflow: hidden;
+  transition: border-color var(--dur-fast, 0.15s) var(--ease-out, ease),
+    background var(--dur-fast, 0.15s) var(--ease-out, ease);
+}
+.mk-preset-cat--open {
+  background: var(--c-card, #ffffff);
+  border-color: var(--c-border-strong, #cbd5e1);
+}
+.mk-preset-cat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--c-ink, #0f172a);
+  cursor: pointer;
+  text-align: left;
+}
+.mk-preset-cat__head:hover {
+  background: var(--c-elev-1, #f1f5f9);
+}
+.mk-preset-cat__title {
+  font-size: var(--fs-15, 15px);
+}
+.mk-preset-cat__chevron {
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--c-muted, #64748b);
+  border-bottom: 2px solid var(--c-muted, #64748b);
+  transform: rotate(45deg);
+  transition: transform var(--dur-fast, 0.15s) var(--ease-out, ease);
+  flex: 0 0 auto;
+}
+.mk-preset-cat--open .mk-preset-cat__chevron {
+  transform: rotate(-135deg);
+}
+.mk-preset-cat .mk-preset-grid {
+  padding: 0 var(--sp-4) var(--sp-4);
+}
+
 .mk-radio-cards {
   display: grid;
   gap: var(--sp-3);
@@ -5677,6 +5732,17 @@
   background: var(--c-btn-primary-active);
   border-color: var(--c-btn-primary-border);
 }
+/* Light-blue primary affordance for Next (every step) and Save when there are
+   unsaved changes — same size as the other buttons, distinguished only by color. */
+.mk-preview-boundary__btn--primary:not(:disabled) {
+  background: var(--c-blue-soft, #e8f0ff);
+  border-color: var(--c-blue, #2563eb);
+  color: var(--c-blue-strong, #1d4ed8);
+}
+.mk-preview-boundary__btn--primary:not(:disabled):hover {
+  background: var(--c-blue-soft-hover, #dbe7ff);
+  border-color: var(--c-blue, #2563eb);
+}
 .mk-preview-boundary__btn--danger-ghost {
   background: transparent;
   border-color: var(--c-btn-danger-quiet);
@@ -6454,6 +6520,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  width: 100%;
+  max-width: 820px;
   padding: var(--sp-3) var(--sp-4);
   background: var(--c-card, #ffffff);
   border: 1px solid rgba(15, 23, 42, 0.10);

@@ -324,13 +324,8 @@ export function MiniKitchenBuilderPreview({
   // Broker-backed persistence state. `savedRecipeId` is the id the broker
   // assigned on the last successful Save; when present, Save becomes Update.
   const [savedRecipeId, setSavedRecipeId] = useState<string | null>(null);
-  // Issue 1: a copyable recipe-ID affordance. `copiedRecipeId` flips to true for
-  // ~2s after a copy so the button can confirm “Copied”. The timer id is held in
-  // a ref so a rapid second copy clears the prior reset.
-  const [copiedRecipeId, setCopiedRecipeId] = useState<boolean>(false);
-  const copyResetRef = useRef<number | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
-  const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
+  const [, setActionStatus] = useState<ActionStatus | null>(null);
 
   // Schedule (X7b) — configured in the builder, but registered or removed only
   // by the save flow through the broker's scheduled-task routes after the recipe
@@ -373,6 +368,10 @@ export function MiniKitchenBuilderPreview({
   // that replaces the old browser confirm; the revert it gates is instant and
   // purely in-memory, so there is no submitting state to track.
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState<boolean>(false);
+  // Confirm before silently narrowing the data scope when the user removes
+  // Entra user info from a scope that includes it. Holds the pending query
+  // change until the user confirms (or cancels, leaving the toggle on).
+  const [entraDeselectPending, setEntraDeselectPending] = useState<LiteRecipeQuery | null>(null);
   // When Save / Update is pressed on an incomplete recipe, this opens the
   // "needs a few more details" dialog instead of letting the click do nothing.
   const [saveBlockedOpen, setSaveBlockedOpen] = useState<boolean>(false);
@@ -500,7 +499,7 @@ export function MiniKitchenBuilderPreview({
   // (runtime readiness) is evaluated separately and never blocks Save.
   const saveRequirements = useMemo(() => deriveSaveRequirements(state), [state]);
   const candidateSaveable = candidateReady && saveRequirements.length === 0;
-  const saveLabel = savedRecipeId ? 'Update recipe' : 'Save recipe';
+  const saveLabel = 'Save recipe';
 
   // Any edit to the recipe invalidates a prior readiness answer, so the panel
   // returns to its idle prompt rather than showing a stale verdict.
@@ -1139,24 +1138,6 @@ export function MiniKitchenBuilderPreview({
     void runBake(true);
   }
 
-  // Issue 1: copy the saved recipe's full ID to the clipboard with a brief
-  // “Copied” confirmation. No-op for an unsaved draft (there is no ID yet).
-  function handleCopyRecipeId() {
-    if (!savedRecipeId) {
-      return;
-    }
-    try {
-      void navigator.clipboard?.writeText(savedRecipeId);
-    } catch {
-      // Clipboard access can be denied; the ID stays visible to copy manually.
-    }
-    setCopiedRecipeId(true);
-    if (copyResetRef.current !== null) {
-      window.clearTimeout(copyResetRef.current);
-    }
-    copyResetRef.current = window.setTimeout(() => setCopiedRecipeId(false), 2000);
-  }
-
   // Issue 2: the full Cookbook app's primary export writes the complete,
   // runtime-oriented recipe as a `.pax` file. Export is offered from the saved
   // Recipes list (not the in-builder Step 7), so the builder keeps only the
@@ -1311,6 +1292,20 @@ export function MiniKitchenBuilderPreview({
     }));
   }
   function handleQueryChange(next: LiteRecipeQuery) {
+    // If the user is REMOVING Entra user info from a scope that includes it,
+    // confirm first — the change narrows the data scope to "Audit activity
+    // only" and can break reports that need user info.
+    if (
+      state.query.includeUserInfo === true &&
+      next.includeUserInfo !== true &&
+      state.query.mode !== 'user-info-only'
+    ) {
+      setEntraDeselectPending(next);
+      return;
+    }
+    applyQueryChange(next);
+  }
+  function applyQueryChange(next: LiteRecipeQuery) {
     setStateMatchPreset(prev => ({
       ...prev,
       query: { ...next, mode: prev.query.mode },
@@ -1646,22 +1641,6 @@ export function MiniKitchenBuilderPreview({
                     onChange={handleIdentityChange}
                     nameError={null}
                   />
-                  {savedRecipeId ? (
-                    <div className="mk-recipe-id-block">
-                      <span className="mk-recipe-id-block__label">Recipe ID</span>
-                      <button
-                        type="button"
-                        className="rce__recipe-id"
-                        onClick={handleCopyRecipeId}
-                        title="Copy the full recipe ID"
-                      >
-                        <code className="rce__recipe-id__value">{savedRecipeId}</code>
-                        <span className="rce__recipe-id__action">
-                          {copiedRecipeId ? 'Copied' : 'Copy'}
-                        </span>
-                      </button>
-                    </div>
-                  ) : null}
                 </>
               ) : null}
 
@@ -1752,9 +1731,10 @@ export function MiniKitchenBuilderPreview({
                     value={state.processing.rollup ?? 'none'}
                     disabled={isUserInfoOnly}
                     onChange={handleRollupChange}
-                  />
-                  {/* Dashboard target — shown only with a rollup on and M365
-                      off, mirroring the broker's -Dashboard AIBV emit guard. */}
+                  >
+                  {/* Dashboard target — a subsection inside Rollup; shown only
+                      with a rollup on and M365 off, mirroring the broker's
+                      -Dashboard AIBV emit guard. */}
                   {(state.processing.rollup === 'rollup' ||
                     state.processing.rollup === 'rollup-plus-raw') &&
                   state.query.includeM365Usage !== true ? (
@@ -1818,6 +1798,7 @@ export function MiniKitchenBuilderPreview({
                       </div>
                     </MiniKitchenSectionCard>
                   ) : null}
+                  </RollupCard>
                 </>
               ) : null}
 
@@ -1828,8 +1809,8 @@ export function MiniKitchenBuilderPreview({
                 <ScheduleCard
                   value={scheduleDraft}
                   onChange={setScheduleDraft}
-                  authMode={state.auth.mode}
                   hasBoundChefKey={Boolean(state.auth.chefKeyId)}
+                  onGoToAuthStep={() => setActiveStep(2)}
                   statusNote={scheduleNote}
                 />
               ) : null}
@@ -2286,20 +2267,6 @@ export function MiniKitchenBuilderPreview({
               ) : null}
             </div>
 
-            {actionStatus ? (
-              <footer
-                className="mk-wizard__content-foot"
-                aria-label="Recipe action status"
-              >
-                <p
-                  className={'mk-action-status mk-action-status--' + actionStatus.kind}
-                  role={actionStatus.kind === 'error' ? 'alert' : 'status'}
-                >
-                  {actionStatus.text}
-                </p>
-              </footer>
-            ) : null}
-
             {/* Persistent primary-action bar. Rendered outside the per-step
                 blocks so Check readiness / Bake are present on every step, and
                 pinned to the bottom of the content column (position: sticky) so
@@ -2317,27 +2284,23 @@ export function MiniKitchenBuilderPreview({
               aria-label="Recipe actions"
             >
               <div className="mk-actionbar__primary">
-              {savedRecipeId === null || isDirty ? (
-                <button
-                  type="button"
-                  className="mk-preview-boundary__btn"
-                  onClick={handleSaveOrUpdate}
-                  disabled={busy}
-                  aria-disabled={busy}
-                  title={
-                    saveDisabledReason ??
-                    (savedRecipeId
-                      ? 'Update the saved recipe in PAX Cookbook.'
-                      : 'Save this recipe in PAX Cookbook.')
-                  }
-                >
-                  {saveLabel}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className={
+                  'mk-preview-boundary__btn' +
+                  (isDirty ? ' mk-preview-boundary__btn--primary' : '')
+                }
+                onClick={handleSaveOrUpdate}
+                disabled={busy}
+                aria-disabled={busy}
+                title={saveDisabledReason ?? 'Save this recipe in PAX Cookbook.'}
+              >
+                {saveLabel}
+              </button>
               {isDirty ? (
                 <button
                   type="button"
-                  className="mk-preview-boundary__btn mk-preview-boundary__btn--danger-ghost"
+                  className="mk-preview-boundary__btn"
                   onClick={handleDiscardChanges}
                   disabled={busy || bakeSubmitting}
                   aria-disabled={busy || bakeSubmitting}
@@ -2346,24 +2309,6 @@ export function MiniKitchenBuilderPreview({
                   Discard changes
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="mk-preview-boundary__btn"
-                onClick={handleCheckReadiness}
-                disabled={!candidateReady || busy || readinessPhase === 'loading'}
-                aria-disabled={!candidateReady || busy || readinessPhase === 'loading'}
-                title={
-                  !candidateReady
-                    ? 'Finish the required recipe details above before checking readiness.'
-                    : busy
-                      ? 'Please wait — finishing the current action.'
-                      : readinessPhase === 'loading'
-                        ? 'Checking readiness…'
-                        : 'Optional preflight: check readiness before you bake. Nothing runs.'
-                }
-              >
-                {readinessPhase === 'loading' ? 'Checking…' : 'Check readiness'}
-              </button>
               <button
                 type="button"
                 className="mk-preview-boundary__btn mk-preview-boundary__btn--bake"
@@ -2396,7 +2341,7 @@ export function MiniKitchenBuilderPreview({
                 </button>
                 <button
                   type="button"
-                  className="mk-preview-boundary__btn"
+                  className="mk-preview-boundary__btn mk-preview-boundary__btn--primary"
                   onClick={() => setActiveStep(s => Math.min(7, s + 1))}
                   disabled={activeStep === 7}
                   aria-disabled={activeStep === 7}
@@ -2491,6 +2436,63 @@ export function MiniKitchenBuilderPreview({
           onCancel={cancelOpenRecipe}
           onConfirm={confirmOpenRecipe}
         />
+      ) : null}
+
+      {entraDeselectPending ? (
+        <div
+          className="mk-modal__backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setEntraDeselectPending(null);
+            }
+          }}
+        >
+          <div
+            className="mk-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mk-entra-deselect-title"
+          >
+            <header className="mk-modal__head">
+              <h2 id="mk-entra-deselect-title" className="mk-modal__title">
+                Remove Entra user info?
+              </h2>
+              <p className="mk-modal__subtitle">
+                You&rsquo;ve chosen a data scope that includes Entra user information.
+                Removing Entra user info will change your data scope to &ldquo;Audit
+                activity only.&rdquo;
+              </p>
+              <p className="mk-modal__subtitle">
+                If you&rsquo;re using this data to populate a report that requires Entra
+                user info (like the AI Business Value dashboard), the report may not
+                populate correctly.
+              </p>
+            </header>
+            <div className="mk-modal__actions">
+              <button
+                type="button"
+                className="mk-modal__button"
+                onClick={() => setEntraDeselectPending(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="mk-modal__button mk-modal__button--primary"
+                onClick={() => {
+                  const pending = entraDeselectPending;
+                  setEntraDeselectPending(null);
+                  if (pending) {
+                    applyQueryChange(pending);
+                  }
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

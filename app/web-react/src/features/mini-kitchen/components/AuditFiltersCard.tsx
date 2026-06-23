@@ -78,7 +78,14 @@ export function AuditFiltersCard({
           These filters are turned off because you chose User info only — there is
           no audit activity to filter.
         </p>
-      ) : null}
+      ) : (
+        <p className="mk-field__note" role="note">
+          These are <strong>inclusion</strong> filters. When you enter a value, only
+          data matching it is included and everything else is left out. Leave a
+          filter empty to include <strong>all</strong> data for that category —
+          nothing is excluded.
+        </p>
+      )}
       <MiniKitchenField
         label="User IDs"
         htmlFor="mk-audit-userids"

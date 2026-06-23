@@ -6,6 +6,7 @@
  * runs PAX, bakes, deletes, renames, or schedules.
  */
 import type { RecipeSummary } from '../host/brokerBridge';
+import { useState } from 'react';
 import type { PresetId } from '../features/mini-kitchen/types';
 import { formatModified } from './shellNav';
 import { RecipeStatusBadge, toneForRecipeStatus } from './StatusCard';
@@ -61,6 +62,26 @@ const START_CARDS: readonly StartCard[] = [
   { kind: 'import-command', id: 'importCommand', title: 'Import Command', desc: 'Paste a PAX command and turn it into a recipe.' },
 ];
 
+// The starting points grouped into collapsible categories (one open at a time,
+// all collapsed by default).
+const TEMPLATE_CATEGORIES: ReadonlyArray<{ id: string; title: string; cardIds: string[] }> = [
+  {
+    id: 'dashboards',
+    title: 'Power BI Dashboard Templates',
+    cardIds: ['aiInOneDashboard', 'aiBusinessValueDashboard', 'm365UsageAnalyticsDashboard'],
+  },
+  {
+    id: 'exports',
+    title: 'Specialized Exports',
+    cardIds: ['userInfoOnly', 'customAuditExport'],
+  },
+  {
+    id: 'import',
+    title: 'Import or Resume',
+    cardIds: ['importPaxRecipeJson', 'importLiteRecipeJson', 'resume', 'importCommand'],
+  },
+];
+
 export function RecipeListPane({
   phase,
   recipes,
@@ -79,6 +100,45 @@ export function RecipeListPane({
     query.length === 0
       ? recipes
       : recipes.filter(r => recipeName(r).toLowerCase().includes(query));
+
+  // One template category open at a time; all collapsed by default.
+  const [openTplCat, setOpenTplCat] = useState<string | null>(null);
+
+  function renderTplCard(card: StartCard) {
+    const isImportPreset =
+      card.kind === 'preset' &&
+      (card.presetId === 'importPaxRecipeJson' ||
+        card.presetId === 'importLiteRecipeJson');
+    const onClick =
+      isImportPreset ? onImportFromFile
+      : card.kind === 'preset' ? () => onPickPreset(card.presetId)
+      : card.kind === 'resume' ? onResume
+      : onImportCommand;
+    const repoUrl =
+      card.kind === 'preset' && card.pills === 'repo'
+        ? powerBiTemplateUrl(card.presetId)
+        : null;
+    return (
+      <li key={card.id} className="dvw-tpl-card">
+        <button
+          type="button"
+          className="dvw-tpl-card__btn"
+          onClick={onClick}
+          title={card.desc}
+        >
+          <span className="dvw-tpl-card__title">{card.title}</span>
+          <span className="dvw-tpl-card__desc">{card.desc}</span>
+        </button>
+        {repoUrl ? <DashboardRepoPills url={repoUrl} /> : null}
+        {card.kind === 'preset' && card.pills === 'filetype-pax' ? (
+          <span className="dvw-tpl-card__filetype">.pax</span>
+        ) : null}
+        {card.kind === 'preset' && card.pills === 'filetype-paxlite' ? (
+          <span className="dvw-tpl-card__filetype">.paxlite</span>
+        ) : null}
+      </li>
+    );
+  }
 
   return (
     <section className="dvw-card dvw-list" aria-labelledby="dvw-list-h">
@@ -173,43 +233,35 @@ export function RecipeListPane({
         <h3 id="dvw-list-templates-h" className="dvw-list__templates-head">
           Start from a template
         </h3>
-        <ul className="dvw-tpl-grid" aria-label="Recipe starting points">
-          {START_CARDS.map(card => {
-            const isImportPreset =
-              card.kind === 'preset' &&
-              (card.presetId === 'importPaxRecipeJson' ||
-                card.presetId === 'importLiteRecipeJson');
-            const onClick =
-              isImportPreset ? onImportFromFile
-              : card.kind === 'preset' ? () => onPickPreset(card.presetId)
-              : card.kind === 'resume' ? onResume
-              : onImportCommand;
-            const repoUrl =
-              card.kind === 'preset' && card.pills === 'repo'
-                ? powerBiTemplateUrl(card.presetId)
-                : null;
+        <div className="dvw-tpl-cats">
+          {TEMPLATE_CATEGORIES.map(cat => {
+            const isOpen = openTplCat === cat.id;
+            const cards = cat.cardIds
+              .map(id => START_CARDS.find(c => c.id === id))
+              .filter((c): c is StartCard => Boolean(c));
             return (
-              <li key={card.id} className="dvw-tpl-card">
+              <div
+                key={cat.id}
+                className={'dvw-tpl-cat' + (isOpen ? ' dvw-tpl-cat--open' : '')}
+              >
                 <button
                   type="button"
-                  className="dvw-tpl-card__btn"
-                  onClick={onClick}
-                  title={card.desc}
+                  className="dvw-tpl-cat__head"
+                  aria-expanded={isOpen}
+                  onClick={() => setOpenTplCat(isOpen ? null : cat.id)}
                 >
-                  <span className="dvw-tpl-card__title">{card.title}</span>
-                  <span className="dvw-tpl-card__desc">{card.desc}</span>
+                  <span className="dvw-tpl-cat__title">{cat.title}</span>
+                  <span className="dvw-tpl-cat__chevron" aria-hidden="true" />
                 </button>
-                {repoUrl ? <DashboardRepoPills url={repoUrl} /> : null}
-                {card.kind === 'preset' && card.pills === 'filetype-pax' ? (
-                  <span className="dvw-tpl-card__filetype">.pax</span>
+                {isOpen ? (
+                  <ul className="dvw-tpl-grid" aria-label={cat.title}>
+                    {cards.map(renderTplCard)}
+                  </ul>
                 ) : null}
-                {card.kind === 'preset' && card.pills === 'filetype-paxlite' ? (
-                  <span className="dvw-tpl-card__filetype">.paxlite</span>
-                ) : null}
-              </li>
+              </div>
             );
           })}
-        </ul>
+        </div>
       </section>
     </section>
   );

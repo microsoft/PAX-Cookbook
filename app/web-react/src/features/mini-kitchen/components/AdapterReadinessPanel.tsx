@@ -157,48 +157,6 @@ function ReadinessResult({ result }: { result: RecipeReadinessBody }) {
         This readiness check does not run PAX. Baking runs PAX only after you
         confirm a Bake.
       </p>
-
-      <details className="mk-readiness__support">
-        <summary className="mk-readiness__support-summary">
-          Show support details
-        </summary>
-        <div className="mk-readiness__support-body">
-          {result.command ? (
-            <div className="mk-readiness__support-block">
-              <span className="mk-readiness__support-label">
-                Command the app would build
-              </span>
-              <code className="mk-readiness__support-code">{result.command}</code>
-            </div>
-          ) : null}
-          {result.argv.length > 0 ? (
-            <div className="mk-readiness__support-block">
-              <span className="mk-readiness__support-label">Arguments</span>
-              <code className="mk-readiness__support-code">
-                {result.argv.join(' ')}
-              </code>
-            </div>
-          ) : null}
-          <div className="mk-readiness__support-block">
-            <span className="mk-readiness__support-label">
-              PAX script installed
-            </span>
-            <span className="mk-readiness__support-value">
-              {result.engine && result.engine.isAcquired ? 'Yes' : 'No'}
-            </span>
-          </div>
-          {result.details ? (
-            <div className="mk-readiness__support-block">
-              <span className="mk-readiness__support-label">
-                Validation detail
-              </span>
-              <pre className="mk-readiness__support-pre">
-                {JSON.stringify(result.details, null, 2)}
-              </pre>
-            </div>
-          ) : null}
-        </div>
-      </details>
     </div>
   );
 }

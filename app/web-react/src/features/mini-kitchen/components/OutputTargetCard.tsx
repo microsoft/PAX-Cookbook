@@ -441,6 +441,7 @@ export function OutputTargetCard({
               </p>
             </div>
           ) : null}
+          {combineEligible ? (
           <MiniKitchenField
             label="Audit activity output"
             htmlFor="mk-output-combine-mode"
@@ -494,6 +495,7 @@ export function OutputTargetCard({
               })}
             </div>
           </MiniKitchenField>
+          ) : null}
         </>
       ) : (
         <p className="mk-callout mk-callout--info">

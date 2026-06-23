@@ -110,6 +110,7 @@
     // never clobber each other.
     var lastFooterText = '';
     var lastFooterTone = 'ok';
+    var lastWorkspaceText = 'Checking\u2026';
     var updateAvailable = false;
 
     function setFooterState(text, tone) {
@@ -164,6 +165,39 @@
         if (dot) {
             if (lastFooterTone === 'warning') { dot.classList.add('is-warning'); }
             else if (lastFooterTone === 'danger') { dot.classList.add('is-danger'); }
+        }
+        renderWorkspaceFooter();
+    }
+
+    // The bottom-right "Workspace:" status. When an update is available it reads
+    // "Update available" and becomes a clickable link to the Updates page;
+    // otherwise it shows the latest workspace-readiness text. The app/engine
+    // version values next to it always reflect the installed build and are not
+    // touched here.
+    function renderWorkspaceFooter() {
+        var el = document.getElementById('app-footer-workspace');
+        if (!el) { return; }
+        if (updateAvailable) {
+            el.textContent = 'Update available';
+            el.classList.add('app-footer-state--link');
+            el.setAttribute('role', 'link');
+            el.setAttribute('tabindex', '0');
+            el.setAttribute('title', 'Open the Updates page');
+            el.onclick = openUpdatesSection;
+            el.onkeydown = function (e) {
+                if (e && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    openUpdatesSection();
+                }
+            };
+        } else {
+            el.textContent = lastWorkspaceText;
+            el.classList.remove('app-footer-state--link');
+            el.removeAttribute('role');
+            el.removeAttribute('tabindex');
+            el.removeAttribute('title');
+            el.onclick = null;
+            el.onkeydown = null;
         }
     }
 
@@ -228,14 +262,16 @@
 
         api.get('/api/v1/health').then(function (resp) {
             var ready = deriveWorkspaceRail(resp) === 'Ready';
-            setText('app-footer-workspace', deriveWorkspaceRail(resp));
+            lastWorkspaceText = deriveWorkspaceRail(resp);
+            renderWorkspaceFooter();
             if (resp && resp.ok) {
                 setFooterState('All systems nominal', 'ok');
             } else {
                 setFooterState('Attention needed', ready ? 'warning' : 'danger');
             }
         }).catch(function () {
-            setText('app-footer-workspace', 'Needs attention');
+            lastWorkspaceText = 'Needs attention';
+            renderWorkspaceFooter();
             setFooterState('Server unreachable', 'danger');
         });
 

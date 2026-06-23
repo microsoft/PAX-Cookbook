@@ -10,7 +10,7 @@
 
 # PAX Cookbook — User Guide
 
-<p align="center"><strong>PAX Cookbook v1.0.0</strong> · Last updated: June 17, 2026</p>
+<p align="center"><strong>PAX Cookbook v1.1.0</strong> · Last updated: June 23, 2026</p>
 
 Welcome to **PAX Cookbook**. This guide explains everything you need to collect Microsoft 365 Copilot adoption and usage data and turn it into reports — even if you have never written a line of code.
 
@@ -248,9 +248,9 @@ The app files are removed. Your collected output files (saved wherever you chose
 
 ### 2.5 Updating
 
-PAX Cookbook can check for newer versions from the **Settings** page. When an update is available, it downloads the new version and replaces the app for you. Your recipes, keys, and history are preserved across updates.
+PAX Cookbook checks for updates automatically each time it starts. When a new version is available, an **Update available** link appears in the footer, and the **Updates** page (in the navigation sidebar) shows what's new. Applying an update is a single, explicit action — PAX Cookbook verifies the download before installing it and never updates silently. If a scheduled bake is due soon, the app warns you before applying so you can pick a better time. Your recipes, keys, and history are preserved across updates.
 
-> 📸 **Screenshot:** The Settings page with the "Check for updates" control.
+> 📸 **Screenshot:** The Updates page showing an available version with the details of what's new and the Apply control.
 
 ---
 
@@ -277,12 +277,13 @@ A sidebar on the left lets you move around the app. Its sections are:
 - **Bakes** — the history of every run.
 - **Pantry** — browse the project's reference files and dashboard documentation.
 - **Chef's Keys** — manage your sign-ins.
-- **Settings** — app options and updates.
+- **Updates** — check for and apply new versions of PAX Cookbook.
+- **Settings** — app options.
 - **Help** — in-app guidance.
 
 Click any item to go to that section.
 
-> 📸 **Screenshot:** The left sidebar with all navigation items visible (Home, Recipes, Bakes, Pantry, Chef's Keys, Settings, Help).
+> 📸 **Screenshot:** The left sidebar with all navigation items visible (Home, Recipes, Bakes, Pantry, Chef's Keys, Updates, Settings, Help).
 
 ### 3.3 The system tray icon
 
@@ -378,6 +379,11 @@ Choose **where** the collected data is saved. You have three destinations:
 - **SharePoint** — uploads the results directly to a SharePoint document library, so they're available to your team.
 - **Microsoft Fabric (OneLake)** — writes the results into a Microsoft Fabric Lakehouse for advanced analytics. Both the friendly name-based URL and the GUID-based URL forms are accepted.
 
+Two related choices also live on this step:
+
+- **Rollup mode and dashboard target** — most presets produce dashboard-ready summary files (a *rollup*) shaped for a specific **dashboard target**, such as AI-in-One. The dashboard target is chosen together with the rollup option here, and you'll see it again later on the bake detail view.
+- **Combined or separate files** — when a recipe collects **two or more** activity types, you can choose whether they're written to one combined file or kept as separate files. With only a single activity type this option doesn't appear, because there's nothing to combine.
+
 > 📸 **Screenshot:** Step 5 Output with a local folder selected.
 
 > 📸 **Screenshot:** Step 5 Output with a SharePoint document library URL entered.
@@ -466,6 +472,13 @@ Click any bake to open its detail view, which shows:
 
 When a recipe has a schedule, Windows Task Scheduler wakes PAX Cookbook at the scheduled time and hands the run to the **background service** — using the same engine and the same safety checks as a manual bake, just without you clicking anything. Scheduled runs appear in the **Bakes** list right alongside manual ones, so you can confirm they ran.
 
+The **Bakes** page also shows an **Upcoming bakes** card listing every recipe that has a schedule, with its next run time and how often it runs. Select an upcoming bake to manage it:
+
+- **Skip next bake** — skips only the next scheduled run; the schedule keeps going after that.
+- **Cancel all future bakes** — removes the recipe's schedule entirely (its Windows scheduled task is unregistered).
+
+The Bakes list refreshes on its own, so a scheduled run appears as it starts and updates while it runs.
+
 If your computer was turned off (or asleep) at the scheduled time, that run is simply skipped; the next scheduled time runs normally. For reliable daily collection, leave the computer on and signed in, with **Start PAX Cookbook at login** enabled.
 
 ### 5.6 Troubleshooting bakes
@@ -532,6 +545,8 @@ Remove a key you no longer use. Make sure no recipe still depends on it first, o
 
 Your secrets are protected by the **Windows credential store** and are encrypted on your computer. They are **never shown** back to you in the app once saved, and they never leave your machine. This keeps sensitive sign-in information safe.
 
+**Confirming it's you.** PAX Cookbook uses **Windows Hello** (your PIN, fingerprint, or face) to confirm it's you at a few key moments: when the app starts, when you reopen it from the system tray, and before each manual bake. It does **not** lock itself while you're working — once you're in, the app stays unlocked the whole time it's open, even if you step away from the computer.
+
 ---
 
 ## 8. Settings
@@ -542,7 +557,7 @@ Turn on **Start PAX Cookbook at login** so the background service is always runn
 
 ### 8.2 Check for updates
 
-Use **Check for updates** to see whether a newer version is available and to install it. Your recipes, keys, and history are kept across updates.
+PAX Cookbook checks for updates automatically on startup. To check or apply one yourself, open the **Updates** page from the navigation sidebar (or click the **Update available** link in the footer when one is found). See [Updating](#25-updating) for the full flow. Your recipes, keys, and history are kept across updates.
 
 ### 8.3 About / version info
 
@@ -677,7 +692,7 @@ Windows may show "Windows protected your PC" because the installer isn't code-si
 - **Check Readiness** — a pre-run check that confirms the engine, sign-in, output location, and permissions are all ready before you bake.
 - **Background service** — the part of PAX Cookbook that keeps running in the system tray so scheduled bakes can fire even when the main window is closed.
 - **Cook log** — the detailed record of what happened during a bake, used to confirm success or investigate a failure.
-- **Taste Test** — a quick validation check used to confirm a recipe or sign-in is working as expected before relying on it.
+- **Taste Test** — a planned validation check for confirming a recipe or sign-in works as expected. The Taste Tests area is reserved in the app today and lights up in a later release.
 - **PAX** — the PAX Purview Audit Log Processor, the open-source engine that performs the actual data collection. PAX Cookbook drives it for you.
 - **Rollup** — the step that turns raw audit data into dashboard-friendly summary files (required for the Power BI dashboard presets; uses Python).
 - **Output destination** — where results are saved: a local folder, a SharePoint document library, or a Microsoft Fabric (OneLake) Lakehouse.

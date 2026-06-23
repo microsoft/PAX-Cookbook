@@ -482,6 +482,13 @@ export function ChefsKeysWorkspace() {
         accent="var(--c-purple)"
       />
 
+      <p className="dvw-keys__intro">
+        A Chef&rsquo;s Key is a saved set of credentials that lets PAX Cookbook connect to
+        your Microsoft&nbsp;365 environment to pull audit data &mdash; so you don&rsquo;t have
+        to sign in every time you bake. Secrets are stored securely in Windows Credential
+        Manager on this PC and are never sent anywhere else.
+      </p>
+
       <div className="dvw-keys">
         <div className="dvw-commandbar" role="group" aria-label="Chef's Keys actions">
           <button

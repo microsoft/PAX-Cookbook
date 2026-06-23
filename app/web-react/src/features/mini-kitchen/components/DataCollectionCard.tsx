@@ -124,7 +124,7 @@ export function DataCollectionCard({
       <MiniKitchenField
         label="Custom activity types"
         htmlFor="mk-data-activitytypes"
-        hint="Separate with new lines, commas, or semicolons. Maps to -ActivityTypes. Leave blank to use the PAX default (CopilotInteraction)."
+        hint="Most people leave this blank. It is for advanced users who need to target specific audit record types not covered by the options above. Separate with new lines, commas, or semicolons. Maps to -ActivityTypes; blank uses the PAX default (CopilotInteraction)."
         optional
         disabled={disabled}
       >
@@ -143,6 +143,7 @@ export function DataCollectionCard({
         />
       </MiniKitchenField>
       <p className="mk-field__note">
+        This is an advanced, rarely needed field — most people leave it blank.
         Activity types are the specific actions recorded in your tenant&rsquo;s
         audit log (for example, <code>CopilotInteraction</code>). For the full list
         of names you can enter here, see{' '}

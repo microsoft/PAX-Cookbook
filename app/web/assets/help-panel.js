@@ -63,11 +63,11 @@
 
     var CATEGORIES = [
         { id: 'getting-started', title: 'Getting Started',
-          summary: 'What PAX Cookbook is, what you can do in this build, and how to read the status rail.' },
+          summary: 'What PAX Cookbook is, what you can do with it, and how to read the status rail.' },
         { id: 'recipes',         title: 'Recipes',
           summary: 'Editable execution plans for a PAX query. Created by materializing a Pantry template.' },
         { id: 'cooks',           title: 'Bakes',
-          summary: 'One bake is one execution of a recipe. Baking is turned off in this build.' },
+          summary: 'One bake is one execution of a recipe. Run a recipe, watch progress, and review past and upcoming bakes.' },
         { id: 'pantry',          title: 'Pantry',
           summary: 'Bundled, read-only recipe templates. Pick one, inspect it, then materialize a recipe.' },
         { id: 'taste-tests',     title: 'Taste Tests',
@@ -77,9 +77,9 @@
         { id: 'settings',        title: 'Settings',
           summary: 'Runtime identity, bundled PAX integrity, and the environment paths Cookbook resolved.' },
         { id: 'updates',         title: 'Updates',
-          summary: 'Where Cookbook updates will appear. The update flow is not wired up in this build.' },
+          summary: 'Check for and install PAX Cookbook updates. Cookbook checks on startup and applies updates with one click.' },
         { id: 'scheduling',      title: 'Scheduling',
-          summary: 'How recurring bakes will be scheduled. Scheduling is turned off in this build.' },
+          summary: 'Run recurring bakes as Windows scheduled tasks. Scheduling a bake requires a Chef\u2019s Key.' },
         { id: 'security',        title: 'Security and Auth',
           summary: 'What stays on this PC, how credentials are stored, and how unlocking works.' },
         { id: 'troubleshooting', title: 'Troubleshooting',
@@ -116,7 +116,7 @@
             body: [
                 '<p>PAX Cookbook is a Windows desktop app that turns the PAX Purview audit log processor into a curated, repeatable workflow. It runs entirely on this PC; every action maps to one explicit, local step &mdash; nothing runs in the background and nothing is sent anywhere on its own.</p>',
                 '<p>The lower-left status rail shows whether the local PAX Cookbook server is responding, whether you are signed in, your workspace, and the app and bundled PAX versions. <em>Check for updates</em> sits just below it.</p>',
-                '<p>This build is for building and reviewing recipes. You can build a recipe, preview the exact PAX command, and run a readiness check. <strong>Baking, Taste Tests, and scheduling are turned off in this build.</strong></p>',
+                '<p>You can build a recipe, preview the exact PAX command, run a readiness check, and bake it to produce your output files. You can also schedule recurring bakes and review past and upcoming bakes on the Bakes page. <strong>Taste Tests are a placeholder that lights up in a later release.</strong></p>',
                 '<p>Click <strong>Help</strong> in the top bar at any time to open this panel. Click the small <strong>?</strong> next to any control to jump straight to its help topic.</p>'
             ]
         },
@@ -132,7 +132,7 @@
                     '<li>Review the <em>command preview</em> to see the exact PAX command the recipe would use.</li>',
                     '<li>Click <em>Check readiness</em> to have PAX Cookbook validate the recipe.</li>',
                 '</ol>',
-                '<p>Preview and readiness are safe: they do not run PAX, connect to a tenant, or collect credentials. Baking is turned off in this build, so no recipe runs yet.</p>'
+                '<p>Preview and readiness are safe: they do not run PAX, connect to a tenant, or collect credentials. When you are ready, click <em>Bake Recipe</em> to run it and write your output files.</p>'
             ]
         },
         'getting-started.status-rail': {
@@ -159,7 +159,7 @@
             body: [
                 '<p>A <strong>recipe</strong> is the editable execution plan for one PAX query. Recipes are created by materializing a bundled <em>template</em> from the Pantry; the template itself is read-only and never executed.</p>',
                 '<p>Each recipe field maps 1:1 to a PAX command-line argument. The recipe editor shows the full preview before any bake begins.</p>',
-                '<p>The editor is laid out as a <strong>Prep Station</strong>: the left column stacks the recipe cards (What, When, Audit filters, Where, User-info output, Advanced, Required permissions, Recent runs, Schedule); the right column is a sticky rail for the PAX command preview and the readiness check. Save and Bake Recipe live in the page header so they stay reachable while you scroll.</p>'
+                '<p>The editor is a guided, seven-step builder: <strong>Basics</strong> (start from a template category or from scratch, then name the recipe), <strong>Authentication</strong> (choose how the recipe signs in and bind a Chef&rsquo;s Key), <strong>Date Range</strong>, <strong>Audit Operations</strong> (Purview source, Entra scope, filters, and any advanced switches), <strong>Output</strong> (where the recipe writes its files, the optional rollup mode, and the dashboard target), <strong>Schedule</strong> (optional recurring bakes, which require a Chef&rsquo;s Key), and <strong>Review + Save</strong> (the generated PAX command preview and the readiness check). Save stays available in the action bar while you move through the steps.</p>'
             ]
         },
         'recipes.name': {
@@ -449,7 +449,7 @@
                     '<h4 class="help-perm-h4">Prerequisites</h4>',
                     '<ul>',
                         '<li><strong>PowerShell 7+</strong> &mdash; required for Cookbook&rsquo;s normal Graph API execution path.</li>',
-                        '<li><strong>Python</strong> &mdash; required because this recipe uses <code>Rollup</code>. PAX handles the Python requirement; Cookbook does not install Python directly.</li>',
+                        '<li><strong>Python</strong> &mdash; required because this recipe uses <code>Rollup</code>. PAX Cookbook sets up Python automatically; you do not need to install it yourself.</li>',
                         '<li><strong>Unified Audit Logging enabled</strong> &mdash; required so audit data exists for the tenant.</li>',
                         '<li><strong>Microsoft Graph / Microsoft 365 endpoint access</strong> &mdash; required so PAX can query Graph and Microsoft 365 audit data.</li>',
                         '<li><strong>Output path write access</strong> &mdash; required so PAX can write generated files.</li>',
@@ -474,7 +474,7 @@
                     '<h4 class="help-perm-h4">Prerequisites</h4>',
                     '<ul>',
                         '<li><strong>PowerShell 7+</strong> &mdash; required for Cookbook&rsquo;s normal Graph API execution path.</li>',
-                        '<li><strong>Python</strong> &mdash; required because this recipe uses <code>Rollup</code>. PAX handles the Python requirement; Cookbook does not install Python directly.</li>',
+                        '<li><strong>Python</strong> &mdash; required because this recipe uses <code>Rollup</code>. PAX Cookbook sets up Python automatically; you do not need to install it yourself.</li>',
                         '<li><strong>Unified Audit Logging enabled</strong> &mdash; required so audit data exists for the tenant.</li>',
                         '<li><strong>Microsoft Graph / Microsoft 365 endpoint access</strong> &mdash; required so PAX can query Graph and Microsoft 365 audit data.</li>',
                         '<li><strong>Output path write access</strong> &mdash; required so PAX can write generated files.</li>',
@@ -594,7 +594,7 @@
                     '<summary>Core runtime requirements</summary>',
                     '<ul>',
                         '<li><strong>PowerShell 7+</strong> &mdash; required for all normal Cookbook Graph runs.</li>',
-                        '<li><strong>Python</strong> &mdash; required only when <code>Rollup</code> or <code>RollupPlusRaw</code> is selected.</li>',
+                        '<li><strong>Python</strong> &mdash; required only when <code>Rollup</code> or <code>RollupPlusRaw</code> is selected. PAX Cookbook sets up Python automatically.</li>',
                         '<li><strong>Unified Audit Logging enabled</strong> &mdash; required for audit export recipes.</li>',
                         '<li><strong>Microsoft Graph / Microsoft 365 endpoint access</strong> &mdash; required for Graph audit and enrichment calls.</li>',
                         '<li><strong>Execution policy Bypass or RemoteSigned</strong> &mdash; required for PowerShell execution.</li>',
@@ -627,7 +627,7 @@
             keywords: ['bake', 'bakes', 'execution', 'run', 'cook'],
             body: [
                 '<p>A <strong>bake</strong> is one execution of a recipe. Cookbook records the frozen command, recipe snapshot, sentinels, and output artifacts for every bake &mdash; nothing is reconstructed after the fact.</p>',
-                '<p>Baking is turned off in this build, so no new bakes run yet.</p>'
+                '<p>The Bakes page lists past bakes and any upcoming scheduled bakes, and refreshes on its own while a bake is running.</p>'
             ]
         },
         'cooks.list': {
@@ -652,6 +652,19 @@
             keywords: ['bake', 'detail', 'snapshot', 'sentinels', 'artifacts'],
             body: [
                 '<p>Opens the persisted command, recipe snapshot, sentinel files, and a list of output artifacts on disk. The detail view never re-derives any of these fields; everything was frozen at bake time.</p>'
+            ]
+        },
+        'cooks.upcoming': {
+            id: 'cooks.upcoming', category: 'cooks',
+            title: 'Upcoming bakes and schedule management',
+            keywords: ['upcoming', 'scheduled', 'schedule', 'skip', 'cancel', 'next run', 'frequency'],
+            body: [
+                '<p>The <strong>Upcoming bakes</strong> card lists recipes that have a schedule, with their next run time and how often they run. Select one to manage its schedule:</p>',
+                '<ul>',
+                    '<li><strong>Skip next bake</strong> &mdash; skips only the next scheduled run; the schedule keeps going after that.</li>',
+                    '<li><strong>Cancel all future bakes</strong> &mdash; removes the recipe&rsquo;s schedule entirely and unregisters its Windows scheduled task.</li>',
+                '</ul>',
+                '<p>The Bakes page refreshes on its own, so a scheduled bake appears as it starts and updates as it runs.</p>'
             ]
         },
 
@@ -693,7 +706,7 @@
             keywords: ['chef', 'key', 'keys', 'auth', 'profile', 'credential', 'entra'],
             body: [
                 '<p>A <strong>Chef&rsquo;s Key</strong> is a saved Entra app registration (tenant plus client) paired with a workload credential bound to this Windows account. Recipes reference a key by id; the credential bytes never leave Windows Credential Manager.</p>',
-                '<p>Chef&rsquo;s Keys are needed only for recipes that authenticate as an Entra workload. Recipes using WebLogin or DeviceCode do not need a key.</p>'
+                '<p>A Chef&rsquo;s Key is <strong>required</strong> for recipes that authenticate with an app registration (AppRegistration mode), because that mode signs in as an Entra workload with nobody present to approve a prompt. For interactive sign-in (WebLogin or DeviceCode) a Chef&rsquo;s Key is <strong>recommended but not required</strong> &mdash; you can sign in at bake time instead. Scheduling a recurring bake always needs a Chef&rsquo;s Key.</p>'
             ]
         },
         'auth-profiles.new': {
@@ -770,7 +783,7 @@
             title: 'Update readiness',
             keywords: ['update', 'check', 'download', 'install', 'restart'],
             body: [
-                '<p>The update flow is not wired up in this build. When it is enabled it will use three explicit operator actions &mdash; check, download, and install &mdash; each a single deliberate click. Nothing is polled, scheduled, retried, or installed silently.</p>'
+                '<p>Cookbook checks for updates automatically when it starts and shows whether one is available. Applying an update is an explicit action you start from the <strong>Updates</strong> page. Downloaded packages are verified before they are applied and are never installed silently.</p>'
             ]
         },
         'settings.diagnostics': {
@@ -794,8 +807,8 @@
             id: 'updates.flow', category: 'updates',
             title: 'How updates work',
             body: [
-                '<p>PAX Cookbook never fetches or installs updates on its own. In this build the update flow is not wired up yet &mdash; the Updates view is a placeholder and <em>Check for updates</em> opens it.</p>',
-                '<p>When updates are enabled, any downloaded package will be verified before it is applied, and installing will be an explicit, single action.</p>'
+                '<p>PAX Cookbook checks for updates automatically when it starts and shows whether a new version is available. It never installs an update on its own.</p>',
+                '<p>Open the <strong>Updates</strong> page &mdash; from the navigation rail, or from the <em>Update available</em> link in the footer &mdash; to see what&rsquo;s new and apply the update. The downloaded package is verified before it is applied, and installing is a single, explicit action. If a scheduled bake is due soon, Cookbook warns you before applying so you can pick a better time.</p>'
             ]
         },
 
@@ -805,7 +818,8 @@
             title: 'About scheduling',
             keywords: ['schedule', 'task', 'scheduled', 'bake', 'cook'],
             body: [
-                '<p>Scheduling will register recurring bakes as Windows Scheduled Tasks and reconcile them on launch. <strong>Scheduling is turned off in this build</strong>; the Schedule controls are visible but do not create tasks yet.</p>'
+                '<p>Scheduling registers recurring bakes as Windows scheduled tasks and reconciles them when Cookbook launches. Set a schedule on the <strong>Schedule</strong> step of the recipe builder.</p>',
+                '<p>Scheduling a bake requires a <strong>Chef&rsquo;s Key</strong>, because a scheduled bake runs unattended and cannot prompt you to sign in. If the recipe has no Chef&rsquo;s Key bound, the schedule controls stay hidden until you add one on the Authentication step.</p>'
             ]
         },
 
@@ -815,17 +829,8 @@
             title: 'How your session is protected',
             keywords: ['token', 'session', 'unlock', 'lock'],
             body: [
-                '<p>PAX Cookbook runs as a local app on this PC and talks only to its own local server. Your session is unlocked while the app is open and is cleared when you lock it or close the app.</p>',
-                '<p>If the app asks you to unlock, enter your credentials in the unlock prompt to continue.</p>'
-            ]
-        },
-        'security.lock-session': {
-            id: 'security.lock-session', category: 'security',
-            title: 'Lock Session',
-            keywords: ['lock', 'logout', 'sign out'],
-            body: [
-                '<p>The <strong>Lock Session</strong> button in the top bar returns PAX Cookbook to a locked state. It does not sign you out of any Microsoft account.</p>',
-                '<p>Unlock again from the app to keep working.</p>'
+                '<p>PAX Cookbook runs as a local app on this PC and talks only to its own local server. It confirms it&rsquo;s you with Windows Hello (fingerprint, face, or PIN) when it starts up, when you reopen it from the system tray, and before each manual bake.</p>',
+                '<p>PAX Cookbook does <strong>not</strong> lock itself while you are working &mdash; it stays unlocked the whole time the app is open, even if you step away. If it asks you to verify, use Windows Hello to continue.</p>'
             ]
         },
         'security.stays-local': {
@@ -869,14 +874,14 @@
             title: 'Asked to sign in or unlock again',
             keywords: ['401', 'token', 'unlock', 'sign in'],
             body: [
-                '<p>Your session ended. Unlock PAX Cookbook again from the app to continue.</p>'
+                '<p>PAX Cookbook needs to confirm it&rsquo;s you again &mdash; this can happen after you reopen it from the tray. Use Windows Hello (fingerprint, face, or PIN) in the verification prompt to continue.</p>'
             ]
         },
         'troubleshooting.no-token': {
             id: 'troubleshooting.no-token', category: 'troubleshooting',
             title: 'Session is locked',
             body: [
-                '<p>PAX Cookbook is locked. Unlock it from the app to continue.</p>'
+                '<p>PAX Cookbook needs to confirm it&rsquo;s you before continuing. Use Windows Hello (fingerprint, face, or PIN) in the verification prompt.</p>'
             ]
         },
         'troubleshooting.degraded': {
@@ -1190,72 +1195,6 @@
     }
 
     // ---------------------------------------------------------------
-    // Lock Session
-    // ---------------------------------------------------------------
-    //
-    // Locks the broker in place and mounts the unlock overlay, so the
-    // operator can step away from the machine and unlock with Windows
-    // Hello when they come back. The broker is the source of truth
-    // for lock state -- merely clearing client-side storage would
-    // leave the broker Unlocked and any subsequent fetch (or a hard
-    // reload that pulls the bearer token from the sidecar) would
-    // walk straight back into the app. So:
-    //
-    //   1. POST /api/v1/broker/lock so the broker transitions to
-    //      Locked. From now on every non-allowlisted route returns
-    //      423, and a hard reload's boot-time /broker/lock-state
-    //      probe will mount the overlay too.
-    //   2. On success: dispatch the same 'cookbook:brokerLocked'
-    //      event api.js fires on 423 responses. lock-overlay.js owns
-    //      the UI from there; we do NOT reload the page (the overlay
-    //      gates the whole SPA in place).
-    //   3. On failure: surface a visible alert. No silent fall-back,
-    //      no token-clear-and-reload, because that would lie about
-    //      the broker's state to the operator.
-
-    function lockSession() {
-        if (!window.cookbookApi || typeof window.cookbookApi.post !== 'function') {
-            // api.js loads before help-panel.js in index.html, so
-            // this branch should be unreachable in production. If it
-            // ever fires, surface it -- do NOT silently fall through
-            // to a reload that would suggest the lock worked.
-            try { window.alert('Lock Session failed: cookbook API helper is not loaded.'); } catch (e) {}
-            return;
-        }
-        var btn = byId('lock-session-button');
-        if (btn && btn.disabled) { return; }
-        if (btn) { btn.disabled = true; }
-        window.cookbookApi.post('/api/v1/broker/lock', {}).then(function (resp) {
-            if (btn) { btn.disabled = false; }
-            if (resp && resp.ok) {
-                // Broker is now Locked. Mount the unlock overlay by
-                // dispatching the same event the api.js 423 path
-                // fires; lock-overlay.js listens for it and owns
-                // both the WebAuthn unlock UI and the diagnostic
-                // fall-back. We do NOT reload -- the overlay is a
-                // modal scrim that gates the live SPA in place.
-                try {
-                    window.dispatchEvent(new CustomEvent('cookbook:brokerLocked', {
-                        detail: {
-                            code:            'brokerLocked',
-                            message:         'Session locked by operator.',
-                            attemptedMethod: null,
-                            attemptedPath:   null,
-                            timestampUtc:    new Date().toISOString()
-                        }
-                    }));
-                } catch (e) {}
-                return;
-            }
-            var msg = 'Lock Session failed: broker did not accept the lock request';
-            if (resp && resp.status) { msg += ' (HTTP ' + resp.status + ')'; }
-            if (resp && resp.networkError) { msg += ' [' + resp.networkError + ']'; }
-            msg += '. The session is NOT locked. Try again or stop the broker manually.';
-            try { window.alert(msg); } catch (e) {}
-        });
-    }
-
-    // ---------------------------------------------------------------
     // Wire-up
     // ---------------------------------------------------------------
 
@@ -1344,15 +1283,6 @@
             renderHome();
         });
         refs.search && refs.search.addEventListener('input', onSearchInput);
-
-        // Lock Session button.
-        var lockBtn = byId('lock-session-button');
-        if (lockBtn) {
-            lockBtn.addEventListener('click', function (ev) {
-                ev.preventDefault();
-                lockSession();
-            });
-        }
 
         document.addEventListener('click', onDocumentClick, false);
         document.addEventListener('keydown', onKeyDown, false);

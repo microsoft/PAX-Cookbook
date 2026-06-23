@@ -31,6 +31,8 @@ interface StatusCardProps {
   tone: StatusTone;
   /** Optional override icon (e.g. folder for Workspace, person for Sign-in). */
   icon?: 'check' | 'folder' | 'person' | 'clock' | 'alert';
+  /** Optional inline help affordance rendered next to the title (e.g. a ? tooltip). */
+  titleHelp?: ReactNode;
 }
 
 function resolveIcon(
@@ -53,14 +55,17 @@ function resolveIcon(
   }
 }
 
-export function StatusCard({ title, state, detail, tone, icon }: StatusCardProps) {
+export function StatusCard({ title, state, detail, tone, icon, titleHelp }: StatusCardProps) {
   const Icon = resolveIcon(tone, icon);
   return (
     <div className={`dvw-status-card dvw-status-card--${tone}`}>
       <span className="dvw-status-card__icon" aria-hidden="true">
         <Icon />
       </span>
-      <span className="dvw-status-card__title">{title}</span>
+      <span className="dvw-status-card__title">
+        {title}
+        {titleHelp}
+      </span>
       <span className="dvw-status-card__state">{state}</span>
       <span className="dvw-status-card__detail">{detail}</span>
     </div>

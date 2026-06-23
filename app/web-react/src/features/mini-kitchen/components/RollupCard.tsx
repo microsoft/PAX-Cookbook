@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { RollupMode } from '../types';
 import { MiniKitchenSectionCard } from './MiniKitchenSectionCard';
 import {
@@ -10,6 +11,8 @@ interface RollupCardProps {
   value: RollupMode;
   disabled?: boolean;
   onChange: (next: RollupMode) => void;
+  /** Optional nested content (the Dashboard target subsection). */
+  children?: ReactNode;
 }
 
 const OPTIONS: ReadonlyArray<{
@@ -26,13 +29,13 @@ const OPTIONS: ReadonlyArray<{
   {
     id: 'rollup',
     title: 'Rollup only',
-    desc: 'Run the PAX rollup post-processor in place of the raw rows. PAX auto-installs Python 3.10+ and orjson on first use.',
+    desc: 'Run the PAX rollup post-processor in place of the raw rows.',
     dashboardOneOf: true,
   },
   {
     id: 'rollup-plus-raw',
     title: 'Rollup + raw',
-    desc: 'Emit both the rollup output and the raw audit rows. PAX auto-installs Python 3.10+ and orjson on first use.',
+    desc: 'Emit both the rollup output and the raw audit rows.',
     dashboardOneOf: true,
   },
 ];
@@ -43,14 +46,13 @@ const OPTIONS: ReadonlyArray<{
  * Python helper on first use and Mini-Kitchen cannot inspect the runtime
  * from the browser.
  */
-export function RollupCard({ value, disabled = false, onChange }: RollupCardProps) {
-  const showRuntimeCallout = value !== 'none';
+export function RollupCard({ value, disabled = false, onChange, children }: RollupCardProps) {
   return (
     <MiniKitchenSectionCard
       id="mk-rollup"
       title="Rollup"
       subtitle="Post-process the audit-query rows into a higher-level rollup."
-      helpText="PAX Cookbook does not inspect the runtime. PAX bootstraps the Python rollup helper on first use."
+      helpText="Turn raw audit rows into the higher-level totals a dashboard expects. PAX Cookbook handles everything needed to produce the rollup automatically."
       disabled={disabled}
       titleBadge={<DashboardReqBadge scopes={BOTH_DASHBOARD_SCOPES} />}
     >
@@ -95,12 +97,7 @@ export function RollupCard({ value, disabled = false, onChange }: RollupCardProp
           );
         })}
       </div>
-      {showRuntimeCallout ? (
-        <p className="mk-callout mk-callout--info">
-          PAX auto-installs Python 3.10+ and the optional orjson package on first use —
-          PAX Cookbook cannot verify the runtime.
-        </p>
-      ) : null}
+      {children}
     </MiniKitchenSectionCard>
   );
 }

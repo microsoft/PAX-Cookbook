@@ -25,14 +25,10 @@ import {
   getRuntimeVersion,
   getPaxEngineState,
   getHealth,
-  getLockState,
-  getSignInProtection,
   formatBuildTimestamp,
   type RuntimeVersionInfo,
   type PaxEngineState,
   type HealthInfo,
-  type LockStateInfo,
-  type SignInProtectionInfo,
 } from '../host/systemInfo';
 import {
   getNotificationSettings,
@@ -67,31 +63,7 @@ function engineStatusLabel(
   return 'Not installed';
 }
 
-// Read-only sign-in/lock status helpers, mirrored from Chef's Keys so the
-// Security section reads identically. Status text only - never a secret,
-// token, challenge, or credential value (constraint 14).
-function lockStatusLabel(phase: LoadPhase, lock: LockStateInfo | null): string {
-  if (phase === 'loading') {
-    return 'Checking…';
-  }
-  if (!lock || !lock.state) {
-    return NOT_REPORTED;
-  }
-  return lock.locked ? 'Locked' : 'Unlocked';
-}
-
-function passkeyStatusLabel(
-  phase: LoadPhase,
-  protect: SignInProtectionInfo | null,
-): string {
-  if (phase === 'loading') {
-    return 'Checking…';
-  }
-  if (!protect) {
-    return NOT_REPORTED;
-  }
-  return protect.passkeyRegistered ? 'Set up on this PC' : 'Not set up yet';
-}
+// Read-only sign-in/lock status helpers removed with the Security section.
 
 type StatusKind = 'ok' | 'err';
 
@@ -200,8 +172,8 @@ function NotificationsCard() {
     : 'Paste the token from BotFather';
 
   return (
-    <section className="dvw-settings__section">
-      <div className="dvw-settings__head">
+    <details className="dvw-settings__section dvw-settings__collapse">
+      <summary className="dvw-settings__head dvw-settings__collapse-summary">
         <div className="dvw-settings__head-title">
           <h3 className="dvw-keys__section-head">Notifications</h3>
           <ContextualHelpButton topic="cookbookNotifications" />
@@ -215,7 +187,7 @@ function NotificationsCard() {
             {settings?.tokenSet ? 'Configured' : 'Not configured'}
           </span>
         ) : null}
-      </div>
+      </summary>
       <p className="dvw-settings__desc">
         Get a Telegram message when a bake finishes or fails, and receive the sign-in
         code when a bake needs a Device Code. Notifications use your own Telegram bot
@@ -336,7 +308,7 @@ function NotificationsCard() {
           ) : null}
         </>
       )}
-    </section>
+    </details>
   );
 }
 
@@ -411,8 +383,8 @@ function StartupCard() {
   }
 
   return (
-    <section className="dvw-settings__section">
-      <div className="dvw-settings__head">
+    <details className="dvw-settings__section dvw-settings__collapse">
+      <summary className="dvw-settings__head dvw-settings__collapse-summary">
         <div className="dvw-settings__head-title">
           <h3 className="dvw-keys__section-head">Startup</h3>
           <ContextualHelpButton topic="cookbookStartup" />
@@ -422,7 +394,7 @@ function StartupCard() {
             {enabled ? 'On' : 'Off'}
           </span>
         ) : null}
-      </div>
+      </summary>
       <p className="dvw-settings__desc">
         Controls whether PAX Cookbook runs in the background after you sign in to
         Windows so scheduled bakes can run on time.
@@ -463,7 +435,7 @@ function StartupCard() {
           ) : null}
         </>
       )}
-    </section>
+    </details>
   );
 }
 
@@ -472,8 +444,6 @@ export function SettingsWorkspace() {
   const [version, setVersion] = useState<RuntimeVersionInfo | null>(null);
   const [engine, setEngine] = useState<PaxEngineState | null>(null);
   const [health, setHealth] = useState<HealthInfo | null>(null);
-  const [lock, setLock] = useState<LockStateInfo | null>(null);
-  const [protect, setProtect] = useState<SignInProtectionInfo | null>(null);
 
   // "Check for updates" lives on the Updates page, which runs the check and
   // shows the result (a green "up to date" banner or the available update). This
@@ -501,13 +471,11 @@ export function SettingsWorkspace() {
     if (!background) {
       setPhase('loading');
     }
-    const [v, e, h, l, p] = await Promise.all([
+    const [v, e, h] = await Promise.all([
       getRuntimeVersion(),
       getPaxEngineState(),
       getHealth(),
-      getLockState(),
-      getSignInProtection(),
-    ]).catch(() => [null, null, null, null, null] as const);
+    ]).catch(() => [null, null, null] as const);
     if (!mountedRef.current) {
       return;
     }
@@ -519,12 +487,6 @@ export function SettingsWorkspace() {
     }
     if (h && h.ok) {
       setHealth(h.data);
-    }
-    if (l && l.ok) {
-      setLock(l.data);
-    }
-    if (p && p.ok) {
-      setProtect(p.data);
     }
     // The page is ready when any core read (version/engine/health) lands. On a
     // background cycle, never downgrade a page that already rendered.
@@ -570,21 +532,11 @@ export function SettingsWorkspace() {
           : 'Needs attention'
         : NOT_REPORTED;
 
-  const passkeyStatus = passkeyStatusLabel(phase, protect);
-  const lockStatus = lockStatusLabel(phase, lock);
-  const verification =
-    protect?.userVerification && protect.userVerification.toLowerCase() === 'required'
-      ? 'Windows Hello required'
-      : protect?.userVerification ?? NOT_REPORTED;
-
   const channelDetail =
     channel !== NOT_REPORTED ? `${channel} channel` : 'Local-first build';
   const engineReady = engineStatus === 'Ready';
   const workspaceReady = workspaceStatus === 'Ready';
   const workspaceAttention = workspaceStatus === 'Needs attention';
-  const passkeyReady = passkeyStatus === 'Set up on this PC';
-  const verificationRequired = verification === 'Windows Hello required';
-  const appUnlocked = lockStatus === 'Unlocked';
 
   return (
     <section aria-labelledby="view-settings">
@@ -649,47 +601,10 @@ export function SettingsWorkspace() {
 
         <NotificationsCard />
 
-        <section className="dvw-settings__section">
-          <div className="dvw-settings__head">
-            <h3 className="dvw-keys__section-head">Security</h3>
-          </div>
-          <div className="dvw-status-grid">
-            <StatusCard
-              title="Windows Hello"
-              state={passkeyStatus}
-              detail="Unlocks the app"
-              tone={
-                passkeyReady
-                  ? 'ready'
-                  : passkeyStatus === 'Not set up yet'
-                    ? 'attention'
-                    : 'unknown'
-              }
-              icon={passkeyReady ? 'check' : undefined}
-            />
-            <StatusCard
-              title="Verification"
-              state={verification}
-              detail="Step-up for manual bakes"
-              tone={verificationRequired ? 'ready' : 'neutral'}
-            />
-            <StatusCard
-              title="App lock"
-              state={lockStatus}
-              detail="Current session"
-              tone={appUnlocked ? 'ready' : 'neutral'}
-              icon={appUnlocked ? 'check' : undefined}
-            />
-          </div>
-          <p className="dvw-keys__sysnote">
-            Status only — no secret, key, or token is shown.
-          </p>
-        </section>
-
-        <section className="dvw-settings__section">
-          <div className="dvw-settings__head">
+        <details className="dvw-settings__section dvw-settings__collapse">
+          <summary className="dvw-settings__head dvw-settings__collapse-summary">
             <h3 className="dvw-keys__section-head">About</h3>
-          </div>
+          </summary>
           <div className="dvw-settings__about">
             <div className="dvw-settings__brand">
               <span className="dvw-settings__brand-name">PAX Cookbook</span>
@@ -725,25 +640,29 @@ export function SettingsWorkspace() {
                 </div>
               </div>
             </div>
-            <div className="dvw-settings__help">
-              <span className="dvw-settings__help-label">Help &amp; getting started</span>
-              <button
-                type="button"
-                className="dvw-settings__help-link"
-                onClick={requestPantryUserGuide}
-              >
-                View the full PAX Cookbook User Guide
-              </button>
-              <button
-                type="button"
-                className="dvw-settings__help-link"
-                onClick={openShellHelp}
-              >
-                Open the help panel
-              </button>
-            </div>
           </div>
-        </section>
+        </details>
+        <details className="dvw-settings__section dvw-settings__collapse">
+          <summary className="dvw-settings__head dvw-settings__collapse-summary">
+            <h3 className="dvw-keys__section-head">Help &amp; getting started</h3>
+          </summary>
+          <div className="dvw-settings__help">
+            <button
+              type="button"
+              className="dvw-settings__help-link"
+              onClick={requestPantryUserGuide}
+            >
+              View the full PAX Cookbook User Guide
+            </button>
+            <button
+              type="button"
+              className="dvw-settings__help-link"
+              onClick={openShellHelp}
+            >
+              Open the help panel
+            </button>
+          </div>
+        </details>
       </div>
     </section>
   );

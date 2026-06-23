@@ -7,14 +7,15 @@
  * dark adaptation via prefers-color-scheme. Nothing here is behavioral.
  */
 
-/* Embed-mode full-bleed override for workspace surfaces whose content root
-   carries the .dvw class (Home, Recipes, Taste Tests). These pages span the
-   whole window width; the capped pages (Bakes, Pantry, Chef's Keys, Settings,
-   Updates) keep the default capped column from .app--embed .app-main in
-   shell.css. */
+/* Embed-mode override for workspace surfaces whose content root carries the
+   .dvw class (Home, Recipes, Taste Tests). These pages use a wider content
+   column than the capped pages (Bakes, Pantry, Chef's Keys, Settings, Updates,
+   which keep var(--container-max)), but are still bounded by
+   var(--container-wide) and centered so content never stretches edge-to-edge on
+   ultra-wide displays. */
 .app--embed .app-main:has(.dvw) {
-  max-width: none;
-  margin-inline: 0;
+  max-width: var(--container-wide);
+  margin-inline: auto;
   padding: var(--sp-7) clamp(20px, 3vw, 36px) var(--sp-10);
 }
 
@@ -1158,6 +1159,57 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: var(--sp-2);
+}
+
+/* Collapsible template categories on the Recipes page (one open at a time). */
+.dvw-tpl-cats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.dvw-tpl-cat {
+  border: 1px solid var(--c-border, #e2e8f0);
+  border-radius: var(--r-md, 10px);
+  background: var(--c-elev-1, #f8fafc);
+  overflow: hidden;
+}
+.dvw-tpl-cat--open {
+  background: var(--c-card, #ffffff);
+  border-color: var(--c-border-strong, #cbd5e1);
+}
+.dvw-tpl-cat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--fs-14, 14px);
+  color: var(--c-ink, #0f172a);
+  cursor: pointer;
+  text-align: left;
+}
+.dvw-tpl-cat__head:hover {
+  background: var(--c-elev-1, #f1f5f9);
+}
+.dvw-tpl-cat__chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--c-muted, #64748b);
+  border-bottom: 2px solid var(--c-muted, #64748b);
+  transform: rotate(45deg);
+  transition: transform var(--dur-fast, 0.15s) var(--ease-out, ease);
+  flex: 0 0 auto;
+}
+.dvw-tpl-cat--open .dvw-tpl-cat__chevron {
+  transform: rotate(-135deg);
+}
+.dvw-tpl-cat .dvw-tpl-grid {
+  padding: 0 var(--sp-3) var(--sp-3);
 }
 
 .dvw-tpl-card {
@@ -2368,6 +2420,24 @@
 .bk-status--unknown { color: var(--c-muted); }
 .bk-status--scheduled { color: var(--c-slate, var(--c-muted)); }
 
+/* Inline ? help tip (e.g. next to the Dashboard target card title). */
+.bk-help-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  border-radius: 999px;
+  background: var(--c-border-strong, #cbd5e1);
+  color: var(--c-page, #ffffff);
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+
 /* Scheduled-bake (Upcoming bakes) detail panel. */
 .bk-sched-badge {
   display: inline-flex;
@@ -3336,6 +3406,43 @@
   gap: var(--sp-3);
   padding-bottom: var(--sp-2);
   border-bottom: 1px solid var(--c-border);
+}
+
+/* Collapsible Settings sections (Startup, Notifications, About, Help). The
+   summary reuses the section-head row; a chevron at the far right rotates when
+   the section is open. Collapsed by default. */
+.dvw-settings__collapse-summary {
+  cursor: pointer;
+  list-style: none;
+}
+.dvw-settings__collapse-summary::-webkit-details-marker {
+  display: none;
+}
+.dvw-settings__collapse-summary::after {
+  content: '';
+  width: 9px;
+  height: 9px;
+  margin-left: var(--sp-2);
+  border-right: 2px solid var(--c-muted, #64748b);
+  border-bottom: 2px solid var(--c-muted, #64748b);
+  transform: rotate(45deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+  flex: 0 0 auto;
+}
+.dvw-settings__collapse[open] > .dvw-settings__collapse-summary::after {
+  transform: rotate(-135deg);
+}
+.dvw-settings__collapse-summary:hover {
+  color: var(--c-ink-strong, #0f172a);
+}
+
+/* Chef's Keys page intro blurb. */
+.dvw-keys__intro {
+  margin: 0 0 var(--sp-4);
+  max-width: 72ch;
+  font-size: var(--fs-14, 14px);
+  line-height: 1.5;
+  color: var(--c-muted, #475569);
 }
 
 /* Keeps a section's contextual-help "?" button pinned immediately to the right

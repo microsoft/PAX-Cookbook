@@ -3,7 +3,7 @@
   "channel": "stable",
   "minimumCompatibleManifestSchema": 1,
   "cookbook": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "releaseTimestamp": "2026-05-22T00:00:00Z",
     "installedAt": null,
     "signedHash": null

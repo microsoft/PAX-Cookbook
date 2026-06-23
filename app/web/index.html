@@ -30,7 +30,7 @@
     <link rel="icon" type="image/png" sizes="256x256" href="images/pax-cookbook-app-icon-256.png?v=uxr11">
     <link rel="manifest" href="manifest.webmanifest?v=uxr11">
     <link rel="stylesheet" href="assets/tokens.css?v=ux10a">
-    <link rel="stylesheet" href="assets/styles.css?v=ux10h">
+    <link rel="stylesheet" href="assets/styles.css?v=ux11a">
     <style>
       /* The integrated content iframe fills the main content area edge to
          edge; the React surface manages its own inner padding and scroll. */
@@ -46,11 +46,11 @@
     <script defer src="assets/permissions-catalog.js?v=uxr8"></script>
     <script defer src="assets/permissions-resolver.js?v=uxr8"></script>
     <script defer src="assets/permissions-viewer.js?v=uxr8"></script>
-    <script defer src="assets/help-panel.js?v=ug2"></script>
+    <script defer src="assets/help-panel.js?v=ug3"></script>
     <script defer src="assets/close-app.js?v=x16cgatefix7"></script>
-    <script defer src="assets/lock-overlay.js?v=uxr21"></script>
+    <script defer src="assets/lock-overlay.js?v=ux11a"></script>
     <script defer src="assets/pax-engine-overlay.js?v=x16cgate2"></script>
-    <script defer src="assets/integrated-shell.js?v=ux9d"></script>
+    <script defer src="assets/integrated-shell.js?v=ux11a"></script>
 </head>
 <body class="ux-redesign">
     <a class="skip-link" href="#page-root">Skip to main content</a>
@@ -66,10 +66,6 @@
                 <button id="help-button" type="button" class="btn-topbar" aria-haspopup="dialog" aria-controls="help-panel" aria-expanded="false">
                     <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-help"></use></svg>
                     <span class="topbar-btn-label">Help</span>
-                </button>
-                <button id="lock-session-button" type="button" class="btn-topbar" title="Clear this session and return to the launcher.">
-                    <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-lock"></use></svg>
-                    <span class="topbar-btn-label">Lock Session</span>
                 </button>
                 <button id="close-app-button" type="button" class="btn-topbar btn-topbar-danger" title="Close the Cookbook window or stop the server.">
                     <svg class="topbar-icon" aria-hidden="true" focusable="false"><use href="#icon-power"></use></svg>
@@ -111,6 +107,14 @@
                         </a>
                     </li>
                     <li class="nav-sep" role="separator" aria-hidden="true"></li>
+                    <li>
+                        <a href="#/updates" class="nav-item">
+                            <svg class="nav-icon" aria-hidden="true" focusable="false" viewBox="0 0 16 16">
+                                <path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" d="M8 2.5v6 M5.4 6.1 8 8.7l2.6-2.6 M3 11.5v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1"/>
+                            </svg>
+                            <span class="nav-label">Updates</span>
+                        </a>
+                    </li>
                     <li>
                         <a href="#/settings" class="nav-item">
                             <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="#icon-settings"></use></svg>

@@ -207,6 +207,7 @@
 
   /* ---- Layout ---- */
   --container-max: 1240px;
+  --container-wide: 1600px;
   --container-inset: clamp(20px, 4vw, 40px);
   --header-h: 60px;
 

@@ -2886,6 +2886,13 @@ select.form-input {
     color: var(--c-fg);
 }
 
+.lock-overlay-logo {
+    height: 26px;
+    width: auto;
+    align-self: flex-start;
+    margin: 0 0 var(--space-1) 0;
+}
+
 .lock-overlay-body p {
     margin: 0 0 var(--space-2) 0;
     line-height: 1.5;

@@ -188,7 +188,6 @@ internal static class BrokerLock
         }
 
         var skew = Skew(_lastActivityUtc, _lastActivityMonoTicks);
-        double monoIdleMinutes = skew.MonoElapsedSec / 60.0;
         TimeAnomaly? forceRelock = null;
 
         if (skew.AnomalyKind is not null)
@@ -202,7 +201,13 @@ internal static class BrokerLock
                 (int)AnomalyThresholdSec);
         }
 
-        if (forceRelock is not null || monoIdleMinutes >= InactivityTimeoutMinutes)
+        // The inactivity auto-lock has been removed: an open app never locks on
+        // idle (active, idle, or minimized to the taskbar). The broker still
+        // re-locks on a detected time anomaly (clock rollback / sleep gap /
+        // forward jump) so a runtime-continuity break never leaves stale auth in
+        // place. Windows Hello is still required at startup and before each
+        // manual bake (the step-up gate is independent of this sweep).
+        if (forceRelock is not null)
         {
             if (_state != "Locked")
             {

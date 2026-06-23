@@ -44,6 +44,12 @@ export function RecipeBasics({ value, onChange, nameError }: RecipeBasicsProps) 
       subtitle="Give this draft a unique name so you can find it later on this device."
       helpText="Names are scoped to this device. PAX Cookbook blocks empty names, reserved preset names, and duplicates of recipes already saved here."
     >
+      <p className="mk-field__note" role="note">
+        Everything in this section is just for organizing your recipes inside PAX
+        Cookbook — none of it changes your data output or bake results. Only the
+        recipe name is required (the default is fine); description, tags, and notes
+        are optional.
+      </p>
       <MiniKitchenField
         label="Name"
         htmlFor="mk-basics-name"

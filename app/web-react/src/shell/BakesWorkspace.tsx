@@ -466,6 +466,69 @@ function extractSignIn(recipe: Record<string, unknown> | undefined): string {
   return 'As configured in the recipe';
 }
 
+// The Power BI dashboard layout a bake's data targets, read from the recipe's
+// template/processing selection. Null for Custom / Entra-only recipes.
+function extractRecipeDashboard(recipe: Record<string, unknown> | undefined): string | null {
+  const proc = recipe?.processing as { dashboard?: unknown } | undefined;
+  const d = proc?.dashboard;
+  return typeof d === 'string' && d.trim().length > 0 ? d.trim() : null;
+}
+
+function resolveDashboardLabel(raw: string | null | undefined): string {
+  if (raw === 'aibv') {
+    return 'AI Business Value';
+  }
+  if (raw === 'aio') {
+    return 'AI-in-One';
+  }
+  return raw && raw.length > 0 ? raw : '\u2014';
+}
+
+// Maps known broker error codes to plain-language explanations with a likely
+// cause and a suggested next step. Unknown codes fall back to the raw value.
+const FRIENDLY_ERROR_MAP: Record<string, { title: string; help: string }> = {
+  spawn_failed: {
+    title: "PAX Cookbook couldn't start the script engine.",
+    help: "This usually means PowerShell 7 isn't installed or can't be found. Try reinstalling PAX Cookbook.",
+  },
+  broker_exited: {
+    title: 'The background process stopped unexpectedly during the bake.',
+    help: 'Try running the bake again. If this keeps happening, open the log file below and share it with support.',
+  },
+  engine_verify_failed: {
+    title: "The PAX engine couldn't be verified before the bake.",
+    help: 'The engine fingerprint did not match the approved version. Update or reinstall PAX Cookbook, then try again.',
+  },
+  engine_missing: {
+    title: 'The PAX engine is not set up on this PC yet.',
+    help: 'Open Settings to finish setting up the engine, then run the bake again.',
+  },
+  disk_space: {
+    title: 'There was not enough free disk space to run the bake.',
+    help: 'Free up space on this drive, then run the bake again.',
+  },
+  timeout: {
+    title: 'The bake ran longer than allowed and was stopped.',
+    help: 'Try a smaller date range or fewer activity types, then run again.',
+  },
+  canceled: {
+    title: 'The bake was stopped before it finished.',
+    help: 'Start the bake again when you are ready.',
+  },
+  auth_failed: {
+    title: "PAX couldn't sign in to your Microsoft 365 environment.",
+    help: 'Check the recipe\u2019s sign-in details (or its Chef\u2019s Key), then run the bake again.',
+  },
+};
+
+function friendlyError(code: string | null | undefined): { title: string; help: string } | null {
+  if (!code) {
+    return null;
+  }
+  const key = code.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  return FRIENDLY_ERROR_MAP[key] ?? null;
+}
+
 export function BakesWorkspace() {
   const [cooks, setCooks] = useState<CookSummary[]>([]);
   const [listPhase, setListPhase] = useState<ListPhase>('loading');
@@ -511,6 +574,10 @@ export function BakesWorkspace() {
   const selectedScheduleRef = useRef<string | null>(null);
   // The selected schedule's recipe document (for Output + Sign-in).
   const [scheduleRecipe, setScheduleRecipe] = useState<RecipeDetailBody | null>(null);
+  // The selected bake's live recipe (so the Dashboard target reflects the recipe
+  // config even when the cook snapshot did not capture it).
+  const [bakeRecipe, setBakeRecipe] = useState<RecipeDetailBody | null>(null);
+  const bakeRecipeIdRef = useRef<string | null>(null);
   // Transient confirmation toast after "Skip next bake".
   const [skipToast, setSkipToast] = useState<string | null>(null);
   const [skipBusy, setSkipBusy] = useState(false);
@@ -870,6 +937,32 @@ export function BakesWorkspace() {
   usePolling(pollCooks, 15000);
   usePolling(pollUpcoming, 60000);
 
+  // Fetch the selected bake's live recipe so the Dashboard target always
+  // reflects the recipe configuration, even when the cook snapshot did not
+  // capture it (e.g. a bake that failed early). Fetched once per distinct recipe.
+  useEffect(() => {
+    const rid = detail?.recipeId ?? null;
+    if (!rid) {
+      setBakeRecipe(null);
+      bakeRecipeIdRef.current = null;
+      return;
+    }
+    if (bakeRecipeIdRef.current === rid) {
+      return;
+    }
+    bakeRecipeIdRef.current = rid;
+    setBakeRecipe(null);
+    void (async () => {
+      const res = await getRecipe(rid);
+      if (!mounted.current || bakeRecipeIdRef.current !== rid) {
+        return;
+      }
+      if (res.ok && res.data) {
+        setBakeRecipe(res.data);
+      }
+    })();
+  }, [detail?.recipeId]);
+
   // One-shot: when the editor has just started a bake it stashes the new
   // cookId, then routes here. Once the history list has loaded, focus that
   // cook so the freshly started bake lands selected. The detail/log still come
@@ -985,6 +1078,8 @@ export function BakesWorkspace() {
     isFailedRun &&
     errorSummary !== null &&
     Boolean(errorSummary.errorClass || errorSummary.errorMessage || errorSummary.closureReason);
+  const friendlyErr =
+    friendlyError(errorSummary?.errorClass) ?? friendlyError(errorSummary?.closureReason);
   const allOutputs = detail?.outputs?.outputs ?? [];
   // Only show output rows for files that actually exist on disk, so the Output
   // files section reflects what this bake really produced — e.g. no phantom
@@ -1388,13 +1483,19 @@ export function BakesWorkspace() {
                 />
                 <StatusCard
                   title="Dashboard target"
-                  state={
-                    detail.recipe?.dashboard === 'aibv'
-                      ? 'AI Business Value'
-                      : detail.recipe?.dashboard === 'aio'
-                        ? 'AI-in-One'
-                        : detail.recipe?.dashboard ?? '—'
+                  titleHelp={
+                    <span
+                      className="bk-help-tip"
+                      role="img"
+                      aria-label="About the dashboard target"
+                      title="The Power BI dashboard this bake's data is designed for. This value comes from the recipe's template selection. Custom and Entra-only recipes don't have a dashboard target."
+                    >
+                      ?
+                    </span>
                   }
+                  state={resolveDashboardLabel(
+                    detail.recipe?.dashboard ?? extractRecipeDashboard(bakeRecipe?.recipe),
+                  )}
                   detail="Power BI target"
                   tone="neutral"
                   icon="check"
@@ -1417,7 +1518,8 @@ export function BakesWorkspace() {
                   </>
                 ) : allOutputs.length > 0 ? (
                   <p className="tt-muted">
-                    This bake&rsquo;s output files are no longer on disk.
+                    Output files were not found on disk. This may be because the bake did not
+                    complete successfully, or the files were moved or deleted.
                   </p>
                 ) : (
                   <p className="tt-muted">No output destinations recorded for this bake.</p>
@@ -1479,12 +1581,30 @@ export function BakesWorkspace() {
 
                 {showErrorSummary ? (
                   <div className="bk-section bk-section--error">
-                    <h3 className="bk-section__title">Error</h3>
-                    {errorSummary?.errorClass ? (
-                      <p className="bk-section__line">{errorSummary.errorClass}</p>
-                    ) : null}
-                    {errorSummary?.errorMessage ? (
-                      <p className="bk-section__line tt-muted">{errorSummary.errorMessage}</p>
+                    <h3 className="bk-section__title">What went wrong</h3>
+                    {friendlyErr ? (
+                      <>
+                        <p className="bk-section__line">{friendlyErr.title}</p>
+                        <p className="bk-section__line tt-muted">{friendlyErr.help}</p>
+                      </>
+                    ) : (
+                      <>
+                        {errorSummary?.errorClass ? (
+                          <p className="bk-section__line">{errorSummary.errorClass}</p>
+                        ) : null}
+                        {errorSummary?.errorMessage ? (
+                          <p className="bk-section__line tt-muted">{errorSummary.errorMessage}</p>
+                        ) : null}
+                      </>
+                    )}
+                    {errorSummary?.errorClass || errorSummary?.closureReason ? (
+                      <p className="bk-section__line tt-muted">
+                        Error code:{' '}
+                        <code>{errorSummary?.errorClass ?? errorSummary?.closureReason}</code>
+                        {detail.logPath
+                          ? ' \u2014 open or download the log below to share with support.'
+                          : ''}
+                      </p>
                     ) : null}
                   </div>
                 ) : null}
@@ -1537,13 +1657,9 @@ export function BakesWorkspace() {
                   />
                   <MetaRow
                     label="Dashboard target"
-                    value={
-                      detail.recipe?.dashboard === 'aibv'
-                        ? 'AI Business Value'
-                        : detail.recipe?.dashboard === 'aio'
-                          ? 'AI-in-One'
-                          : detail.recipe?.dashboard ?? '—'
-                    }
+                    value={resolveDashboardLabel(
+                      detail.recipe?.dashboard ?? extractRecipeDashboard(bakeRecipe?.recipe),
+                    )}
                   />
                   <MetaRow
                     label="Started"
