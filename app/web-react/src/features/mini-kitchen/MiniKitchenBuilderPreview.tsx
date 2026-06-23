@@ -85,7 +85,6 @@ import { QueryModeCard, type QueryModeSelection } from './components/QueryModeCa
 import { DataCollectionCard } from './components/DataCollectionCard';
 import { DateRangeCard } from './components/DateRangeCard';
 import { RollupCard } from './components/RollupCard';
-import { MiniKitchenSectionCard } from './components/MiniKitchenSectionCard';
 import { DashboardReqTag } from './components/DashboardRequirement';
 import { AuditFiltersCard } from './components/AuditFiltersCard';
 import { OutputTargetCard } from './components/OutputTargetCard';
@@ -840,13 +839,20 @@ export function MiniKitchenBuilderPreview({
   // actually persisted, so callers like "Save and leave" can continue the
   // navigation on success and abort it (leaving the user in the builder, with
   // the save-requirements dialog shown) on a block or failure.
-  async function handleSaveOrUpdate(): Promise<boolean> {
+  async function handleSaveOrUpdate(force = false): Promise<boolean> {
     if (busy) {
       return false;
     }
-    if (!candidateSaveable || !createBuild.body) {
-      // Incomplete recipe: never a silent no-op. Surface the missing details in
-      // a dialog that names each gap and the step that fixes it.
+    if (!createBuild.body) {
+      // The recipe can't be serialized at all yet (a fundamental gap). Show what
+      // is missing; there is nothing we can send to save.
+      setSaveBlockedOpen(true);
+      return false;
+    }
+    if (!force && saveRequirements.length > 0) {
+      // Incomplete but serializable. Let the user decide in the requirements
+      // dialog: jump to a missing field, keep editing, or save the recipe as-is
+      // (a draft they can finish — and bake — later).
       setSaveBlockedOpen(true);
       return false;
     }
@@ -1657,7 +1663,17 @@ export function MiniKitchenBuilderPreview({
                     left menu &mdash; each key&rsquo;s secret is kept in Windows
                     Credential Manager on this PC and never leaves your device.
                   </p>
-                  <AuthContextCard value={state.auth} onChange={handleAuthChange} />
+                  <AuthContextCard
+                    value={state.auth}
+                    onChange={handleAuthChange}
+                    onCreateChefKey={() =>
+                      setNavIntent({
+                        section: 'chefskeys',
+                        proceed: () => requestShellSection('chefskeys'),
+                        cancel: () => {},
+                      })
+                    }
+                  />
                 </>
               ) : null}
 
@@ -1738,13 +1754,18 @@ export function MiniKitchenBuilderPreview({
                   {(state.processing.rollup === 'rollup' ||
                     state.processing.rollup === 'rollup-plus-raw') &&
                   state.query.includeM365Usage !== true ? (
-                    <MiniKitchenSectionCard
-                      id="mk-dashboard-target"
-                      title="Dashboard target"
-                      subtitle="Choose the dashboard column layout the rollup produces."
-                      helpText="AIBV produces the 50-column AI Business Value superset; AI-in-One is the default."
-                      titleBadge={<ContextualHelpButton topic="rollupDashboard" />}
-                    >
+                    <div className="mk-subsection" id="mk-dashboard-target">
+                      <div className="mk-subsection__head">
+                        <h3 className="mk-subsection-title">Dashboard target</h3>
+                        <ContextualHelpButton topic="rollupDashboard" />
+                      </div>
+                      <p className="mk-card__subtitle">
+                        Choose the dashboard column layout the rollup produces.
+                      </p>
+                      <p className="mk-card__help">
+                        AIBV produces the full AI Business Value superset; AI-in-One
+                        is the default.
+                      </p>
                       <div
                         className="mk-radio-cards"
                         role="radiogroup"
@@ -1761,7 +1782,7 @@ export function MiniKitchenBuilderPreview({
                             {
                               id: 'aibv' as const,
                               title: 'AI Business Value (AIBV)',
-                              desc: 'The 50-column AI Business Value superset.',
+                              desc: 'The AI Business Value superset.',
                               scope: 'ai-business-value' as const,
                             },
                           ]
@@ -1796,7 +1817,7 @@ export function MiniKitchenBuilderPreview({
                           );
                         })}
                       </div>
-                    </MiniKitchenSectionCard>
+                    </div>
                   ) : null}
                   </RollupCard>
                 </>
@@ -1810,6 +1831,7 @@ export function MiniKitchenBuilderPreview({
                   value={scheduleDraft}
                   onChange={setScheduleDraft}
                   hasBoundChefKey={Boolean(state.auth.chefKeyId)}
+                  authMode={state.auth.mode}
                   onGoToAuthStep={() => setActiveStep(2)}
                   statusNote={scheduleNote}
                 />
@@ -2290,10 +2312,14 @@ export function MiniKitchenBuilderPreview({
                   'mk-preview-boundary__btn' +
                   (isDirty ? ' mk-preview-boundary__btn--primary' : '')
                 }
-                onClick={handleSaveOrUpdate}
-                disabled={busy}
-                aria-disabled={busy}
-                title={saveDisabledReason ?? 'Save this recipe in PAX Cookbook.'}
+                onClick={() => handleSaveOrUpdate(false)}
+                disabled={busy || !isDirty}
+                aria-disabled={busy || !isDirty}
+                title={
+                  !busy && !isDirty
+                    ? 'No unsaved changes to save.'
+                    : (saveDisabledReason ?? 'Save this recipe in PAX Cookbook.')
+                }
               >
                 {saveLabel}
               </button>
@@ -2423,9 +2449,14 @@ export function MiniKitchenBuilderPreview({
       {saveBlockedOpen ? (
         <SaveRequirementsModal
           requirements={saveRequirements}
+          canSaveAnyway={Boolean(createBuild.body)}
           onGoToStep={step => {
             setActiveStep(step);
             setSaveBlockedOpen(false);
+          }}
+          onSaveAnyway={() => {
+            setSaveBlockedOpen(false);
+            void handleSaveOrUpdate(true);
           }}
           onClose={() => setSaveBlockedOpen(false)}
         />
@@ -2465,8 +2496,7 @@ export function MiniKitchenBuilderPreview({
               </p>
               <p className="mk-modal__subtitle">
                 If you&rsquo;re using this data to populate a report that requires Entra
-                user info (like the AI Business Value dashboard), the report may not
-                populate correctly.
+                user info, the report may not populate correctly.
               </p>
             </header>
             <div className="mk-modal__actions">

@@ -699,6 +699,82 @@
   min-width: 0;
 }
 
+/* Collapsible section card (details/summary variant of .mk-card). The card keeps
+ * its frame; only the title row shows when collapsed. */
+.mk-card__head--summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.mk-card__head--summary::-webkit-details-marker {
+  display: none;
+}
+.mk-card__chevron {
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--c-muted, #64748b);
+  border-bottom: 2px solid var(--c-muted, #64748b);
+  transform: rotate(45deg);
+  transition: transform var(--dur-fast, 0.15s) var(--ease-out, ease);
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+details[open] > .mk-card__head--summary .mk-card__chevron,
+details[open] > .mk-subcollapse__summary .mk-card__chevron {
+  transform: rotate(-135deg);
+}
+
+/* Collapsible subsection (e.g. Custom activity types inside a card). */
+.mk-subcollapse {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: var(--r-lg, 10px);
+  background: var(--c-elev-1, #f8fafc);
+}
+.mk-subcollapse__summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+}
+.mk-subcollapse__summary::-webkit-details-marker {
+  display: none;
+}
+.mk-subcollapse__title {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-ink-strong);
+}
+.mk-subcollapse__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4) var(--sp-4);
+}
+
+/* Non-collapsible subsection within a card (e.g. Dashboard target inside the
+ * Rollup card) — one heading level below the section title. */
+.mk-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.mk-subsection__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.mk-subsection-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-17);
+  font-weight: 700;
+  color: var(--c-ink-strong);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
 /* ---------------------------------------------------------------------------
  * Field wrapper
  * ------------------------------------------------------------------------- */
@@ -1311,6 +1387,15 @@
 
 .mk-callout code {
   font-family: var(--font-mono);
+}
+
+/* Stacked paragraphs inside a callout (e.g. the Chef's Key explainer) need
+ * breathing room so they don't run together as one block. */
+.mk-callout p {
+  margin: 0;
+}
+.mk-callout p + p {
+  margin-top: var(--sp-2);
 }
 
 /* ---------------------------------------------------------------------------
@@ -5713,6 +5798,14 @@
 .mk-preview-boundary__btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* Compact variant for inline callout actions (e.g. the Schedule gate's
+   "Go to Authentication" button), which should not dominate the callout. */
+.mk-preview-boundary__btn--sm {
+  min-height: 28px;
+  padding: 4px var(--sp-3);
+  font-size: var(--fs-13);
+  align-self: flex-start;
 }
 /* Spacing wrapper for the secondary "Create new Chef's Key" action in the
    Authentication step. */

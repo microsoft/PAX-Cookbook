@@ -3414,9 +3414,15 @@
 .dvw-settings__collapse-summary {
   cursor: pointer;
   list-style: none;
+  justify-content: flex-start;
 }
 .dvw-settings__collapse-summary::-webkit-details-marker {
   display: none;
+}
+/* Push the status pill ("On" / "Configured") and the chevron to the right edge,
+   leaving the title on the left. */
+.dvw-settings__collapse-summary > .dvw-settings__head-title {
+  margin-right: auto;
 }
 .dvw-settings__collapse-summary::after {
   content: '';
@@ -3434,6 +3440,14 @@
 }
 .dvw-settings__collapse-summary:hover {
   color: var(--c-ink-strong, #0f172a);
+}
+/* Roomier spacing inside an expanded Settings section so the body content
+   (paragraphs, steps, fields) isn't cramped together. */
+.dvw-settings__collapse[open] {
+  gap: var(--sp-5);
+}
+.dvw-settings__collapse .settings-steps {
+  gap: var(--sp-2);
 }
 
 /* Chef's Keys page intro blurb. */

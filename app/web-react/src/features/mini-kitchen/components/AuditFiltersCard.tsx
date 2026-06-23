@@ -71,6 +71,9 @@ export function AuditFiltersCard({
       title="User, group, and agent filters"
       subtitle="Optional narrowing of the audit-query result set."
       helpText="Leave blank to skip a filter. PAX Cookbook does not validate IDs or names against your tenant."
+      optional
+      collapsible
+      defaultOpen={false}
       disabled={disabled}
     >
       {disabled ? (
@@ -79,10 +82,10 @@ export function AuditFiltersCard({
           no audit activity to filter.
         </p>
       ) : (
-        <p className="mk-field__note" role="note">
+        <p className="mk-callout mk-callout--info" role="note">
           These are <strong>inclusion</strong> filters. When you enter a value, only
           data matching it is included and everything else is left out. Leave a
-          filter empty to include <strong>all</strong> data for that category —
+          filter empty to include <strong>all</strong> data for that category &mdash;
           nothing is excluded.
         </p>
       )}

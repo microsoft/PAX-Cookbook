@@ -1,5 +1,6 @@
 import { MiniKitchenSectionCard } from './MiniKitchenSectionCard';
 import { MiniKitchenField } from './MiniKitchenField';
+import type { AuthMode } from '../types';
 import {
   type ScheduleDraft,
   applyScheduleEnabled,
@@ -31,6 +32,8 @@ interface ScheduleCardProps {
   onChange: (next: ScheduleDraft) => void;
   /** True when a Chef's Key is bound; required to enable scheduling. */
   hasBoundChefKey: boolean;
+  /** This recipe's current sign-in mode, used to tailor the not-schedulable copy. */
+  authMode: AuthMode;
   /** Navigate to the Authentication step so the user can assign a Chef's Key. */
   onGoToAuthStep?: () => void;
   /** Optional note from the server (e.g. a schedule-drift advisory). */
@@ -51,18 +54,20 @@ export function ScheduleCard({
   value,
   onChange,
   hasBoundChefKey,
+  authMode,
   onGoToAuthStep,
   statusNote,
 }: ScheduleCardProps) {
   const validity = isScheduleValid(value);
   const showConfig = value.enabled;
+  const isInteractiveAuth = authMode === 'WebLogin' || authMode === 'DeviceCode';
 
   return (
     <MiniKitchenSectionCard
       id="mk-schedule"
       title="Schedule"
       subtitle="Run this saved recipe automatically on a recurring schedule."
-      helpText="Scheduling configures a per-user Windows task that runs this recipe automatically on the chosen cadence. The schedule is registered when you save the recipe and runs under the bound Chef's Key, so an unattended run needs an App registration key (secret or certificate). For a scheduled bake to actually fire, keep Start PAX Cookbook at login on (Settings \u2192 Startup) so the background broker is running when the scheduled time arrives. Manual bakes are unaffected."
+      helpText="Scheduling sets up a Windows task that runs this recipe automatically on the cadence you choose. The schedule is created when you save the recipe and signs in with the bound Chef's Key, so an unattended run needs an App registration key (secret or certificate). For a scheduled bake to actually run, keep Start PAX Cookbook at login turned on in Settings so PAX Cookbook is running in the background when the scheduled time arrives. Manual bakes are unaffected."
     >
       <p className="mk-field__note">
         Scheduling automates this recipe so it bakes on its own at set times — daily or
@@ -74,14 +79,14 @@ export function ScheduleCard({
       {!hasBoundChefKey ? (
         <div className="mk-callout mk-callout--warning">
           <p>
-            Scheduled bakes run unattended, so they need a Chef&rsquo;s Key for sign-in —
-            an interactive sign-in can&rsquo;t be used for automatic runs. Assign a
-            Chef&rsquo;s Key on the Authentication step to turn scheduling on.
+            {isInteractiveAuth
+              ? 'This recipe is set to sign in interactively (Web login or Device code), which needs a person at the keyboard \u2014 so it can\u2019t run on an unattended schedule. To schedule it, switch to an App registration sign-in and bind a Chef\u2019s Key on the Authentication step.'
+              : 'This recipe doesn\u2019t have a Chef\u2019s Key bound yet. A scheduled bake runs unattended, so it needs a Chef\u2019s Key for sign-in. Bind one on the Authentication step to turn scheduling on.'}
           </p>
           {onGoToAuthStep ? (
             <button
               type="button"
-              className="mk-preview-boundary__btn"
+              className="mk-preview-boundary__btn mk-preview-boundary__btn--sm"
               onClick={onGoToAuthStep}
             >
               Go to Authentication (Step 2)

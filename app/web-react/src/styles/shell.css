@@ -22,8 +22,6 @@ body {
   line-height: var(--lh-base);
   color: var(--c-ink);
   background: var(--c-page);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
@@ -351,6 +349,11 @@ button {
 
 .view-head__text {
   min-width: 0;
+}
+
+.view-head__actions {
+  flex: 0 0 auto;
+  align-self: flex-start;
 }
 
 .view-head__art {

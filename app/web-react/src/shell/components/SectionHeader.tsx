@@ -21,6 +21,8 @@ interface SectionHeaderProps {
   accent?: string;
   /** Optional decorative art rendered at the trailing edge of the header. */
   art?: ReactNode;
+  /** Optional interactive actions (e.g. a button) rendered top-right of the title row. */
+  actions?: ReactNode;
   /** Heading level. Home/Recipes use h1; nested placeholder views use h2. */
   headingLevel?: 'h1' | 'h2';
   /** Optional id applied to the heading for aria-labelledby wiring. */
@@ -33,6 +35,7 @@ export function SectionHeader({
   helpTopic,
   accent,
   art,
+  actions,
   headingLevel = 'h2',
   titleId,
 }: SectionHeaderProps) {
@@ -50,6 +53,7 @@ export function SectionHeader({
           </Heading>
           {lede ? <p className="view-head__lede">{lede}</p> : null}
         </div>
+        {actions ? <div className="view-head__actions">{actions}</div> : null}
         {art ? <div className="view-head__art">{art}</div> : null}
       </div>
     </header>

@@ -375,6 +375,45 @@ internal static class WebViewShell
         var web = new WebView2 { Dock = DockStyle.Fill };
         form.Controls.Add(web);
 
+        // Post-navigation relayout nudge. After an in-app update reloads the
+        // page (a fresh top-level navigation that does not go through the
+        // initial force-show/settle path), the embedded Chromium compositor can
+        // present a stale frame: text falls back to grayscale antialiasing
+        // (no ClearType, so it looks jagged) and the full-bleed pages whose
+        // width is resolved by a :has() rule have not settled — until a real
+        // window resize forces a recomposite. That is exactly why minimizing
+        // and restoring the window fixes it. Reproduce that resize invisibly
+        // after every top-level navigation by toggling a 1px bottom padding on
+        // the form (which resizes the docked WebView2 by one pixel and back, on
+        // the next message-loop tick so Chromium registers two distinct resize
+        // events), so content renders correctly without the user having to
+        // minimize and restore.
+        Padding relayoutBaselinePadding = form.Padding;
+        var relayoutNudgeTimer = new System.Windows.Forms.Timer { Interval = 32 };
+        relayoutNudgeTimer.Tick += (_, _) =>
+        {
+            relayoutNudgeTimer.Stop();
+            if (form.IsDisposed) { return; }
+            try { form.Padding = relayoutBaselinePadding; }
+            catch { /* Non-fatal: the nudge is a best-effort repaint. */ }
+        };
+        void NudgeWebViewRelayout()
+        {
+            if (form.IsDisposed || web.IsDisposed) { return; }
+            try
+            {
+                form.Padding = new Padding(
+                    relayoutBaselinePadding.Left,
+                    relayoutBaselinePadding.Top,
+                    relayoutBaselinePadding.Right,
+                    relayoutBaselinePadding.Bottom + 1);
+                relayoutNudgeTimer.Stop();
+                relayoutNudgeTimer.Start();
+            }
+            catch { /* Non-fatal: the nudge is a best-effort repaint. */ }
+        }
+        web.NavigationCompleted += (_, _) => NudgeWebViewRelayout();
+
         // Whether the next FormClosing should proceed to teardown rather than be
         // intercepted and routed to the in-app close modal. It is set true only
         // by an explicit Close-app decision (the modal's Close app button, the

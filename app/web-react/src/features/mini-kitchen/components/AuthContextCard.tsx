@@ -4,7 +4,6 @@ import { MiniKitchenSectionCard } from './MiniKitchenSectionCard';
 import { MiniKitchenField } from './MiniKitchenField';
 import { DashboardReqBadge, USER_INFO_RUN_SCOPES } from './DashboardRequirement';
 import { listChefKeys, type ChefKeyItem } from '../../../host/chefKeys';
-import { requestShellSection } from '../../../shell/shellNav';
 import {
   CK_AUTH_TYPE_FOR_MODE,
   applyAuthModeChange,
@@ -39,6 +38,12 @@ export function schedulingIndicator(
 interface AuthContextCardProps {
   value: LiteRecipeAuth;
   onChange: (next: LiteRecipeAuth) => void;
+  /**
+   * Open the Chef's Keys page to create a new key. The builder routes this
+   * through its leave-confirmation modal so EVERY click warns about leaving the
+   * in-progress recipe, regardless of whether there are unsaved edits.
+   */
+  onCreateChefKey: () => void;
 }
 
 const AUTH_MODES: ReadonlyArray<{
@@ -73,7 +78,7 @@ const AUTH_MODES: ReadonlyArray<{
   },
 ];
 
-export function AuthContextCard({ value, onChange }: AuthContextCardProps) {
+export function AuthContextCard({ value, onChange, onCreateChefKey }: AuthContextCardProps) {
   const mode = value.mode;
   const isAppReg =
     mode === 'AppRegistrationSecret' || mode === 'AppRegistrationCertificate';
@@ -113,7 +118,6 @@ export function AuthContextCard({ value, onChange }: AuthContextCardProps) {
   const ckType = CK_AUTH_TYPE_FOR_MODE[mode];
   const matchingKeys = (chefKeys ?? []).filter(k => k.authType === ckType);
   const boundId = value.chefKeyId ?? '';
-  const sched = schedulingIndicator(mode, boundId.length > 0);
 
   return (
     <MiniKitchenSectionCard
@@ -230,7 +234,7 @@ export function AuthContextCard({ value, onChange }: AuthContextCardProps) {
               <button
                 type="button"
                 className="mk-preview-boundary__btn"
-                onClick={() => requestShellSection('chefskeys')}
+                onClick={onCreateChefKey}
               >
                 + Create new Chef&apos;s Key
               </button>
@@ -246,13 +250,6 @@ export function AuthContextCard({ value, onChange }: AuthContextCardProps) {
           Chef&rsquo;s Keys page, then bind it above.
         </p>
       ) : null}
-      <p
-        className={
-          'mk-callout ' + (sched.tone === 'ok' ? 'mk-callout--info' : 'mk-callout--warning')
-        }
-      >
-        {sched.text}
-      </p>
       {mode === 'AppRegistrationSecret' ? (
         <p className="mk-callout mk-callout--info">
           The client secret is stored in the bound Chef&apos;s Key (Windows Credential

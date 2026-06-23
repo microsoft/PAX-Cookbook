@@ -1,6 +1,5 @@
 import type { LiteRecipeQuery } from '../types';
 import { MiniKitchenSectionCard } from './MiniKitchenSectionCard';
-import { MiniKitchenField } from './MiniKitchenField';
 import {
   DashboardReqBadge,
   DashboardReqTag,
@@ -121,41 +120,49 @@ export function DataCollectionCard({
           );
         })}
       </div>
-      <MiniKitchenField
-        label="Custom activity types"
-        htmlFor="mk-data-activitytypes"
-        hint="Most people leave this blank. It is for advanced users who need to target specific audit record types not covered by the options above. Separate with new lines, commas, or semicolons. Maps to -ActivityTypes; blank uses the PAX default (CopilotInteraction)."
-        optional
-        disabled={disabled}
-      >
-        <textarea
-          id="mk-data-activitytypes"
-          className="mk-input mk-input--textarea mk-input--code"
-          rows={3}
-          value={listToLines(activityTypes)}
-          placeholder={'CopilotInteraction'}
-          spellCheck={false}
-          disabled={disabled}
-          onChange={e => {
-            const list = linesToList(e.target.value);
-            onActivityTypesChange(list.length > 0 ? list : undefined);
-          }}
-        />
-      </MiniKitchenField>
-      <p className="mk-field__note">
-        This is an advanced, rarely needed field — most people leave it blank.
-        Activity types are the specific actions recorded in your tenant&rsquo;s
-        audit log (for example, <code>CopilotInteraction</code>). For the full list
-        of names you can enter here, see{' '}
-        <a
-          href="https://learn.microsoft.com/purview/audit-log-activities"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Audited activities in Microsoft Purview
-        </a>
-        .
-      </p>
+      <details className="mk-subcollapse">
+        <summary className="mk-subcollapse__summary">
+          <span className="mk-subcollapse__title">Custom activity types</span>
+          <span className="mk-field__optional">optional</span>
+          <span className="mk-card__chevron" aria-hidden="true" />
+        </summary>
+        <div className="mk-subcollapse__body">
+          <p className="mk-field__hint" id="mk-data-activitytypes-hint">
+            Most people leave this blank. It is for advanced users who need to
+            target specific audit record types not covered by the options above.
+            Separate with new lines, commas, or semicolons. Maps to -ActivityTypes;
+            blank uses the PAX default (CopilotInteraction).
+          </p>
+          <textarea
+            id="mk-data-activitytypes"
+            className="mk-input mk-input--textarea mk-input--code"
+            rows={3}
+            value={listToLines(activityTypes)}
+            placeholder={'CopilotInteraction'}
+            spellCheck={false}
+            disabled={disabled}
+            aria-describedby="mk-data-activitytypes-hint"
+            onChange={e => {
+              const list = linesToList(e.target.value);
+              onActivityTypesChange(list.length > 0 ? list : undefined);
+            }}
+          />
+          <p className="mk-field__note">
+            This is an advanced, rarely needed field — most people leave it blank.
+            Activity types are the specific actions recorded in your tenant&rsquo;s
+            audit log (for example, <code>CopilotInteraction</code>). For the full list
+            of names you can enter here, see{' '}
+            <a
+              href="https://learn.microsoft.com/purview/audit-log-activities"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Audited activities in Microsoft Purview
+            </a>
+            .
+          </p>
+        </div>
+      </details>
     </MiniKitchenSectionCard>
   );
 }

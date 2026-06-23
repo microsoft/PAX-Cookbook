@@ -106,7 +106,7 @@ public class NativeBrokerHostStage3hTests
     [InlineData("RetriesExhausted",
         "Too many failed verification attempts. Please wait and try again.")]
     [InlineData("ComInteropFailure",
-        "Windows verification surface is unavailable. Restart the appliance and try again; if the problem persists, see TROUBLESHOOTING \u00a713b.")]
+        "Windows verification surface is unavailable. Restart the appliance and try again; if the problem persists, see the PAX Cookbook User Guide.")]
     [InlineData("Unknown",
         "Verification did not succeed. Please try the operation again.")]
     public async Task Put_returns_401_reAuthRequired_when_verdict_is_not_verified(

@@ -546,6 +546,15 @@ export function SettingsWorkspace() {
         lede="App information, notifications, security, and the PAX engine for this app. These details are read-only unless noted."
         helpTopic="cookbookSettings"
         accent="var(--c-slate)"
+        actions={
+          <button
+            type="button"
+            className="dvw-settings__updates-btn"
+            onClick={handleGoToUpdates}
+          >
+            Check for updates
+          </button>
+        }
       />
 
       <div className="dvw-settings">
@@ -582,18 +591,6 @@ export function SettingsWorkspace() {
               }
               icon="folder"
             />
-          </div>
-          <div className="dvw-settings__updates">
-            <span className="dvw-settings__updates-label">
-              Keep PAX Cookbook current
-            </span>
-            <button
-              type="button"
-              className="dvw-settings__updates-btn"
-              onClick={handleGoToUpdates}
-            >
-              Check for updates
-            </button>
           </div>
         </section>
 

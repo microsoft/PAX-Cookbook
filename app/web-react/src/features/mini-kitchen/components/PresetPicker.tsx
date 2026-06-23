@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DASHBOARD_PRESETS } from '../data/dashboard-presets';
 import { powerBiTemplateUrl } from '../data/powerBiTemplateLinks';
 import type { PresetId } from '../types';
@@ -63,6 +63,23 @@ export function PresetPicker({ selected, onSelect, onImportClick }: PresetPicker
   // (so arriving via a template shows its card pre-selected); collapsed when the
   // selection is not in any category.
   const [openCat, setOpenCat] = useState<string | null>(() => categoryForPreset(selected));
+
+  // The preset that launched the builder can arrive AFTER first mount (the
+  // handoff from the template/preset page sets it a tick later). Whenever the
+  // selected preset changes, open its category so the chosen card is visible
+  // and pre-selected. Manual category collapse does not change `selected`, so
+  // this never fights the user once they are in the builder.
+  const prevSelectedRef = useRef(selected);
+  useEffect(() => {
+    if (prevSelectedRef.current === selected) {
+      return;
+    }
+    prevSelectedRef.current = selected;
+    const cat = categoryForPreset(selected);
+    if (cat) {
+      setOpenCat(cat);
+    }
+  }, [selected]);
 
   function renderCard(presetId: PresetId) {
     const preset = DASHBOARD_PRESETS.find(p => p.id === presetId);

@@ -54,6 +54,9 @@ export function AdvancedArgsCard({ value, onChange }: AdvancedArgsCardProps) {
       title="Advanced options (switches)"
       subtitle="Optional — most bakes don't need anything here. Only add raw PAX switches for edge cases the guided options above don't cover."
       helpText="Use carefully. The builder does not validate values — it only flags removed, duplicate, unknown, or secret-shaped tokens. Documentation for the available switches is linked below."
+      optional
+      collapsible
+      defaultOpen={false}
     >
       <MiniKitchenField
         label="Extra switches"
