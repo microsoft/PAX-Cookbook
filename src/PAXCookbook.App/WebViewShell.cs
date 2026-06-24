@@ -71,7 +71,7 @@ internal static class WebViewShell
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
-    private const int SW_SHOWMAXIMIZED = 3;
+    private const int SW_SHOWNORMAL = 1;
 
     // Taskbar button icon for the running window. Under corporate WDAC the app
     // runs via the Microsoft-signed dotnet.exe host, launched from a shortcut
@@ -252,33 +252,34 @@ internal static class WebViewShell
         ApplicationConfiguration.Initialize();
 
         // Open on the monitor where the user launched the app (the screen under
-        // the cursor), not always the primary monitor. A maximized window
-        // maximizes on the monitor that contains its restore bounds, so those
-        // bounds are positioned on the target screen BEFORE the first show.
-        // Cursor.Position can throw in unusual session states, so fall back to
-        // the primary screen's working area.
+        // the cursor), not always the primary monitor. Cursor.Position can throw
+        // in unusual session states, so fall back to the primary screen's
+        // working area.
         Rectangle targetWorkingArea;
         try { targetWorkingArea = Screen.FromPoint(Cursor.Position).WorkingArea; }
-        catch { targetWorkingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 860); }
-        var restoreSize = new Size(
-            Math.Min(1280, targetWorkingArea.Width),
-            Math.Min(860, targetWorkingArea.Height));
-        var restoreLocation = new Point(
-            targetWorkingArea.X + Math.Max(0, (targetWorkingArea.Width - restoreSize.Width) / 2),
-            targetWorkingArea.Y + Math.Max(0, (targetWorkingArea.Height - restoreSize.Height) / 2));
+        catch { targetWorkingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080); }
+        // Open at a fixed 1920x1080 window, but never larger than the target
+        // monitor's working area (smaller displays cap to the available space).
+        var targetSize = new Size(
+            Math.Min(1920, targetWorkingArea.Width),
+            Math.Min(1080, targetWorkingArea.Height));
+        // Center the window on the monitor it launches on.
+        var targetLocation = new Point(
+            targetWorkingArea.X + Math.Max(0, (targetWorkingArea.Width - targetSize.Width) / 2),
+            targetWorkingArea.Y + Math.Max(0, (targetWorkingArea.Height - targetSize.Height) / 2));
 
         using var form = new Form
         {
             Text = title,
-            // Manual placement on the target screen so the maximize lands on the
-            // monitor the user launched from (CenterScreen always uses primary).
+            // Manual placement so the window centers on the monitor the user
+            // launched from (CenterScreen always uses the primary monitor).
             StartPosition = FormStartPosition.Manual,
-            Location = restoreLocation,
-            // Restore-state bounds (used when the user un-maximizes); the window
-            // OPENS maximized via WindowState below, and the force-show timer
-            // re-asserts the maximized state rather than restoring it.
-            ClientSize = restoreSize,
-            WindowState = FormWindowState.Maximized,
+            Location = targetLocation,
+            // Fixed 1920x1080 (capped to the working area). The window opens in
+            // the normal (non-maximized) state at exactly this size; the
+            // force-show timer below shows it normally rather than maximized.
+            Size = targetSize,
+            WindowState = FormWindowState.Normal,
             MinimumSize = new Size(880, 600),
         };
 
@@ -600,18 +601,18 @@ internal static class WebViewShell
         Directory.CreateDirectory(userDataFolder);
 
         // Coordinate the FIRST navigation with the window settling into its
-        // final maximized, foreground state. The browser-owned Windows Hello
-        // unlock prompt (raised on the first protected page) is positioned
-        // relative to the foreground window at the instant it is shown. If React
-        // loads and raises that prompt BEFORE the force-show maximize lands, the
-        // system credential dialog is placed against the not-yet-settled window
-        // and then visibly jumps to the corner when the maximize completes a
-        // moment later. Deferring the first navigation until BOTH the WebView2
-        // core is ready AND the window has been force-shown maximized and
-        // activated guarantees React — and the Hello prompt — only ever loads
-        // against the final window. Whichever of the two completes last performs
-        // the single navigation. Both run on the UI thread; the interlock is a
-        // belt-and-suspenders guard against a double navigation.
+        // final, foreground state. The browser-owned Windows Hello unlock prompt
+        // (raised on the first protected page) is positioned relative to the
+        // foreground window at the instant it is shown. If React loads and raises
+        // that prompt BEFORE the force-show lands, the system credential dialog
+        // is placed against the not-yet-settled window and then visibly jumps to
+        // the corner when the show completes a moment later. Deferring the first
+        // navigation until BOTH the WebView2 core is ready AND the window has
+        // been force-shown at its fixed size and activated guarantees React — and
+        // the Hello prompt — only ever loads against the final window. Whichever
+        // of the two completes last performs the single navigation. Both run on
+        // the UI thread; the interlock is a belt-and-suspenders guard against a
+        // double navigation.
         bool webCoreReady = false;
         bool windowSettled = false;
         int firstNavigationDone = 0;
@@ -858,11 +859,10 @@ internal static class WebViewShell
                 // WITHOUT a Hide/Show toggle. A toggle would destroy and recreate
                 // the taskbar button (a hidden window has no button), and the
                 // fresh button would adopt the dotnet host process's generic icon
-                // instead of the bundled high-resolution app icon. SW_SHOWMAXIMIZED
-                // (not SW_SHOWNORMAL) is used so force-showing keeps the window
-                // maximized — SW_SHOWNORMAL would RESTORE it, which made the window
-                // flash maximized and then shrink to its restore size.
-                ShowWindow(form.Handle, SW_SHOWMAXIMIZED);
+                // instead of the bundled high-resolution app icon. The window
+                // opens at a fixed 1920x1080 in the normal state, so it is shown
+                // normally (not maximized) at exactly the bounds set above.
+                ShowWindow(form.Handle, SW_SHOWNORMAL);
                 if (form.WindowState == FormWindowState.Minimized)
                 {
                     form.WindowState = FormWindowState.Normal;
@@ -880,17 +880,17 @@ internal static class WebViewShell
                 // Non-fatal: force-show is a best-effort correction.
             }
 
-            // The window has now been shown maximized and brought to the
-            // foreground, but the maximize ANIMATION needs a beat to finish on
-            // the display before the system positions an owner-anchored dialog
-            // correctly. Releasing the first navigation the instant the show
-            // call returned still let the Windows Hello unlock prompt
-            // occasionally anchor to the mid-animation window and land in the
-            // top-left corner. A short, deliberate delay AFTER the show — before
-            // the first navigation (which loads React and raises the unlock
-            // prompt) — covers the animation reliably across systems without
-            // feeling slow. A non-blocking one-shot timer is used so the UI
-            // thread keeps pumping during the wait.
+            // The window has now been shown at its fixed size and brought to the
+            // foreground, but it needs a beat to settle into its final position
+            // before the system positions an owner-anchored dialog correctly.
+            // Releasing the first navigation the instant the show call returned
+            // still let the Windows Hello unlock prompt occasionally anchor to
+            // the not-yet-settled window and land in the top-left corner. A
+            // short, deliberate delay AFTER the show — before the first
+            // navigation (which loads React and raises the unlock prompt) —
+            // covers the settle reliably across systems without feeling slow. A
+            // non-blocking one-shot timer is used so the UI thread keeps pumping
+            // during the wait.
             var settleTimer = new System.Windows.Forms.Timer { Interval = 300 };
             settleTimer.Tick += (_, _) =>
             {

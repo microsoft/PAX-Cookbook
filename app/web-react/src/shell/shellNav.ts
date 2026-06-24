@@ -47,6 +47,14 @@ export function shellSectionHash(section: ShellSectionId): string {
 /** Key used to hand a selected recipe from Home to the Recipes workspace. */
 export const PENDING_SELECT_KEY = 'cookbook.pendingSelectRecipe';
 
+/**
+ * Key used to ask the Recipes workspace to OPEN a recipe directly in the
+ * builder/editor (not merely pre-select it in the list). Set by the Bakes
+ * surface's "Open recipe" actions so a bake/schedule opens its exact recipe in
+ * the editor, ready for review/editing.
+ */
+export const PENDING_OPEN_EDITOR_KEY = 'cookbook.pendingOpenEditorRecipe';
+
 /** Key used to hand a Pantry-seeded recipe draft to the Recipes editor. */
 export const PENDING_DRAFT_KEY = 'cookbook.pendingRecipeDraft';
 
@@ -198,6 +206,32 @@ export function takePendingSelect(): string | null {
     const value = window.sessionStorage.getItem(PENDING_SELECT_KEY);
     if (value) {
       window.sessionStorage.removeItem(PENDING_SELECT_KEY);
+    }
+    return value && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remember which recipe the Recipes workspace should OPEN in the builder/editor
+ * on its next load (as opposed to merely pre-selecting it in the list). Used by
+ * the Bakes surface so "Open recipe" lands in the editor on that exact recipe.
+ */
+export function rememberPendingOpenEditor(recipeId: string): void {
+  try {
+    window.sessionStorage.setItem(PENDING_OPEN_EDITOR_KEY, recipeId);
+  } catch {
+    // Storage disabled — the open simply will not pre-seed.
+  }
+}
+
+/** Read and clear the pending open-in-editor recipe id (one-shot). */
+export function takePendingOpenEditor(): string | null {
+  try {
+    const value = window.sessionStorage.getItem(PENDING_OPEN_EDITOR_KEY);
+    if (value) {
+      window.sessionStorage.removeItem(PENDING_OPEN_EDITOR_KEY);
     }
     return value && value.length > 0 ? value : null;
   } catch {

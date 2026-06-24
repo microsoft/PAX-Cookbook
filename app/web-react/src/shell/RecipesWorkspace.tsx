@@ -66,6 +66,7 @@ import type {
 } from '../features/mini-kitchen/types';
 import {
   takePendingSelect,
+  takePendingOpenEditor,
   takePendingDraft,
   takePendingImportCommand,
   rememberPendingBakeSelect,
@@ -350,6 +351,20 @@ export function RecipesWorkspace() {
           const list = res.data.recipes ?? [];
           setRecipes(list);
           setListPhase('loaded');
+          // A Bakes "Open recipe" action asks us to open a specific recipe
+          // straight in the builder/editor (not merely pre-select it). Honor it
+          // first. The builder loads the recipe itself and shows a graceful
+          // "no longer exists" message if it was deleted after the bake ran, so
+          // we route by id whether or not it is still in the list.
+          const openEditorId = takePendingOpenEditor();
+          if (openEditorId) {
+            const match = list.find(r => r.recipeId === openEditorId) || null;
+            if (match) {
+              void selectRecipe(match);
+            }
+            setMode({ kind: 'editor', recipeId: openEditorId });
+            return;
+          }
           const pending = takePendingSelect();
           const initial =
             (pending && list.find(r => r.recipeId === pending)) || list[0] || null;

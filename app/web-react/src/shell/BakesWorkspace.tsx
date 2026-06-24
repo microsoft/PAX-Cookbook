@@ -50,7 +50,7 @@ import {
 import { downloadBakeLogByCookId, downloadBakeLogText } from './logDownload';
 import {
   formatModified,
-  rememberPendingSelect,
+  rememberPendingOpenEditor,
   requestShellSection,
   takePendingBakeSelect,
 } from './shellNav';
@@ -815,9 +815,9 @@ export function BakesWorkspace() {
     }
   }, [cancelTarget, loadUpcoming]);
 
-  // "Open recipe" — open the recipe in the builder for editing.
+  // "Open recipe" — open the recipe in the builder/editor for review or editing.
   const openScheduleRecipe = useCallback((recipeId: string) => {
-    rememberPendingSelect(recipeId);
+    rememberPendingOpenEditor(recipeId);
     requestShellSection('recipes');
   }, []);
 
@@ -1412,7 +1412,7 @@ export function BakesWorkspace() {
                       onClick={() => {
                         const rid = detail.recipe?.recipeId ?? detail.recipeId;
                         if (rid) {
-                          rememberPendingSelect(rid);
+                          rememberPendingOpenEditor(rid);
                           requestShellSection('recipes');
                         }
                       }}
