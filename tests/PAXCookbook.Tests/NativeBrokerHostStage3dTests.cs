@@ -23,7 +23,7 @@ namespace PAXCookbook.Tests;
 public class NativeBrokerHostStage3dTests
 {
     private const string PaxScriptBaselineHash =
-        "1A9BC94783683AE1DA68EE6A86DE2106A96122B67B14EE20090E6687792E3878";
+        "5893B42807079CD8E321FE19C50C97188AD39A545BA7B90945657FDAE0BCE390";
 
     // ---------- 1. Lock-state shape -- boot is Locked ----------
 

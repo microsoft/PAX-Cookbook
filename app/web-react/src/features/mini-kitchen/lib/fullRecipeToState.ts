@@ -31,7 +31,9 @@ import { normalizeRecipe } from './normalizeRecipe';
 import type {
   AgentFilterMode,
   AuthMode,
+  DashboardTarget,
   ExecutionMode,
+  FillerLabelMode,
   MiniKitchenRecipeState,
   OutputMode,
   PresetId,
@@ -192,6 +194,32 @@ export function fullRecipeToState(recipe: unknown): FullRecipeOpenResult {
   const rollup = inverseRollup(asString(processing.rollup));
   if (rollup) {
     state.processing.rollup = rollup;
+  }
+
+  // Read back the dashboard column target so a saved AIO/AIBV pick survives a
+  // reload. Only 'aio'/'aibv' are valid; anything else leaves the field absent
+  // (the builder treats absent as AI-in-One, PAX's default).
+  const dashboard = asString(processing.dashboard);
+  if (dashboard === 'aio' || dashboard === 'aibv') {
+    state.processing.dashboard = dashboard as DashboardTarget;
+  }
+
+  // Read back the engine-wide de-identify flag (valid in every run shape).
+  if (asBool(processing.deidentify) === true) {
+    state.processing.deidentify = true;
+  }
+
+  // Read back the org/manager-hierarchy filler. 'Fixed' also restores the
+  // literal label text. Any other value leaves the field absent (blank/default).
+  const fillerLabel = asString(processing.fillerLabel);
+  if (fillerLabel === 'Self' || fillerLabel === 'RepeatManager' || fillerLabel === 'Fixed') {
+    state.processing.fillerLabel = fillerLabel as FillerLabelMode;
+    if (fillerLabel === 'Fixed') {
+      const text = asString(processing.fillerLabelText);
+      if (text && text.trim().length > 0) {
+        state.processing.fillerLabelText = text;
+      }
+    }
   }
 
   // ---- Destinations ----

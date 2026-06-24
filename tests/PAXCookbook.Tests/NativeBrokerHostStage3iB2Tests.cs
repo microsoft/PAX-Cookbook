@@ -29,7 +29,7 @@ public class NativeBrokerHostStage3iB2Tests
     // change; the PAX script itself does not move. Asserted in a
     // tripwire fact so any drift in the bundled script is loud.
     private const string PaxScriptBaselineHash =
-        "1A9BC94783683AE1DA68EE6A86DE2106A96122B67B14EE20090E6687792E3878";
+        "5893B42807079CD8E321FE19C50C97188AD39A545BA7B90945657FDAE0BCE390";
 
     // Crockford Base32 ULIDs (no I, L, O, U). Distinct from
     // Stage 3i-B1's fixtures so the two suites can run interleaved

@@ -1291,6 +1291,14 @@ export interface ResumeCookRequest {
   checkpointPath: string;
   force: boolean;
   chefKeyId: string | null;
+  /**
+   * Output-shaping switches re-supplied on resume (the rollup itself is implied
+   * by the checkpoint). Optional; omitting them resumes with PAX defaults.
+   */
+  dashboard?: 'aio' | 'aibv';
+  deidentify?: boolean;
+  fillerLabel?: 'Self' | 'RepeatManager' | 'Fixed';
+  fillerLabelText?: string;
 }
 
 /** Discriminated outcome of a resume (cook-start) attempt. Mirrors StartCookOutcome. */

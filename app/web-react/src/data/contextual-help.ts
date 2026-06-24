@@ -40,6 +40,8 @@ export type ContextualHelpTopicId =
   | 'dateRangeScheduling'
   | 'rollup'
   | 'rollupDashboard'
+  | 'rollupFiller'
+  | 'outputDeidentify'
   | 'userIds'
   | 'groupDisplayNames'
   | 'agentFilters'
@@ -193,6 +195,14 @@ export const CONTEXTUAL_HELP_TOPICS: Record<
   rollupDashboard: {
     title: 'Dashboard target',
     body: 'When rollup is on (and the M365 usage bundle is off), you can target either the AI-in-One dashboard (the default) or the AI Business Value dashboard. AI Business Value produces a wider 50-column superset fact for the AI Business Value Power BI dashboard; AI-in-One is the standard layout. Both use the same Copilot interaction audit data and Entra user info — only the output column profile differs. The M365 Usage dashboard is a separate data source selected by including M365 usage.',
+  },
+  rollupFiller: {
+    title: 'Hierarchy filler',
+    body: 'Choose what to write into empty org / manager-hierarchy levels in the rollup. Blank leaves them empty (the default), Repeat the person carries the person down, Repeat their manager carries their manager down, and Custom text stamps a label you type. It applies only to rollup output and not to the M365 usage bundle.',
+  },
+  outputDeidentify: {
+    title: 'De-identify output',
+    body: 'Anonymizes people in both the audit output and the Entra user-info output, and in the rollup built from them. It is one-way: the original identities cannot be recovered from the de-identified files. If you append to an existing file, only append to one that is already de-identified.',
   },
   userIds: {
     title: 'User IDs',

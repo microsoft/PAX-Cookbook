@@ -351,6 +351,7 @@ export function renderPaxCommand(recipe: MiniKitchenRecipeState): RenderedComman
   emitFactOutput(ctx, state);
   emitCombineOutput(ctx, state);
   emitUserInfoOutput(ctx, state);
+  emitDeidentify(ctx, state);
   emitAuthContext(ctx, state);
   emitAdvancedArgs(ctx, state);
 
@@ -558,6 +559,38 @@ function emitRollup(ctx: BuildContext, state: MiniKitchenRecipeState): void {
     (state.processing.dashboard ?? '').toLowerCase() === 'aibv'
   ) {
     pushSwitch(ctx, 'Dashboard', 'AIBV');
+  }
+
+  // Mirror the broker (PaxAdapter.cs): -FillerLabel is rollup-only and is never
+  // emitted alongside -IncludeM365Usage. Blank/default omits the switch; 'Fixed'
+  // also emits -FillerLabelText. An empty 'Fixed' label is a readiness blocker.
+  const fillerLabel = state.processing.fillerLabel;
+  if (rollupOn && state.query.includeM365Usage !== true && fillerLabel) {
+    pushSwitch(ctx, 'FillerLabel', fillerLabel);
+    if (fillerLabel === 'Fixed') {
+      const text = (state.processing.fillerLabelText ?? '').trim();
+      if (text.length > 0) {
+        pushSwitch(ctx, 'FillerLabelText', text);
+      } else {
+        warnBlocking(
+          ctx,
+          'filler-label-text-missing',
+          'Custom filler label is selected but no label text was entered. Enter the text or choose a different filler.',
+          'processing.fillerLabelText',
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Emit -Deidentify. The de-identify flag is engine-wide: it anonymizes the raw
+ * audit + EntraUsers output and threads --deidentify into the rollup processor,
+ * so it is valid in every run shape (audit, rollup, and user-info-only).
+ */
+function emitDeidentify(ctx: BuildContext, state: MiniKitchenRecipeState): void {
+  if (state.processing.deidentify === true) {
+    pushFlag(ctx, 'Deidentify');
   }
 }
 

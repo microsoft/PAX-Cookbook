@@ -30,8 +30,10 @@ import { containsLikelySecret } from './secretScanner';
 import type {
   AgentFilterMode,
   AuthMode,
+  DashboardTarget,
   DateRangeMode,
   ExecutionMode,
+  FillerLabelMode,
   LiteRecipe,
   LiteRecipeImportResult,
   LiteRecipeScrubWarning,
@@ -57,6 +59,8 @@ const PRESET_IDS: ReadonlySet<PresetId> = new Set([
 const QUERY_MODES: ReadonlySet<QueryMode> = new Set(['audit-query', 'user-info-only']);
 const DATE_RANGE_MODES: ReadonlySet<DateRangeMode> = new Set(['previous-day', 'custom']);
 const ROLLUP_MODES: ReadonlySet<RollupMode> = new Set(['none', 'rollup', 'rollup-plus-raw']);
+const DASHBOARD_TARGETS: ReadonlySet<DashboardTarget> = new Set(['aio', 'aibv']);
+const FILLER_LABEL_MODES: ReadonlySet<FillerLabelMode> = new Set(['Self', 'RepeatManager', 'Fixed']);
 const OUTPUT_COMBINE_MODES: ReadonlySet<OutputCombineMode> = new Set(['combined', 'separate']);
 const OUTPUT_MODES: ReadonlySet<OutputMode> = new Set(['write-new', 'append']);
 const USER_INFO_OUTPUT_MODES: ReadonlySet<UserInfoOutputMode> = new Set([
@@ -226,7 +230,7 @@ function rebuildLiteRecipe(
       targetPaxVersion:
         typeof compatibility.targetPaxVersion === 'string'
           ? compatibility.targetPaxVersion
-          : '1.11.7',
+          : '1.11.8',
       switchCatalogVersion:
         typeof compatibility.switchCatalogVersion === 'string'
           ? compatibility.switchCatalogVersion
@@ -339,6 +343,10 @@ function liteRecipeBlockToState(
         : undefined,
       promptFilter: readOptionalEnum<PromptFilter>(processing.promptFilter, PROMPT_FILTERS),
       rollup: readOptionalEnum<RollupMode>(processing.rollup, ROLLUP_MODES),
+      dashboard: readOptionalEnum<DashboardTarget>(processing.dashboard, DASHBOARD_TARGETS),
+      deidentify: readBoolean(processing.deidentify),
+      fillerLabel: readOptionalEnum<FillerLabelMode>(processing.fillerLabel, FILLER_LABEL_MODES),
+      fillerLabelText: readString(processing.fillerLabelText),
       outputCombineMode: readOptionalEnum<OutputCombineMode>(
         processing.outputCombineMode,
         OUTPUT_COMBINE_MODES,

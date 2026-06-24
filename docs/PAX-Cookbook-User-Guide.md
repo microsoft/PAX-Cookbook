@@ -382,6 +382,8 @@ Choose **where** the collected data is saved. You have three destinations:
 Two related choices also live on this step:
 
 - **Rollup mode and dashboard target** — most presets produce dashboard-ready summary files (a *rollup*) shaped for a specific **dashboard target**, such as AI-in-One. The dashboard target is chosen together with the rollup option here, and you'll see it again later on the bake detail view.
+- **Hierarchy filler** — when a rollup is on, you can choose what fills empty levels of the org / manager hierarchy: leave them **blank** (the default), **repeat the person**, **repeat their manager**, or stamp a **custom label** you type. It applies only to rollup output and not to the M365 usage bundle.
+- **De-identify output** — an optional privacy toggle (off by default) that anonymizes people in both the audit output and the Entra user-info output, and in the rollup built from them. It is one-way: the original identities can't be recovered from the de-identified files. If you append to an existing file, only append to one that is already de-identified.
 - **Combined or separate files** — when a recipe collects **two or more** activity types, you can choose whether they're written to one combined file or kept as separate files. With only a single activity type this option doesn't appear, because there's nothing to combine.
 
 > 📸 **Screenshot:** Step 5 Output with a local folder selected.

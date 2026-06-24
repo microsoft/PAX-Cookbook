@@ -1010,6 +1010,17 @@ public sealed class RecipeValidator
     private const string SemverPattern = "^\\d+\\.\\d+\\.\\d+$";
     private const string TemplateIdPattern = "^[a-z][a-z0-9-]{1,62}[a-z0-9]$";
 
+    // Power BI dashboard targets a rollup recipe may declare (processing.dashboard).
+    // EXTENSIBLE: to support a new dashboard, add its lowercase token here, then
+    // mirror it in PaxAdapter (bake-argv emission) and the React DashboardTarget
+    // union. 'aio' is PAX's default and is omitted at runtime; 'm365' is implied
+    // by -IncludeM365Usage. Keeping all engine-recognised values here keeps the
+    // save schema forward-compatible as dashboards are added.
+    private static readonly object[] DashboardEnum   = { "aio", "aibv", "m365" };
+    // Org/manager-hierarchy filler modes (processing.fillerLabel). Blank/default
+    // is the absent field, so only the three non-default modes are enumerated.
+    private static readonly object[] FillerLabelEnum = { "Self", "RepeatManager", "Fixed" };
+
     private static readonly SchemaNode RecipeSchemaRoot = Obj(
         required: new[] { "recipeId", "recipeSchemaVersion", "paxAdapterVersion", "identity", "ingredients", "query", "processing", "destinations", "auth" },
         properties: new(StringComparer.Ordinal)
@@ -1082,7 +1093,11 @@ public sealed class RecipeValidator
                 required: Array.Empty<string>(),
                 properties: new(StringComparer.Ordinal)
                 {
-                    ["rollup"] = Str(@enum: new object[] { "Rollup", "RollupPlusRaw" }),
+                    ["rollup"]          = Str(@enum: new object[] { "Rollup", "RollupPlusRaw" }),
+                    ["dashboard"]       = Str(@enum: DashboardEnum),
+                    ["deidentify"]      = Boolean(),
+                    ["fillerLabel"]     = Str(@enum: FillerLabelEnum),
+                    ["fillerLabelText"] = Str(),
                 }),
             ["destinations"] = Obj(
                 required: Array.Empty<string>(),

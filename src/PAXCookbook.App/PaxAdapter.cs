@@ -220,6 +220,16 @@ internal static class PaxAdapter
         // is implied by -IncludeM365Usage (omitted). A missing/unknown value is AIO.
         bool dashboardAibv = processing is not null && processing.ContainsKey("dashboard") && CiEq(JsonModel.Str(processing["dashboard"]), "aibv");
 
+        // Org/manager-hierarchy level filler (rollup-only, AIO/AIBV). Blank/default
+        // is the absent field and omits the switch; 'Fixed' carries a literal label
+        // via -FillerLabelText.
+        string fillerLabel = processing is not null && processing.ContainsKey("fillerLabel")
+            ? JsonModel.Str(processing["fillerLabel"]) : string.Empty;
+        string fillerLabelText = processing is not null && processing.ContainsKey("fillerLabelText")
+            ? JsonModel.Str(processing["fillerLabelText"]) : string.Empty;
+        // One-way output anonymization. Engine-wide flag (raw + rollup + user-info).
+        bool deidentify = processing is not null && processing.ContainsKey("deidentify") && JsonModel.Bool(processing["deidentify"]);
+
         Dictionary<string, object?>? entraUserData = ingredients is null ? null : GetChild(ingredients, "entraUserData");
         bool includeUserInfo = entraUserData is not null && entraUserData.ContainsKey("includeUserInfo") && JsonModel.Bool(entraUserData["includeUserInfo"]);
 
@@ -241,8 +251,26 @@ internal static class PaxAdapter
                 tokens.Add("-Dashboard");
                 tokens.Add("AIBV");
             }
+            // -FillerLabel / -FillerLabelText: rollup-only and never with the M365
+            // dashboard (PAX rejects that pair). Blank/default omits the switch;
+            // -FillerLabelText only accompanies the 'Fixed' mode.
+            if (fillerLabel.Length > 0 && rollupTok.Length > 0 && !includeM365)
+            {
+                tokens.Add("-FillerLabel");
+                tokens.Add(fillerLabel);
+                if (CiEq(fillerLabel, "Fixed") && fillerLabelText.Length > 0)
+                {
+                    tokens.Add("-FillerLabelText");
+                    tokens.Add(fillerLabelText);
+                }
+            }
             if (includeUserInfo || projectingUserInfoDest) { tokens.Add("-IncludeUserInfo"); }
         }
+
+        // -Deidentify anonymizes the raw audit + EntraUsers output and threads
+        // --deidentify into the rollup processor. Valid in every run shape, so it
+        // is emitted outside the audit / user-info branch.
+        if (deidentify) { tokens.Add("-Deidentify"); }
 
         // Dates (audit only).
         string startDate = string.Empty, endDate = string.Empty;

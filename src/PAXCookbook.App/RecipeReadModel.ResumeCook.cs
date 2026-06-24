@@ -78,6 +78,9 @@ internal static partial class RecipeReadModel
         bool force,
         string? chefKeyId,
         string? dashboard,
+        bool deidentify,
+        string? fillerLabel,
+        string? fillerLabelText,
         bool reAuthVerified,
         string? pwshPathOverride)
     {
@@ -220,7 +223,7 @@ internal static partial class RecipeReadModel
         // (f, g) Project the resume invocation plan against the MANAGED engine
         // path. Pure string projection — no file read, no spawn.
         PaxAdapter.InvocationPlan plan = BuildResumeInvocationPlan(
-            checkpoint, force, resolvedChefKey, dashboard, engine.ManagedEnginePath);
+            checkpoint, force, resolvedChefKey, dashboard, deidentify, fillerLabel, fillerLabelText, engine.ManagedEnginePath);
 
         // (h) Create the per-cook folder under the resume bucket.
         string cookId = NewCookId();
@@ -306,9 +309,11 @@ internal static partial class RecipeReadModel
     // (GetInvocationPlan): & '<engine>' <paxCommand>, then the
     // -NoProfile/-NoLogo/-Command spawn argv.
     private static PaxAdapter.InvocationPlan BuildResumeInvocationPlan(
-        string checkpoint, bool force, ChefKeyModel.ChefKeyResolved? resolvedChefKey, string? dashboard, string paxScriptPath)
+        string checkpoint, bool force, ChefKeyModel.ChefKeyResolved? resolvedChefKey, string? dashboard,
+        bool deidentify, string? fillerLabel, string? fillerLabelText, string paxScriptPath)
     {
-        (List<string> paxArgv, string paxCommand) = BuildResumeArgvAndCommand(checkpoint, force, resolvedChefKey, dashboard);
+        (List<string> paxArgv, string paxCommand) = BuildResumeArgvAndCommand(
+            checkpoint, force, resolvedChefKey, dashboard, deidentify, fillerLabel, fillerLabelText);
 
         string escapedPath = paxScriptPath.Replace("'", "''");
         string commandExpr = $"& '{escapedPath}' {paxCommand}";
@@ -335,7 +340,8 @@ internal static partial class RecipeReadModel
     // values unquoted exactly as the recipe path does. The stored paxArgv keeps
     // its natural order (resume tokens, then -Force, then the auth tail).
     private static (List<string> Argv, string Command) BuildResumeArgvAndCommand(
-        string checkpoint, bool force, ChefKeyModel.ChefKeyResolved? resolvedChefKey, string? dashboard)
+        string checkpoint, bool force, ChefKeyModel.ChefKeyResolved? resolvedChefKey, string? dashboard,
+        bool deidentify, string? fillerLabel, string? fillerLabelText)
     {
         var argv = new List<string>();
         var commandParts = new List<string>();
@@ -378,6 +384,40 @@ internal static partial class RecipeReadModel
             argv.Add("AIBV");
             commandParts.Add("-Dashboard");
             commandParts.Add("AIBV");
+        }
+
+        // Hierarchy filler. Like -Dashboard, the rollup is implied by the
+        // checkpoint, so the filler switch is re-supplied whenever the operator
+        // selected one. 'Fixed' carries its literal label via -FillerLabelText.
+        // The values are emitted unquoted like the auth tail, except the custom
+        // text which is quoted (it may contain spaces).
+        string fillerLabelTok = (fillerLabel ?? string.Empty).Trim();
+        if (fillerLabelTok.Length > 0)
+        {
+            argv.Add("-FillerLabel");
+            argv.Add(fillerLabelTok);
+            commandParts.Add("-FillerLabel");
+            commandParts.Add(fillerLabelTok);
+            if (string.Equals(fillerLabelTok, "Fixed", StringComparison.OrdinalIgnoreCase))
+            {
+                string fillerText = (fillerLabelText ?? string.Empty).Trim();
+                if (fillerText.Length > 0)
+                {
+                    argv.Add("-FillerLabelText");
+                    argv.Add(fillerText);
+                    commandParts.Add("-FillerLabelText");
+                    commandParts.Add(PaxAdapter.ConvertToQuotedArg(fillerText));
+                }
+            }
+        }
+
+        // De-identify. Engine-wide one-way anonymization of the resumed run's
+        // output; re-supplied so a resumed de-identify cook does not emit
+        // identified rows.
+        if (deidentify)
+        {
+            argv.Add("-Deidentify");
+            commandParts.Add("-Deidentify");
         }
 
         // Auth tail — only when a Chef's Key was resolved. Mirrors the recipe
@@ -602,7 +642,8 @@ internal static partial class RecipeReadModel
     internal static string TestSeamBuildResumeCommand(string checkpointPath, bool force)
     {
         (_, string command) = BuildResumeArgvAndCommand(
-            (checkpointPath ?? string.Empty).Trim(), force, resolvedChefKey: null, dashboard: null);
+            (checkpointPath ?? string.Empty).Trim(), force, resolvedChefKey: null, dashboard: null,
+            deidentify: false, fillerLabel: null, fillerLabelText: null);
         return command;
     }
 }

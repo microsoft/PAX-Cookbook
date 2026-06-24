@@ -84,6 +84,22 @@ export function deriveSaveRequirements(state: MiniKitchenRecipeState): SaveRequi
         reqs.push({ id: 'agentIds', label: 'Agent IDs' });
       }
     }
+
+    // The custom filler label needs its text. This fires only when the filler
+    // would actually be emitted (a rollup without the M365 dashboard) and the
+    // operator picked the custom 'Fixed' mode but left the text blank. Other
+    // filler modes — and a recipe with no filler at all — never appear here,
+    // so a name-only draft stays saveable.
+    const rollupOn =
+      state.processing.rollup === 'rollup' || state.processing.rollup === 'rollup-plus-raw';
+    if (
+      rollupOn &&
+      state.query.includeM365Usage !== true &&
+      state.processing.fillerLabel === 'Fixed' &&
+      (state.processing.fillerLabelText ?? '').trim().length === 0
+    ) {
+      reqs.push({ id: 'fillerLabelText', label: 'Custom filler label text' });
+    }
   } else {
     const ui = state.destinations.userInfo;
     const uiPath = (ui.path ?? '').trim();

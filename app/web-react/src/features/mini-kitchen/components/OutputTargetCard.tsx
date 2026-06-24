@@ -18,6 +18,7 @@ import {
   USER_INFO_RUN_SCOPES,
 } from './DashboardRequirement';
 import { BrowsePathButton } from '../../../shell/BrowsePathButton';
+import { ContextualHelpButton } from '../../../components/ContextualHelpButton';
 
 interface OutputTargetCardProps {
   value: LiteRecipeDestinations;
@@ -47,8 +48,15 @@ interface OutputTargetCardProps {
    * the user-info output-mode picker and path field are rendered disabled.
    */
   userInfoEligible?: boolean;
+  /**
+   * Current value of the engine-wide de-identify flag (PAX `-Deidentify`).
+   * Optional; `undefined`/`false` both render the toggle off.
+   */
+  deidentify?: boolean;
   onChange: (next: LiteRecipeDestinations) => void;
   onCombineModeChange?: (next: OutputCombineMode) => void;
+  /** Toggle the engine-wide de-identify flag. */
+  onDeidentifyChange?: (next: boolean) => void;
 }
 
 const FACT_MODES: ReadonlyArray<{ id: OutputMode; title: string; desc: string }> = [
@@ -153,8 +161,10 @@ export function OutputTargetCard({
   combineEligible = false,
   combineDisabledByM365 = false,
   userInfoEligible = true,
+  deidentify = false,
   onChange,
   onCombineModeChange,
+  onDeidentifyChange,
 }: OutputTargetCardProps) {
   const fact = value.fact;
   const userInfo = value.userInfo;
@@ -604,6 +614,40 @@ export function OutputTargetCard({
             </p>
           ) : null}
         </MiniKitchenField>
+      ) : null}
+      {onDeidentifyChange ? (
+        <div className="mk-subsection" id="mk-deidentify">
+          <div className="mk-subsection__head">
+            <h3 className="mk-subsection-title">Privacy</h3>
+            <ContextualHelpButton topic="outputDeidentify" />
+          </div>
+          <label
+            htmlFor="mk-deidentify-toggle"
+            className={'mk-toggle' + (deidentify ? ' mk-toggle--on' : '')}
+          >
+            <input
+              type="checkbox"
+              id="mk-deidentify-toggle"
+              className="mk-toggle__input"
+              checked={deidentify}
+              onChange={e => onDeidentifyChange(e.target.checked)}
+            />
+            <span className="mk-toggle__title">De-identify output</span>
+            <span className="mk-toggle__desc">
+              Anonymizes people in both the audit output and the Entra user-info
+              output (and the rollup built from them). One-way: the original
+              identities cannot be recovered from the de-identified files.
+            </span>
+            <span className="mk-toggle__switch-hint">-Deidentify</span>
+          </label>
+          {deidentify && (fact.mode === 'append' || userInfo.mode === 'append') ? (
+            <p className="mk-field__note" role="note">
+              Heads up: you are appending to an existing file. De-identified rows
+              will be mixed in with whatever that file already contains. Append
+              de-identified output only to a file that is itself de-identified.
+            </p>
+          ) : null}
+        </div>
       ) : null}
     </MiniKitchenSectionCard>
   );

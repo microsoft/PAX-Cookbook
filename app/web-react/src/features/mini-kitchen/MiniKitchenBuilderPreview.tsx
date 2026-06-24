@@ -68,6 +68,7 @@ import { ContextualHelpButton } from '../../components/ContextualHelpButton';
 import type {
   AuthMode,
   DashboardTarget,
+  FillerLabelMode,
   LiteRecipeAuth,
   LiteRecipeDestinations,
   LiteRecipeIdentity,
@@ -1360,10 +1361,38 @@ export function MiniKitchenBuilderPreview({
       },
     }));
   }
+
+  function handleFillerLabelChange(next: FillerLabelMode | 'blank') {
+    setStateMatchPreset(prev => ({
+      ...prev,
+      processing: {
+        ...prev.processing,
+        // 'blank' is the default and is stored as the absent field. Leaving
+        // 'Fixed' also drops any previously entered custom text.
+        fillerLabel: next === 'blank' ? undefined : next,
+        fillerLabelText:
+          next === 'Fixed' ? prev.processing.fillerLabelText : undefined,
+      },
+    }));
+  }
+
+  function handleFillerLabelTextChange(next: string) {
+    setStateMatchPreset(prev => ({
+      ...prev,
+      processing: { ...prev.processing, fillerLabelText: next },
+    }));
+  }
   function handleCombineModeChange(next: OutputCombineMode) {
     setStateMatchPreset(prev => ({
       ...prev,
       processing: { ...prev.processing, outputCombineMode: next },
+    }));
+  }
+  function handleDeidentifyChange(next: boolean) {
+    setStateMatchPreset(prev => ({
+      ...prev,
+      // Engine-wide flag; stored only when on to keep the recipe minimal.
+      processing: { ...prev.processing, deidentify: next ? true : undefined },
     }));
   }
   function handleDestinationsChange(next: LiteRecipeDestinations) {
@@ -1748,6 +1777,8 @@ export function MiniKitchenBuilderPreview({
                     }
                     onChange={handleDestinationsChange}
                     onCombineModeChange={handleCombineModeChange}
+                    deidentify={state.processing.deidentify === true}
+                    onDeidentifyChange={handleDeidentifyChange}
                   />
                   <RollupCard
                     value={state.processing.rollup ?? 'none'}
@@ -1823,6 +1854,59 @@ export function MiniKitchenBuilderPreview({
                           );
                         })}
                       </div>
+                    </div>
+                  ) : null}
+                  {/* Hierarchy filler — a subsection inside Rollup; shown on the
+                      same guard as the dashboard target (rollup on, M365 off),
+                      mirroring the broker's -FillerLabel emit guard. */}
+                  {(state.processing.rollup === 'rollup' ||
+                    state.processing.rollup === 'rollup-plus-raw') &&
+                  state.query.includeM365Usage !== true ? (
+                    <div className="mk-subsection" id="mk-filler-label">
+                      <div className="mk-subsection__head">
+                        <h3 className="mk-subsection-title">Hierarchy filler</h3>
+                        <ContextualHelpButton topic="rollupFiller" />
+                      </div>
+                      <p className="mk-card__subtitle">
+                        Choose what to write into empty org / manager-hierarchy
+                        levels in the rollup.
+                      </p>
+                      <label className="mk-field__label" htmlFor="mk-filler-label-select">
+                        Filler value
+                      </label>
+                      <select
+                        id="mk-filler-label-select"
+                        className="mk-select"
+                        value={state.processing.fillerLabel ?? 'blank'}
+                        onChange={e =>
+                          handleFillerLabelChange(
+                            e.target.value as FillerLabelMode | 'blank',
+                          )
+                        }
+                      >
+                        <option value="blank">Blank (default)</option>
+                        <option value="Self">Repeat the person</option>
+                        <option value="RepeatManager">Repeat their manager</option>
+                        <option value="Fixed">Custom text…</option>
+                      </select>
+                      {state.processing.fillerLabel === 'Fixed' ? (
+                        <div className="mk-field">
+                          <label
+                            className="mk-field__label"
+                            htmlFor="mk-filler-label-text"
+                          >
+                            Custom filler text
+                          </label>
+                          <input
+                            id="mk-filler-label-text"
+                            type="text"
+                            className="mk-input"
+                            value={state.processing.fillerLabelText ?? ''}
+                            onChange={e => handleFillerLabelTextChange(e.target.value)}
+                            placeholder="e.g. (no manager)"
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   </RollupCard>

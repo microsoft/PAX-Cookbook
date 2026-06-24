@@ -49,6 +49,14 @@ export type RollupMode = 'none' | 'rollup' | 'rollup-plus-raw';
 export type DashboardTarget = 'aio' | 'aibv';
 
 /**
+ * Org/manager-hierarchy level filler for AIO/AIBV rollups (PAX `-FillerLabel`).
+ * `Self` repeats the person, `RepeatManager` repeats their manager, and `Fixed`
+ * stamps a literal label carried in `fillerLabelText`. `undefined` is blank (the
+ * default) and omits the switch.
+ */
+export type FillerLabelMode = 'Self' | 'RepeatManager' | 'Fixed';
+
+/**
  * Audit activity output layout. `combined` emits `-CombineOutput` and writes
  * one combined CSV covering every selected activity type; `separate` omits
  * the switch and lets PAX write one CSV per activity type. Only meaningful
@@ -132,6 +140,18 @@ export interface LiteRecipeProcessing {
   rollup?: RollupMode;
   /** Dashboard column target. `undefined` means AI-in-One (AIO), the default. */
   dashboard?: DashboardTarget;
+  /**
+   * One-way output anonymization (PAX `-Deidentify`). Optional; `undefined`
+   * and `false` both mean off (the default). Valid in every run shape.
+   */
+  deidentify?: boolean;
+  /**
+   * Org/manager-hierarchy level filler for AIO/AIBV rollups. `undefined` is
+   * blank (the default) and omits the switch; `Fixed` requires `fillerLabelText`.
+   */
+  fillerLabel?: FillerLabelMode;
+  /** Literal filler label, used only when `fillerLabel === 'Fixed'`. */
+  fillerLabelText?: string;
   /**
    * Audit activity output layout. Optional so older lite recipes round-trip
    * without rewrite — the renderer treats `undefined` as `'combined'` for

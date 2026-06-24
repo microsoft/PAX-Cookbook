@@ -153,6 +153,34 @@ export const PAX_SWITCH_CATALOG: readonly PaxSwitchDefinition[] = [
     conflictsWith: ['Rollup'],
   },
 
+  // ---- Rollup hierarchy filler --------------------------------------------
+  {
+    name: 'FillerLabel',
+    kind: 'enum',
+    enumValues: ['Self', 'RepeatManager', 'Fixed'],
+    description:
+      'How to fill empty org/manager-hierarchy levels in an AIO/AIBV rollup. `Self` repeats the person, `RepeatManager` repeats their manager, and `Fixed` stamps the literal label supplied via -FillerLabelText. Rollup-only; PAX rejects it alongside -IncludeM365Usage. Omitted = blank (the PAX default).',
+    since: '1.11.8',
+    requires: ['Rollup'],
+  },
+  {
+    name: 'FillerLabelText',
+    kind: 'string',
+    description:
+      'Literal label written into empty hierarchy levels when -FillerLabel is Fixed. Ignored for the Self / RepeatManager modes.',
+    since: '1.11.8',
+    requires: ['FillerLabel'],
+  },
+
+  // ---- Output anonymization ------------------------------------------------
+  {
+    name: 'Deidentify',
+    kind: 'flag',
+    description:
+      'One-way anonymization of the raw audit + EntraUsers output, threaded into the rollup processor. Engine-wide: valid for raw audit, rollup, and user-info-only runs. Omitted = off (the PAX default).',
+    since: '1.11.8',
+  },
+
   // ---- Fact output ---------------------------------------------------------
   // PAX v1.11.3 auto-detects the storage tier (Local / SharePoint / Fabric)
   // from the URL shape passed here. The same switch carries a Windows path,

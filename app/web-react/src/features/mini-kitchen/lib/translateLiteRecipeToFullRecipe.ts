@@ -30,6 +30,7 @@ import type {
   DashboardTarget,
   DateRangeMode,
   ExecutionMode,
+  FillerLabelMode,
   MiniKitchenRecipeState,
   PromptFilter,
   StorageTier,
@@ -126,7 +127,13 @@ export interface FullCookbookRecipeCandidate {
   identity: { name: string };
   ingredients: FullCookbookIngredients;
   query: FullCookbookQuery;
-  processing: { rollup?: FullRollupMode; dashboard?: DashboardTarget };
+  processing: {
+    rollup?: FullRollupMode;
+    dashboard?: DashboardTarget;
+    deidentify?: boolean;
+    fillerLabel?: FillerLabelMode;
+    fillerLabelText?: string;
+  };
   destinations: {
     fact?: FullCookbookDestination;
     userInfo?: FullCookbookDestination;
@@ -197,7 +204,7 @@ const DEFAULT_RECIPE_ID = '0123456789ABCDEFGHJKMNPQRS';
 // server-stamps `paxAdapterVersion` from the managed engine's VERSION.json
 // (RecipeMutationService), so this value never reaches persisted identity; it
 // only keeps the local pre-save candidate aligned with the bundled engine.
-const DEFAULT_PAX_ADAPTER_VERSION = '1.11.7';
+const DEFAULT_PAX_ADAPTER_VERSION = '1.11.8';
 const DEFAULT_TIMESTAMP = '2026-01-01T00:00:00.000Z';
 const DEFAULT_CREATED_BY = 'mini-kitchen-lite';
 
@@ -426,7 +433,13 @@ export function translateLiteRecipeToFullRecipe(
   }
 
   // ---- Processing (rollup + dashboard target) ----
-  const processing: { rollup?: FullRollupMode; dashboard?: DashboardTarget } = {};
+  const processing: {
+    rollup?: FullRollupMode;
+    dashboard?: DashboardTarget;
+    deidentify?: boolean;
+    fillerLabel?: FillerLabelMode;
+    fillerLabelText?: string;
+  } = {};
   if (!isUserInfoOnly) {
     const rollup = state.processing.rollup;
     if (rollup === 'rollup') {
@@ -453,6 +466,29 @@ export function translateLiteRecipeToFullRecipe(
       processing.dashboard = state.processing.dashboard;
     }
 
+    // Carry the org/manager-hierarchy filler (PAX -FillerLabel). It is rollup-
+    // only and never travels with the M365 dashboard, mirroring the bake-time
+    // projection. Blank/default is the absent field; 'Fixed' also carries the
+    // literal label text.
+    const fillerLabel = state.processing.fillerLabel;
+    if (
+      (fillerLabel === 'Self' || fillerLabel === 'RepeatManager' || fillerLabel === 'Fixed') &&
+      processing.rollup !== undefined &&
+      !includeM365Usage
+    ) {
+      processing.fillerLabel = fillerLabel;
+      if (fillerLabel === 'Fixed') {
+        const text = (state.processing.fillerLabelText ?? '').trim();
+        if (text.length > 0) {
+          processing.fillerLabelText = text;
+        }
+      }
+    } else if (fillerLabel === 'Self' || fillerLabel === 'RepeatManager' || fillerLabel === 'Fixed') {
+      notesForUi.push(
+        'Filler label requires a rollup without the M365 dashboard; it was not carried into the candidate.',
+      );
+    }
+
     // The lite outputCombineMode has no field in the full schema. PAX
     // auto-enables -CombineOutput under -IncludeM365Usage and under rollup, so
     // for those configurations the loss is behaviourally inert; otherwise the
@@ -472,6 +508,12 @@ export function translateLiteRecipeToFullRecipe(
         notesForUi.push(reason);
       }
     }
+  }
+
+  // De-identify is engine-wide (raw + rollup + user-info), so it is carried
+  // regardless of run shape. Absent/false both mean off.
+  if (state.processing.deidentify === true) {
+    processing.deidentify = true;
   }
 
   // ---- Destinations ----

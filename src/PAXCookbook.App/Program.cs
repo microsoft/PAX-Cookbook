@@ -1562,6 +1562,9 @@ internal static class Program
             bool force = false;
             string? chefKeyId = null;
             string? dashboard = null;
+            bool deidentify = false;
+            string? fillerLabel = null;
+            string? fillerLabelText = null;
             if (body is JsonElement b && b.ValueKind == JsonValueKind.Object)
             {
                 if (b.TryGetProperty("checkpointPath", out JsonElement cpEl) &&
@@ -1584,11 +1587,26 @@ internal static class Program
                 {
                     dashboard = dashEl.GetString();
                 }
+                if (b.TryGetProperty("deidentify", out JsonElement deidEl))
+                {
+                    if (deidEl.ValueKind == JsonValueKind.True) { deidentify = true; }
+                    else if (deidEl.ValueKind == JsonValueKind.False) { deidentify = false; }
+                }
+                if (b.TryGetProperty("fillerLabel", out JsonElement flEl) &&
+                    flEl.ValueKind == JsonValueKind.String)
+                {
+                    fillerLabel = flEl.GetString();
+                }
+                if (b.TryGetProperty("fillerLabelText", out JsonElement fltEl) &&
+                    fltEl.ValueKind == JsonValueKind.String)
+                {
+                    fillerLabelText = fltEl.GetString();
+                }
             }
 
             (int status, object respBody) = RecipeReadModel.StartResumeCook(
                 workspacePath, versionInfo, engine, checkpointPath, force, chefKeyId,
-                dashboard, manualCookReAuthSeam, cookPwshPathOverride);
+                dashboard, deidentify, fillerLabel, fillerLabelText, manualCookReAuthSeam, cookPwshPathOverride);
             return Results.Json(respBody, statusCode: status);
         });
 

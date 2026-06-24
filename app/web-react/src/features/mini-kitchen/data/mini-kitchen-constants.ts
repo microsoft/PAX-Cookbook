@@ -27,7 +27,7 @@ export const COOKBOOK_RECIPE_SCHEMA_VERSION = 1 as const;
  * Bumped (with a `-N` suffix on same-day re-edits) whenever any entry in
  * `data/pax-switch-catalog.ts` changes. See risk R13 in the master plan.
  */
-export const SWITCH_CATALOG_VERSION = '2026.05.29-1' as const;
+export const SWITCH_CATALOG_VERSION = '2026.05.29-2' as const;
 
 /**
  * Default PAX script version targeted by new recipes. Surfaced in the builder
@@ -36,7 +36,7 @@ export const SWITCH_CATALOG_VERSION = '2026.05.29-1' as const;
  * Cookbook bundles and runs (the broker remains the authoritative source of the
  * persisted `paxAdapterVersion`; this constant only drives builder/export copy).
  */
-export const TARGET_PAX_VERSION_DEFAULT = '1.11.7' as const;
+export const TARGET_PAX_VERSION_DEFAULT = '1.11.8' as const;
 
 /** Identity stamps written into the lite recipe `createdBy` block. */
 export const MINI_KITCHEN_CREATED_BY_TOOL = 'PAX Cookbook Recipe Builder' as const;
