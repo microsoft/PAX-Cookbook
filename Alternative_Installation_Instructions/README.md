@@ -108,14 +108,16 @@ anything yourself** — the helper does it.
 3. **Copy the command below**, paste it into the PowerShell 7 window, and press **Enter**:
 
    ```powershell
-   pwsh -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1" -InstallRoot "$env:LOCALAPPDATA\PAXCookbook" -PayloadZip "$env:USERPROFILE\Downloads\PAX_Cookbook_Payload.zip" -Desktop
+   pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1" -InstallRoot "$env:LOCALAPPDATA\PAXCookbook" -PayloadZip "$env:USERPROFILE\Downloads\PAX_Cookbook_Payload.zip" -Desktop
    ```
 
    > This assumes the helper script and the zip are both in your **Downloads**
    > folder. If you saved them somewhere else, just change those two paths to
    > match. `-PayloadZip` is the zip you downloaded in Step 2; `-InstallRoot` is
    > where the app will be placed (a tidy spot in your own user folder — no admin
-   > rights needed).
+   > rights needed). `-ExecutionPolicy Bypass` lets this one setup script run even
+   > though you just downloaded it; it applies **only to this single command**,
+   > not to your computer's overall settings.
 
 4. You'll see a few green "[+]" lines and finally **"Done. PAX Cookbook is ready."**
    That's it — setup is complete.
