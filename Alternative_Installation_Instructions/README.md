@@ -220,10 +220,21 @@ In your personal app folder: `%LOCALAPPDATA%\PAXCookbook` (for example,
 `C:\Users\YourName\AppData\Local\PAXCookbook`).
 
 **"I want to remove it."**
-Delete the Start Menu (and Desktop) shortcut, delete the
-`%LOCALAPPDATA%\PAXCookbook` folder, and — if you turned on start-at-login — open
-**Task Manager → Startup**, find **PAX Cookbook**, and disable it. Nothing was
-installed system-wide.
+Use the uninstaller — it undoes everything automatically (the shortcuts, the
+start-at-sign-in entry, and all of the app's files). **[Download
+`Uninstall-PAXCookbook-Manual.ps1` from GitHub →](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Uninstall-PAXCookbook-Manual.ps1)**
+the same way you got the setup script (open the link, then click the **download
+button**). Then **right-click it** in your Downloads folder and choose **Run with
+PowerShell**. It asks you to confirm, then removes PAX Cookbook for your account
+only — nothing was installed system-wide.
+
+Close PAX Cookbook first (including its system-tray icon), or some files stay
+locked and you'd need to run it again. Note that this also deletes your saved
+recipes and bake history. Prefer the command line?
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Uninstall-PAXCookbook-Manual.ps1"
+```
 
 ---
 
