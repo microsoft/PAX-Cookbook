@@ -43,7 +43,7 @@ namespace PAXCookbook.Tests;
 public class NativeBrokerHostStage3kTests
 {
     private const string PaxScriptBaselineHash =
-        "5893B42807079CD8E321FE19C50C97188AD39A545BA7B90945657FDAE0BCE390";
+        "007AD1A7F6D40B40E873C684D10B2A79B4D1DD03A1900ADE19B6E482CC10C728";
 
     // ============================================================
     // A. CloseChoice / CloseGestureOutcome enum shape

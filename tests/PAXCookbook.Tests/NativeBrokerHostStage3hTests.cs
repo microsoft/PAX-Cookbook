@@ -64,7 +64,7 @@ public class NativeBrokerHostStage3hTests
     // PAX_Purview_Audit_Log_Processor.ps1 contents. Stage 3h is a
     // BROKER-side change; the PAX script itself does not move.
     private const string PaxScriptBaselineHash =
-        "5893B42807079CD8E321FE19C50C97188AD39A545BA7B90945657FDAE0BCE390";
+        "007AD1A7F6D40B40E873C684D10B2A79B4D1DD03A1900ADE19B6E482CC10C728";
 
     // Valid Crockford-base32 ULIDs (uppercase, no I L O U). 26 chars.
     private const string SampleRecipeId         = "01HQRC7N5VRSXG8K9MZTABCDEF";

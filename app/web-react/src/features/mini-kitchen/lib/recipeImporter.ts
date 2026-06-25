@@ -230,7 +230,7 @@ function rebuildLiteRecipe(
       targetPaxVersion:
         typeof compatibility.targetPaxVersion === 'string'
           ? compatibility.targetPaxVersion
-          : '1.11.8',
+          : '1.11.9',
       switchCatalogVersion:
         typeof compatibility.switchCatalogVersion === 'string'
           ? compatibility.switchCatalogVersion

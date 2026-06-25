@@ -10,9 +10,9 @@
   },
   "includedPaxScript": {
     "name": "PAX Purview Audit Log Processor",
-    "version": "1.11.8",
+    "version": "1.11.9",
     "relativePath": "resources/pax/PAX_Purview_Audit_Log_Processor.ps1",
-    "sha256": "5893B42807079CD8E321FE19C50C97188AD39A545BA7B90945657FDAE0BCE390",
+    "sha256": "007AD1A7F6D40B40E873C684D10B2A79B4D1DD03A1900ADE19B6E482CC10C728",
     "acquisitionPolicy": "external",
     "exportEnabled": false,
     "engineManifestUrl": "https://github.com/microsoft/PAX/releases/latest/download/approved-engine-manifest.json",
