@@ -93,8 +93,16 @@ anything yourself** — the helper does it.
 1. From **this `Alternative_Installation_Instructions` folder** (the same place
    you're reading this guide), download **`Install-PAXCookbook-Manual.ps1`** into
    your **Downloads** folder (the same place as the zip).
-   *(On GitHub: click the file name to open it, then click the **Download raw
-   file** button — the small download icon near the top-right of the file view.)*
+
+   **How to download it from GitHub:** click the file name
+   **`Install-PAXCookbook-Manual.ps1`** in the list above. That opens the script's
+   own page, which only *shows* the file's text — it does **not** download
+   anything yet. To actually save it, click the **download button** (the small
+   download-arrow icon near the top-right of the code area, highlighted in red
+   below), then choose your **Downloads** folder if you're asked where to save it.
+
+   <img src="images/07-manual-install-script-download.png" alt="GitHub file view of Install-PAXCookbook-Manual.ps1 with the download button highlighted near the top right" width="680">
+
 2. Click **Start**, type **PowerShell 7**, and open it. (Look for the app named
    "PowerShell 7" — the icon is a dark blue terminal.)
 3. **Copy the command below**, paste it into the PowerShell 7 window, and press **Enter**:
