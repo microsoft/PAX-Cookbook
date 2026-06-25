@@ -86,6 +86,18 @@ For detailed installation help — including system requirements, uninstalling, 
 
 ---
 
+## Alternative installation (locked-down / managed PCs)
+
+Some organizations run strict security policies (Microsoft Defender Application Control / WDAC, or similar) that **hard-block brand-new, not-yet-signed apps** — sometimes with no "Run anyway" option at all. During PAX Cookbook's preview period the `PAX_Cookbook_Setup.exe` installer **isn't code-signed yet**, so on those managed machines the normal Setup can be blocked.
+
+If that's your situation, there's a fully supported **manual installation path** that avoids the Setup `.exe` entirely. PAX Cookbook runs on Microsoft's own signed `.NET` host, so you can install the free Microsoft prerequisites, download the app's data payload, and run a small setup script — no blocked program involved.
+
+👉 **[Alternative installation instructions →](Alternative_Installation_Instructions/README.md)**
+
+> **Why this exists (and for how long):** this manual path is a **temporary bridge** for locked-down environments while we're in testing and preview. Once code signing is in place — which we're targeting **before General Availability** — the standard signed installer will run everywhere and this alternative path will no longer be needed.
+
+---
+
 ## Building from source
 
 <details>
