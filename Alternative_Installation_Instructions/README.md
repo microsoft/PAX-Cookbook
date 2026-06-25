@@ -13,13 +13,10 @@ team — these are all standard Microsoft tools they usually allow).
 
 Take it one step at a time. You've got this.
 
-> **The two setup scripts:** this guide uses a small setup script,
-> **[Install-PAXCookbook-Manual.ps1](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Install-PAXCookbook-Manual.ps1)**,
-> and an optional launcher,
-> **[Launch-PAXCookbook-Manual.ps1](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Launch-PAXCookbook-Manual.ps1)**.
-> You can click those links to open each script on GitHub and download it — the
-> steps below also link them at the moment you need them, so you never have to go
-> hunting for files.
+> **The setup script:** this guide uses one small setup script —
+> **[Install-PAXCookbook-Manual.ps1](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Install-PAXCookbook-Manual.ps1)**.
+> You'll download it in Step 3, where there's a direct link and a screenshot
+> right when you need it — so you never have to go hunting for files.
 
 ---
 
@@ -39,7 +36,7 @@ permits. If any of them are already on your PC, you can skip that one.
 | What it is | Why you need it | Where to get it |
 |---|---|---|
 | **.NET 8 Desktop Runtime** and **ASP.NET Core 8 Runtime** | The Microsoft engine that actually runs PAX Cookbook. | https://dotnet.microsoft.com/download/dotnet/8.0 — download the **Windows x64** installers for both "Desktop Runtime" and "ASP.NET Core Runtime". |
-| **PowerShell 7** | A newer version of a tool that's already built into Windows; used to run the one-time setup script below. | https://aka.ms/install-powershell — or search "PowerShell" in the Microsoft Store. |
+| **PowerShell 7** | A newer version of a tool that's already built into Windows; PAX Cookbook uses it to run your reports. | https://aka.ms/install-powershell — or search "PowerShell" in the Microsoft Store. |
 | **WebView2 Runtime** | Lets PAX Cookbook show its window (it's the same display engine as Microsoft Edge). | https://developer.microsoft.com/en-us/microsoft-edge/webview2/?cs=1796170201&form=MA13LH#download — download the **Evergreen Standalone Installer**. (Often already installed.) |
 | **Python 3.10 or newer** | Required for PAX Cookbook to run. | https://www.python.org/downloads/ — download the **Windows x64** installer, and tick “Add python.exe to PATH” during setup. |
 
@@ -88,61 +85,95 @@ the same block the installer did. Remember where it saved (usually your
 
 This single step does everything else for you: it unpacks the app into a tidy,
 personal folder, tells Windows the files are safe, sets up your workspace, and
-creates your Start Menu (and Desktop) shortcut. **You don't need to unzip
-anything yourself** — the helper does it.
+creates your **Start Menu and Desktop shortcuts** — and sets PAX Cookbook to
+start quietly at sign-in so scheduled reports can run on their own. **You don't
+need to unzip anything yourself** — the helper does it.
 
-1. **[Download `Install-PAXCookbook-Manual.ps1` from GitHub →](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Install-PAXCookbook-Manual.ps1)**
-   Click that link, then save the script into your **Downloads** folder (the same
-   place as the zip).
+### 3a — Download the setup script
 
-   The link opens the script's page on GitHub, which only *shows* the file's text
-   — it doesn't download anything by itself. To actually save it, click the
-   **download button** (the small download-arrow icon near the top-right of the
-   code area, highlighted in red below), then choose your **Downloads** folder if
-   you're asked where to save it.
+**[Download `Install-PAXCookbook-Manual.ps1` from GitHub →](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Install-PAXCookbook-Manual.ps1)**
+Click that link, then save the script into your **Downloads** folder (the same
+place as the zip).
 
-   <img src="images/07-manual-install-script-download.png" alt="GitHub file view of Install-PAXCookbook-Manual.ps1 with the download button highlighted near the top right" width="680">
+The link opens the script's page on GitHub, which only *shows* the file's text —
+it doesn't download anything by itself. To actually save it, click the
+**download button** (the small download-arrow icon near the top-right of the code
+area, highlighted in red below), then choose your **Downloads** folder if asked.
 
-2. Click **Start**, type **PowerShell 7**, and open it. (Look for the app named
-   "PowerShell 7" — the icon is a dark blue terminal.)
-3. **Copy the command below**, paste it into the PowerShell 7 window, and press **Enter**:
+<img src="images/07-manual-install-script-download.png" alt="GitHub file view of Install-PAXCookbook-Manual.ps1 with the download button highlighted near the top right" width="680">
 
-   ```powershell
-   pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1" -InstallRoot "$env:LOCALAPPDATA\PAXCookbook" -PayloadZip "$env:USERPROFILE\Downloads\PAX_Cookbook_Payload.zip" -Desktop
-   ```
+### 3b — Run it (just right-click the file)
 
-   > This assumes the helper script and the zip are both in your **Downloads**
-   > folder. If you saved them somewhere else, just change those two paths to
-   > match. `-PayloadZip` is the zip you downloaded in Step 2; `-InstallRoot` is
-   > where the app will be placed (a tidy spot in your own user folder — no admin
-   > rights needed). `-ExecutionPolicy Bypass` lets this one setup script run even
-   > though you just downloaded it; it applies **only to this single command**,
-   > not to your computer's overall settings.
+1. Open your **Downloads** folder and find **`Install-PAXCookbook-Manual.ps1`**.
+2. **Right-click it** and choose **Run with PowerShell**.
+   *(On Windows 11 you may have to click **Show more options** first to see
+   "Run with PowerShell".)*
+3. A PowerShell window opens and runs the setup. You'll see a few green "[+]"
+   lines and finally **"Done. PAX Cookbook is ready."** Press **Enter** to close
+   the window.
 
-4. You'll see a few green "[+]" lines and finally **"Done. PAX Cookbook is ready."**
-   That's it — setup is complete.
+That's it — setup is complete. By default this installs PAX Cookbook to your
+personal app folder, adds a **Start Menu** and a **Desktop** shortcut, and sets
+it to **start at sign-in** (so scheduled reports can run on their own).
 
-*Want it to also start quietly in the background each time you sign in (so
-scheduled reports can run on their own)? Add `-EnableAutoStart` to the end of the
-command. This is optional.*
+> If Windows refuses to run the script, see **"Windows won't run the setup
+> script"** in Troubleshooting below — there's a copy-paste command that always
+> works.
+
+### 3c — Prefer the command line, or want different options? (optional)
+
+If you'd rather run it from a terminal — or want to change the defaults — open
+**PowerShell** (PowerShell 7 or the built-in Windows PowerShell) and use one of
+these. They all assume the script and the zip are in your **Downloads** folder.
+
+**Default install** — Start Menu + Desktop shortcuts, and start-at-sign-in:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1"
+```
+
+**No Desktop shortcut and no start-at-sign-in** (Start Menu shortcut only):
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1" -NoDesktop -NoAutoStart
+```
+
+**Keep the Desktop shortcut, but don't start at sign-in:**
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1" -NoAutoStart
+```
+
+**Start at sign-in, but skip the Desktop shortcut:**
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1" -NoDesktop
+```
+
+**Install to a specific folder, or point at a specific zip:**
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1" -InstallRoot "D:\Apps\PAXCookbook" -PayloadZip "$env:USERPROFILE\Downloads\PAX_Cookbook_Payload.zip"
+```
+
+> **What the options do:** `-NoDesktop` skips the Desktop shortcut •
+> `-NoAutoStart` skips start-at-sign-in • `-InstallRoot` chooses where the app is
+> installed • `-PayloadZip` points at the downloaded zip. `-ExecutionPolicy
+> Bypass` simply lets this freshly downloaded script run; it applies **only to
+> that one command**, never to your computer's overall settings.
 
 ---
 
 ## Step 4 — Open PAX Cookbook
 
-Click **Start**, find **PAX Cookbook**, and click it. (If you used `-Desktop`,
-there's also an icon on your Desktop.) The window opens just like any normal app.
+Click **Start**, find **PAX Cookbook**, and click it — there's also an icon on
+your **Desktop** (unless you chose to skip it). The window opens just like any
+normal app.
 
 > **Please use the shortcut to open the app** — don't double-click the file named
 > `PAX Cookbook.exe` inside the App folder. That file is only there to supply the
 > app's icon; opening it directly would hit the same block you saw before. The
 > shortcut opens the app the approved way.
-
-*Prefer to start the app from a script instead of the shortcut? There's an
-optional **[Launch-PAXCookbook-Manual.ps1](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Launch-PAXCookbook-Manual.ps1)**
-— download it the same way (open the link, then click the download button), save
-it to your **Downloads** folder, and run it in PowerShell 7 whenever you want to
-open PAX Cookbook.*
 
 ---
 
@@ -157,14 +188,24 @@ open PAX Cookbook.*
 
 ## Troubleshooting
 
+**"Windows won't run the setup script."**
+Some PCs block scripts you just downloaded when you right-click them. Open
+**PowerShell**, paste the command below (it grants a one-time permission for this
+single command only), and press **Enter**:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1"
+```
+
 **"The app opens, but when I run a report it fails saying 'not digitally signed'."**
-Re-run the Step 3 helper command. Its first job is to mark the files as safe to
+Re-run the setup — right-click the script and choose **Run with PowerShell** again
+(or use the command in Step 3c). Its first job is to mark the files as safe to
 run, and that fixes this. (This can happen if the files picked up a "downloaded
-from the internet" flag during extraction.)
+from the internet" flag.)
 
 **"It says Microsoft .NET / dotnet was not found."**
 Install the **.NET 8 Desktop Runtime** and **ASP.NET Core 8 Runtime** from Step 1,
-then run the Step 3 command again.
+then run the setup again.
 
 **"The window opens but stays blank or white."**
 Install the **WebView2 Runtime** from Step 1 (it's what draws the window), then

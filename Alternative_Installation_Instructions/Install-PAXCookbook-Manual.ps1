@@ -1,4 +1,3 @@
-#requires -Version 7.0
 <#
 .SYNOPSIS
     Manual (no-Setup-EXE) installer finisher for PAX Cookbook.
@@ -8,28 +7,31 @@
     hard-blocked by Defender/WDAC with no "Run anyway" option. The app itself
     never needs the Setup EXE: it runs as the Microsoft-signed dotnet.exe host
     executing the app DLL. This script replicates the handful of *functional*
-    things the normal Setup does after copying files, so a hand-extracted
-    payload behaves like a real install:
+    things the normal Setup does, so a downloaded payload behaves like a real
+    install:
 
-      1. Unblock-File the whole extracted tree (strip Mark-of-the-Web). This is
-         the single most important step: without it, the engine .ps1 carries the
-         internet "zone" mark and PowerShell's default RemoteSigned policy
-         refuses to run it, so bakes fail with "not digitally signed".
+      0. Extract PAX_Cookbook_Payload.zip into the install folder if it hasn't
+         been extracted yet (looks in your Downloads folder by default).
+      1. Unblock-File the whole tree (strip Mark-of-the-Web). Without this, the
+         engine .ps1 carries the internet "zone" mark and PowerShell's default
+         RemoteSigned policy refuses to run it, so bakes fail with "not digitally
+         signed".
       2. Create the per-user Workspace folder (recipes + bake history live here).
       3. Write installed-skus.json with the real payload SHA so the in-app
          updater does NOT show a spurious "update available" prompt.
-      4. Create a Start Menu (and optionally Desktop) shortcut whose Target is
-         the user's dotnet.exe and whose arguments are the app DLL +
+      4. Create a Start Menu shortcut AND (by default) a Desktop shortcut whose
+         Target is the user's dotnet.exe and whose arguments are the app DLL +
          --workspace/--approot -- byte-for-byte the same launch line a normal
-         install creates (see ShortcutCatalog.cs). The shortcut icon is read
-         from the shipped apphost EXE exactly as the real install does.
-      5. (Optional, -EnableAutoStart) Add the per-user HKCU Run value that
-         starts the headless broker at login, mirroring AutoStartRegistrar.cs,
-         so scheduled bakes can fire with no window open.
+         install creates (see ShortcutCatalog.cs). Use -NoDesktop to skip the
+         Desktop shortcut.
+      5. (By default) Add the per-user HKCU Run value that starts the headless
+         broker at login, mirroring AutoStartRegistrar.cs, so scheduled bakes can
+         fire with no window open. Use -NoAutoStart to skip it.
 
-    The script is idempotent (safe to re-run), makes NO HKLM writes, requires NO
-    administrator rights, installs NO Windows service, and never executes the
-    unsigned apphost EXE.
+    Runs on Windows PowerShell 5.1 or PowerShell 7, so you can simply right-click
+    the file and choose "Run with PowerShell". It is idempotent (safe to re-run),
+    makes NO HKLM writes, requires NO administrator rights, installs NO Windows
+    service, and never executes the unsigned apphost EXE.
 
 .PARAMETER InstallRoot
     The folder where the app lives. If it doesn't already contain an "App"
@@ -37,33 +39,60 @@
     it for you. Defaults to %LOCALAPPDATA%\PAXCookbook.
 
 .PARAMETER PayloadZip
-    Optional. The PAX_Cookbook_Payload.zip you downloaded. Used as the
-    extraction source (when InstallRoot isn't populated yet) AND to compute the
-    payload SHA for installed-skus.json (so the updater stays quiet). If omitted,
-    the script looks for the zip in your Downloads folder and next to
-    InstallRoot; if it still can't find it and the app isn't already extracted,
-    it stops with a clear message.
+    Optional. The PAX_Cookbook_Payload.zip you downloaded. Used as the extraction
+    source (when InstallRoot isn't populated yet) AND to compute the payload SHA
+    for installed-skus.json (so the updater stays quiet). If omitted, the script
+    looks for the zip in your Downloads folder and next to InstallRoot.
 
-.PARAMETER EnableAutoStart
-    Also register the headless broker to start at login (HKCU Run). Optional;
-    only needed if you want scheduled bakes to fire when no window is open.
+.PARAMETER NoDesktop
+    Skip the Desktop shortcut. A Desktop shortcut is created by default; the
+    Start Menu shortcut is always created.
 
-.PARAMETER Desktop
-    Also create a Desktop shortcut (a Start Menu shortcut is always created).
+.PARAMETER NoAutoStart
+    Skip registering the headless broker to start at login. Start-at-login is
+    enabled by default so scheduled bakes can fire with no window open.
+
+.PARAMETER NoPause
+    Don't wait for a keypress before the window closes. Useful for unattended
+    runs; omit it for a right-click run so you can read the result.
 
 .EXAMPLE
-    pwsh -File .\Install-PAXCookbook-Manual.ps1 -InstallRoot "C:\Users\me\AppData\Local\PAXCookbook" -PayloadZip "C:\Users\me\Downloads\PAX_Cookbook_Payload.zip"
+    # Simplest: right-click Install-PAXCookbook-Manual.ps1 in your Downloads
+    # folder and choose "Run with PowerShell". Installs to %LOCALAPPDATA%\PAXCookbook
+    # with a Start Menu shortcut, a Desktop shortcut, and start-at-login (the defaults).
+
+.EXAMPLE
+    # Same defaults, from a PowerShell terminal:
+    pwsh -ExecutionPolicy Bypass -File .\Install-PAXCookbook-Manual.ps1
+
+.EXAMPLE
+    # No Desktop shortcut and no start-at-login (Start Menu shortcut only):
+    pwsh -ExecutionPolicy Bypass -File .\Install-PAXCookbook-Manual.ps1 -NoDesktop -NoAutoStart
+
+.EXAMPLE
+    # Desktop shortcut, but NOT start-at-login:
+    pwsh -ExecutionPolicy Bypass -File .\Install-PAXCookbook-Manual.ps1 -NoAutoStart
+
+.EXAMPLE
+    # Start-at-login, but NO Desktop shortcut:
+    pwsh -ExecutionPolicy Bypass -File .\Install-PAXCookbook-Manual.ps1 -NoDesktop
+
+.EXAMPLE
+    # Custom install folder and an explicit zip path:
+    pwsh -ExecutionPolicy Bypass -File .\Install-PAXCookbook-Manual.ps1 -InstallRoot "D:\Apps\PAXCookbook" -PayloadZip "C:\Users\me\Downloads\PAX_Cookbook_Payload.zip"
 
 .NOTES
-    Run this in PowerShell 7 (pwsh) after downloading the payload zip. It does
+    After downloading the payload zip (and this script) to your Downloads folder,
+    just right-click this file and choose "Run with PowerShell". The script does
     not download anything and makes no network calls.
 #>
 [CmdletBinding()]
 param(
     [string] $InstallRoot = (Join-Path $env:LOCALAPPDATA 'PAXCookbook'),
     [string] $PayloadZip  = '',
-    [switch] $EnableAutoStart,
-    [switch] $Desktop
+    [switch] $NoDesktop,
+    [switch] $NoAutoStart,
+    [switch] $NoPause
 )
 
 $ErrorActionPreference = 'Stop'
@@ -83,7 +112,8 @@ $RunValueName       = 'PAX Cookbook'         # AutoStartRegistrar.ValueName
 function Write-Step    ([string]$m) { Write-Host "  [*] $m" -ForegroundColor Cyan }
 function Write-OkLine  ([string]$m) { Write-Host "  [+] $m" -ForegroundColor Green }
 function Write-WarnLine([string]$m) { Write-Host "  [!] $m" -ForegroundColor Yellow }
-function Fail          ([string]$m) { Write-Host ""; Write-Host "ERROR: $m" -ForegroundColor Red; exit 1 }
+function Wait-Close { if (-not $NoPause) { Write-Host ""; Read-Host "Press Enter to close this window" | Out-Null } }
+function Fail          ([string]$m) { Write-Host ""; Write-Host "ERROR: $m" -ForegroundColor Red; Wait-Close; exit 1 }
 
 Write-Host ""
 Write-Host "PAX Cookbook -- manual install finisher" -ForegroundColor White
@@ -253,7 +283,10 @@ $skus = [ordered]@{
     recordedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 }
 $skusPath = Join-Path $InstallRoot 'installed-skus.json'
-$skus | ConvertTo-Json | Set-Content -LiteralPath $skusPath -Encoding UTF8
+$skusJson = $skus | ConvertTo-Json
+# Write UTF-8 WITHOUT a BOM (version-agnostic: Set-Content -Encoding UTF8 adds a
+# BOM on Windows PowerShell 5.1). Matches the real Setup's InstalledSkusWriter.
+[System.IO.File]::WriteAllText($skusPath, $skusJson, (New-Object System.Text.UTF8Encoding($false)))
 if ($payloadSha) {
     Write-OkLine "Wrote installed-skus.json (payloadSha256=$payloadSha)"
 } else {
@@ -300,7 +333,7 @@ $startMenuLnk = Join-Path $startMenuDir "$ProductName.lnk"
 New-AppShortcut -LinkPath $startMenuLnk
 Write-OkLine "Created Start Menu shortcut: $startMenuLnk"
 
-if ($Desktop) {
+if (-not $NoDesktop) {
     $desktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "$ProductName.lnk"
     New-AppShortcut -LinkPath $desktopLnk
     Write-OkLine "Created Desktop shortcut: $desktopLnk"
@@ -312,7 +345,7 @@ if ($Desktop) {
 #    "<dotnet>" "<dll>" --headless --workspace "<ws>" --approot "<app>".
 #    HKCU only -- no HKLM, no admin, no service.
 # ---------------------------------------------------------------------------
-if ($EnableAutoStart) {
+if (-not $NoAutoStart) {
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     $runCmd = "`"$dotnet`" `"$appDll`" --headless --workspace `"$workspace`" --approot `"$appRoot`""
     if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
@@ -328,9 +361,10 @@ Write-Host "Done. PAX Cookbook is ready." -ForegroundColor Green
 Write-Host ""
 Write-Host "  Installed at : $InstallRoot"
 Write-Host "  Workspace    : $workspace"
-Write-Host "  Launch with  : Start Menu -> '$ProductName'$(if ($Desktop) { '  (or the Desktop shortcut)' })"
+Write-Host "  Launch with  : Start Menu -> '$ProductName'$(if (-not $NoDesktop) { '  (or the Desktop shortcut)' })"
 Write-Host ""
 Write-Host "  First launch sets up the analysis engine automatically -- nothing else to do."
 Write-Host "  If a bake ever fails saying 'not digitally signed', re-run this script"
 Write-Host "  (the unblock step) and try again."
 Write-Host ""
+Wait-Close
