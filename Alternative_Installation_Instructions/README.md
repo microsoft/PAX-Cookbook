@@ -13,12 +13,13 @@ team — these are all standard Microsoft tools they usually allow).
 
 Take it one step at a time. You've got this.
 
-> **Where these files live:** you're reading this in the
-> **`Alternative_Installation_Instructions`** folder of the PAX Cookbook
-> repository. The small setup scripts this guide uses —
-> **`Install-PAXCookbook-Manual.ps1`** (and the optional
-> **`Launch-PAXCookbook-Manual.ps1`**) — are in this same folder. You'll download
-> the setup script in Step 3.
+> **The two setup scripts:** this guide uses a small setup script,
+> **[Install-PAXCookbook-Manual.ps1](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Install-PAXCookbook-Manual.ps1)**,
+> and an optional launcher,
+> **[Launch-PAXCookbook-Manual.ps1](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Launch-PAXCookbook-Manual.ps1)**.
+> You can click those links to open each script on GitHub and download it — the
+> steps below also link them at the moment you need them, so you never have to go
+> hunting for files.
 
 ---
 
@@ -90,16 +91,15 @@ personal folder, tells Windows the files are safe, sets up your workspace, and
 creates your Start Menu (and Desktop) shortcut. **You don't need to unzip
 anything yourself** — the helper does it.
 
-1. From **this `Alternative_Installation_Instructions` folder** (the same place
-   you're reading this guide), download **`Install-PAXCookbook-Manual.ps1`** into
-   your **Downloads** folder (the same place as the zip).
+1. **[Download `Install-PAXCookbook-Manual.ps1` from GitHub →](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Install-PAXCookbook-Manual.ps1)**
+   Click that link, then save the script into your **Downloads** folder (the same
+   place as the zip).
 
-   **How to download it from GitHub:** click the file name
-   **`Install-PAXCookbook-Manual.ps1`** in the list above. That opens the script's
-   own page, which only *shows* the file's text — it does **not** download
-   anything yet. To actually save it, click the **download button** (the small
-   download-arrow icon near the top-right of the code area, highlighted in red
-   below), then choose your **Downloads** folder if you're asked where to save it.
+   The link opens the script's page on GitHub, which only *shows* the file's text
+   — it doesn't download anything by itself. To actually save it, click the
+   **download button** (the small download-arrow icon near the top-right of the
+   code area, highlighted in red below), then choose your **Downloads** folder if
+   you're asked where to save it.
 
    <img src="images/07-manual-install-script-download.png" alt="GitHub file view of Install-PAXCookbook-Manual.ps1 with the download button highlighted near the top right" width="680">
 
@@ -136,9 +136,11 @@ there's also an icon on your Desktop.) The window opens just like any normal app
 > app's icon; opening it directly would hit the same block you saw before. The
 > shortcut opens the app the approved way.
 
-*Prefer to start the app from a script instead of the shortcut? This folder also
-includes an optional **`Launch-PAXCookbook-Manual.ps1`** — download it the same
-way and run it in PowerShell 7 whenever you want to open PAX Cookbook.*
+*Prefer to start the app from a script instead of the shortcut? There's an
+optional **[Launch-PAXCookbook-Manual.ps1](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Launch-PAXCookbook-Manual.ps1)**
+— download it the same way (open the link, then click the download button), save
+it to your **Downloads** folder, and run it in PowerShell 7 whenever you want to
+open PAX Cookbook.*
 
 ---
 
