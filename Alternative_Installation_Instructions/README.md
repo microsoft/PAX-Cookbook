@@ -102,13 +102,28 @@ area, highlighted in red below), then choose your **Downloads** folder if asked.
 
 <img src="images/07-manual-install-script-download.png" alt="GitHub file view of Install-PAXCookbook-Manual.ps1 with the download button highlighted near the top right" width="680">
 
-### 3b — Run it (just right-click the file)
+### 3b — Unblock the script, then run it
+
+Because you just downloaded the script, Windows tags it as "came from another
+computer" and **silently refuses to run it** — if you skip this step, the
+PowerShell window flashes open and closes instantly with nothing happening.
+Clearing that tag once fixes it:
 
 1. Open your **Downloads** folder and find **`Install-PAXCookbook-Manual.ps1`**.
-2. **Right-click it** and choose **Run with PowerShell**.
+2. **Right-click it → Properties.**
+3. At the bottom of the **General** tab, if you see a checkbox labelled
+   **Unblock** (next to *"This file came from another computer and might be
+   blocked..."*), **tick it**, then click **OK**.
+   *(No Unblock checkbox? Then Windows already trusts the file — just continue.)*
+
+<br>
+
+Now run it:
+
+4. **Right-click the script again** and choose **Run with PowerShell**.
    *(On Windows 11 you may have to click **Show more options** first to see
    "Run with PowerShell".)*
-3. A PowerShell window opens and runs the setup. You'll see a few green "[+]"
+5. A PowerShell window opens and runs the setup. You'll see a few green "[+]"
    lines and finally **"Done. PAX Cookbook is ready."** Press **Enter** to close
    the window.
 
@@ -116,9 +131,9 @@ That's it — setup is complete. By default this installs PAX Cookbook to your
 personal app folder, adds a **Start Menu** and a **Desktop** shortcut, and sets
 it to **start at sign-in** (so scheduled reports can run on their own).
 
-> If Windows refuses to run the script, see **"Windows won't run the setup
-> script"** in Troubleshooting below — there's a copy-paste command that always
-> works.
+> Still flashes and closes, even after unblocking? See **"Windows won't run the
+> setup script"** in Troubleshooting below — there's a copy-paste command that
+> always works.
 
 ### 3c — Prefer the command line, or want different options? (optional)
 
@@ -188,13 +203,17 @@ normal app.
 
 ## Troubleshooting
 
-**"Windows won't run the setup script."**
-Some PCs block scripts you just downloaded when you right-click them. Open
-**PowerShell**, paste the command below (it grants a one-time permission for this
-single command only), and press **Enter**:
+**"Windows won't run the setup script."** *(PowerShell window flashes open and
+closes instantly, nothing happens.)*
+This means Windows is still blocking the downloaded script. First make sure you
+did the **Unblock** step in **Step 3b** (right-click the script → Properties →
+tick **Unblock** → OK). If it still won't run, open **PowerShell** (Start → type
+*PowerShell* → Enter), paste the line below, and press **Enter** — it clears the
+block and runs the setup in the window you already have open, so any message
+stays visible:
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1"
+Unblock-File "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1"; & "$env:USERPROFILE\Downloads\Install-PAXCookbook-Manual.ps1"
 ```
 
 **"The app opens, but when I run a report it fails saying 'not digitally signed'."**
@@ -224,9 +243,10 @@ Use the uninstaller — it undoes everything automatically (the shortcuts, the
 start-at-sign-in entry, and all of the app's files). **[Download
 `Uninstall-PAXCookbook-Manual.ps1` from GitHub →](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Uninstall-PAXCookbook-Manual.ps1)**
 the same way you got the setup script (open the link, then click the **download
-button**). Then **right-click it** in your Downloads folder and choose **Run with
-PowerShell**. It asks you to confirm, then removes PAX Cookbook for your account
-only — nothing was installed system-wide.
+button**). Then **right-click it → Properties → tick Unblock → OK** (same as
+Step 3b), then **right-click it again** and choose **Run with PowerShell**. It
+asks you to confirm, then removes PAX Cookbook for your account only — nothing
+was installed system-wide.
 
 Close PAX Cookbook first (including its system-tray icon), or some files stay
 locked and you'd need to run it again. Note that this also deletes your saved
