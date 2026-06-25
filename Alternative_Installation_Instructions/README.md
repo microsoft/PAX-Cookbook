@@ -28,6 +28,13 @@ PAX Cookbook relies on a few free, official Microsoft tools. These are all
 **signed Microsoft installers** that your IT department typically already
 permits. If any of them are already on your PC, you can skip that one.
 
+> ### 📸 Don't worry — there are screenshots to guide you
+> **You don't have to figure out the download pages on your own.** Just below
+> this table you'll find a **labeled screenshot for every item**, with arrows
+> and boxes pointing at the exact button or file to click. If a page looks busy
+> or you're unsure which option to pick, **scroll down to the matching picture
+> first** — then click with confidence.
+
 | What it is | Why you need it | Where to get it |
 |---|---|---|
 | **.NET 8 Desktop Runtime** and **ASP.NET Core 8 Runtime** | The Microsoft engine that actually runs PAX Cookbook. | https://dotnet.microsoft.com/download/dotnet/8.0 — download the **Windows x64** installers for both "Desktop Runtime" and "ASP.NET Core Runtime". |
