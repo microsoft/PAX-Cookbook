@@ -260,6 +260,12 @@ recipes and bake history. Prefer the command line?
 pwsh -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Uninstall-PAXCookbook-Manual.ps1"
 ```
 
+The uninstaller lists what it will remove, asks you to type **YES** to confirm,
+and then reports each item it removed — ending with **"Done. PAX Cookbook has
+been removed."**
+
+<img src="images/10-uninstall-script-terminal-output.png" alt="PowerShell window showing the manual uninstaller output ending in 'Done. PAX Cookbook has been removed.'" width="680">
+
 ---
 
 If you get stuck on any step, send your IT contact this guide — every tool here is
