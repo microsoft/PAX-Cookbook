@@ -116,6 +116,8 @@ Clearing that tag once fixes it:
    blocked..."*), **tick it**, then click **OK**.
    *(No Unblock checkbox? Then Windows already trusts the file — just continue.)*
 
+<img src="images/08-unblock-install-script.png" alt="Install-PAXCookbook-Manual.ps1 Properties dialog with the Unblock checkbox ticked and highlighted at the bottom" width="380">
+
 <br>
 
 Now run it:
@@ -126,6 +128,8 @@ Now run it:
 5. A PowerShell window opens and runs the setup. You'll see a few green "[+]"
    lines and finally **"Done. PAX Cookbook is ready."** Press **Enter** to close
    the window.
+
+<img src="images/09-install-script-terminal-output.png" alt="PowerShell window showing the manual install finisher output ending in 'Done. PAX Cookbook is ready.'" width="680">
 
 That's it — setup is complete. By default this installs PAX Cookbook to your
 personal app folder, adds a **Start Menu** and a **Desktop** shortcut, and sets
