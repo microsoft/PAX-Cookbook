@@ -18,4 +18,7 @@ public static class AppExitCodes
     public const int WebView2RuntimeMissing = 20;
     public const int WebView2HostFailure = 30;
     public const int ProtocolRejected = 40;
+
+    // Early startup guard: the host OS is older than Windows 10.
+    public const int UnsupportedWindowsVersion = 50;
 }

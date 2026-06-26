@@ -13,6 +13,8 @@ team — these are all standard Microsoft tools they usually allow).
 
 Take it one step at a time. You've got this.
 
+> **Before you start:** PAX Cookbook requires **Windows 10 or 11 (64‑bit)**. It can't run on older versions of Windows.
+
 > **The setup script:** this guide uses one small setup script —
 > **[Install-PAXCookbook-Manual.ps1](https://github.com/microsoft/PAX-Cookbook/blob/main/Alternative_Installation_Instructions/Install-PAXCookbook-Manual.ps1)**.
 > You'll download it in Step 3, where there's a direct link and a screenshot

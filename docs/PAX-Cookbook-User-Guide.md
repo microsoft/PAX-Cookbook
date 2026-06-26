@@ -195,7 +195,9 @@ That's it — you've collected your first set of Copilot data. From here, explor
 
 To run PAX Cookbook you need:
 
-- **Windows 10 or Windows 11.**
+- **Windows 10 or Windows 11 (64‑bit).**
+- **.NET 8, PowerShell 7, and Python.** These are standard Microsoft components; the Setup wizard checks for them and installs any that are missing (see [Running the Setup wizard](#23-running-the-setup-wizard)).
+- **Microsoft Edge WebView2 Runtime.** Ships with Windows 11 and on most Windows 10 PCs; installed automatically if missing.
 - **An internet connection.** This is needed to download the components during setup and to collect data from Microsoft 365.
 - **A Microsoft 365 tenant with Purview audit logging enabled.** This is the source of your data.
 

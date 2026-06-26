@@ -4,6 +4,7 @@ using PAXCookbook.Shared;
 using PAXCookbook.Shared.Contracts;
 using PAXCookbook.Shared.ExitCodes;
 using PAXCookbook.Shared.Paths;
+using PAXCookbook.Shared.Platform;
 using PAXCookbookSetup;
 using PAXCookbookSetup.Gui;
 using PAXCookbookSetup.Payload;
@@ -14,6 +15,16 @@ using PAXCookbookSetup.Verbs;
 // (a verb or flag) -> the verb-based CLI used by scripted/silent installs.
 // Because this is a WinExe, the CLI path first reattaches stdout/stderr to
 // the launching terminal so interactive verb output stays visible.
+
+// Earliest possible guard: PAX Cookbook requires Windows 10 or later. This
+// runs before any staging/install work so a pre-Win10 machine is kicked out
+// immediately instead of installing into a state the app can never run in.
+if (!WindowsVersionGate.IsSupported())
+{
+    UnsupportedOsNotice.Show();
+    return SetupExitCodes.UnsupportedWindowsVersion;
+}
+
 if (args.Length == 0)
 {
     // GUI wizard: hide the dotnet.exe host console window so no blank terminal

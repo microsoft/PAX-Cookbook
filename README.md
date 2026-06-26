@@ -76,6 +76,8 @@ That's it. For the full walkthrough, see the **[User Guide](docs/PAX-Cookbook-Us
 
 ## Installation
 
+**Requires Windows 10 or 11 (64‑bit).** The wizard installs the other prerequisites (.NET 8, PowerShell 7, Python) for you.
+
 1. Download **`PAX_Cookbook_Setup.exe`** from the [latest Release](https://github.com/microsoft/PAX-Cookbook/releases/latest).
 2. Double-click to run the wizard. It checks for and installs the prerequisites (.NET 8, PowerShell 7, Python) automatically.
 3. Follow the prompts to finish, then launch from the Start Menu.

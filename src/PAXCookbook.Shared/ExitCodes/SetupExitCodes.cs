@@ -24,6 +24,9 @@ public static class SetupExitCodes
     public const int WebView2RuntimeMissing = 80;
     public const int WebView2DetectionAmbiguous = 81;
 
+    // Early startup guard: the host OS is older than Windows 10.
+    public const int UnsupportedWindowsVersion = 82;
+
     public const int HandoffRequired = 90;
     public const int HandoffFailed = 91;
 

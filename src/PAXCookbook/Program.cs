@@ -7,6 +7,7 @@ using PAXCookbook.Ipc;
 using PAXCookbook.Logging;
 using PAXCookbook.Runtime;
 using PAXCookbook.Shared.ExitCodes;
+using PAXCookbook.Shared.Platform;
 using PAXCookbook.WebView2;
 
 namespace PAXCookbook;
@@ -18,6 +19,16 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Earliest possible guard: PAX Cookbook requires Windows 10 or later.
+        // Runs before any argument parsing or window work, so it fires on the
+        // shortcut path AND the manual dotnet+DLL path, and the user never
+        // reaches the identity-verification step on an unsupported OS.
+        if (!WindowsVersionGate.IsSupported())
+        {
+            UnsupportedOsNotice.Show();
+            return AppExitCodes.UnsupportedWindowsVersion;
+        }
+
         AppArgs parsed;
         try
         {

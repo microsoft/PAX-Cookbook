@@ -120,6 +120,22 @@ Write-Host "PAX Cookbook -- manual install finisher" -ForegroundColor White
 Write-Host "=======================================" -ForegroundColor White
 
 # ---------------------------------------------------------------------------
+# 0. Minimum OS guard -- PAX Cookbook requires Windows 10 or later. Stop here
+#    with a friendly message instead of completing the whole setup only to
+#    dead-end at first launch on an unsupported version of Windows. Both
+#    Windows PowerShell 5.1 and PowerShell 7 report the true OS version here
+#    (their hosts declare Windows 10 compatibility), so Major is 10 on
+#    Windows 10/11 and 6 on Windows 7/8/8.1.
+# ---------------------------------------------------------------------------
+if ([System.Environment]::OSVersion.Version.Major -lt 10) {
+    Write-Host ""
+    Write-Host "PAX Cookbook requires Windows 10 or later. This computer is running an" -ForegroundColor Yellow
+    Write-Host "earlier version of Windows, so the app can't run here." -ForegroundColor Yellow
+    Wait-Close
+    exit 1
+}
+
+# ---------------------------------------------------------------------------
 # 1. Validate the extracted payload.
 # ---------------------------------------------------------------------------
 $InstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
