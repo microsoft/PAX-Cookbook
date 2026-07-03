@@ -880,6 +880,20 @@ details[open] > .mk-subcollapse__summary .mk-card__chevron {
   gap: 8px;
 }
 
+.mk-byod-schema-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mk-byod-schema-list li {
+  font-size: var(--fs-13, 13px);
+  color: var(--c-muted);
+  line-height: 1.5;
+}
+
 /* ---------------------------------------------------------------------------
  * Inputs
  * ------------------------------------------------------------------------- */

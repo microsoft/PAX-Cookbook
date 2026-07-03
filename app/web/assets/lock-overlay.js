@@ -188,6 +188,19 @@
               'PIN, the same way you unlock this computer.');
         body.appendChild(p1);
 
+        // The Windows Security (Windows Hello) prompt can open on a
+        // different monitor than this window, or behind it. Both
+        // ceremonies -- first-run setup and the returning-user unlock --
+        // render through this view, so the hint is added once here and
+        // shows for both. Kept to one concise line.
+        var pMonitorHint = document.createElement('p');
+        pMonitorHint.className = 'lock-overlay-fine';
+        pMonitorHint.textContent =
+            'If you don\'t see the Windows Security prompt, check your other ' +
+            'monitors or look behind this window \u2014 it may have opened ' +
+            'somewhere else.';
+        body.appendChild(pMonitorHint);
+
         // UX-1H7 -- first-run passkey explanation. The current
         // broker /webauthn/status response is cached on
         // state.statusCache by the preflight path. When registered

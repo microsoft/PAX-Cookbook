@@ -129,7 +129,8 @@ export function DataCollectionCard({
       </div>
       <div className="mk-byod-field">
         <label className="mk-byod-field__label" htmlFor="mk-data-userinfofile">
-          Bring your own directory <span className="mk-field__optional">optional</span>
+          Bring your own directory (BYOD){' '}
+          <span className="mk-field__optional">optional</span>
         </label>
         <p className="mk-field__hint" id="mk-data-userinfofile-hint">
           Supply the user and organization directory from a CSV file instead of
@@ -152,20 +153,63 @@ export function DataCollectionCard({
             onChange({ ...value, userInfoFile: v.trim().length > 0 ? v : undefined });
           }}
         />
+        <p className="mk-field__note">
+          The builder does not read or validate the file; PAX reads it when the
+          recipe runs.
+        </p>
         <details className="mk-subcollapse">
           <summary className="mk-subcollapse__summary">
-            <span className="mk-subcollapse__title">Directory file columns</span>
+            <span className="mk-subcollapse__title">Directory file format &amp; columns</span>
             <span className="mk-field__optional">reference</span>
             <span className="mk-card__chevron" aria-hidden="true" />
           </summary>
           <div className="mk-subcollapse__body">
             <p className="mk-field__hint">
-              Header names are case-insensitive and alias-aware. Only{' '}
-              <code>UserPrincipalName</code> is required. <code>DisplayName</code>,{' '}
-              <code>Department</code>, <code>JobTitle</code>, and <code>ManagerUpn</code>{' '}
-              are recommended for full org-hierarchy fidelity; <code>HasLicense</code>{' '}
-              is optional (leave it blank to resolve each user online). Any extra
-              columns you include are preserved as-is.
+              Provide a CSV with a header row. Headers are matched
+              case-insensitively, and common aliases are recognized automatically
+              (for example <code>UPN</code>, <code>Name</code>,{' '}
+              <code>Organization</code>, <code>Title</code>, <code>ManagerEmail</code>,{' '}
+              <code>HasCopilotLicense</code>).
+            </p>
+            <ul className="mk-byod-schema-list">
+              <li>
+                <code>UserPrincipalName</code> &mdash; required. The user&rsquo;s
+                sign-in name (UPN).
+              </li>
+              <li>
+                <code>DisplayName</code> &mdash; recommended. Full name for reporting.
+              </li>
+              <li>
+                <code>Department</code> &mdash; recommended. Used for grouping and
+                the org hierarchy.
+              </li>
+              <li>
+                <code>JobTitle</code> &mdash; recommended. Shown in reporting.
+              </li>
+              <li>
+                <code>ManagerUpn</code> &mdash; recommended. The manager&rsquo;s
+                UPN; builds the org / manager hierarchy.
+              </li>
+              <li>
+                <code>HasLicense</code> &mdash; optional. Leave blank to resolve the
+                license online for that user, or set it (for example true / false)
+                to skip the online check. If every row sets it, the directory builds
+                fully offline.
+              </li>
+            </ul>
+            <p className="mk-field__hint">
+              Any extra columns you include are preserved exactly as provided.
+            </p>
+            <p className="mk-field__hint">
+              Microsoft docs:{' '}
+              <a
+                href="https://github.com/microsoft/PAX/blob/release/release_documentation/Purview_Audit_Log_Processor/PAX_Purview_Audit_Log_Processor_Documentation_v1.11.x.md#bring-your-own-directory-byod"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Bring your own directory (BYOD) file schema
+              </a>
+              .
             </p>
           </div>
         </details>

@@ -40,7 +40,7 @@ const PRESET_CATEGORIES: ReadonlyArray<{
   {
     id: 'exports',
     title: 'Specialized Exports',
-    presetIds: ['userInfoOnly', 'customAuditExport'],
+    presetIds: ['userInfoOnly', 'agent365CatalogOnly', 'customAuditExport'],
   },
   {
     id: 'import',
