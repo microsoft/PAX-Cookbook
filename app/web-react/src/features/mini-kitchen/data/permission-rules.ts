@@ -122,6 +122,52 @@ export const PERMISSION_RULES: readonly PermissionRule[] = [
     severity: 'required',
   },
 
+  // ---- Microsoft Agent 365 catalog ----------------------------------------
+  {
+    id: 'agent365CatalogRead',
+    name: 'CopilotPackages.Read.All',
+    group: 'graph',
+    appliesTo: 'tenant-admin-consent',
+    appliesToLabel: 'Microsoft Agent 365 catalog',
+    requiredBecause:
+      'PAX reads the Microsoft Agent 365 catalog through the Graph Copilot packages API. This scope is required for both interactive sign-in and app-registration / managed-identity runs.',
+    triggeredBy: ['query.includeAgent365Info', 'query.onlyAgent365Info'],
+    severity: 'required',
+  },
+  {
+    id: 'agent365ApplicationRead',
+    name: 'Application.Read.All',
+    group: 'graph',
+    appliesTo: 'tenant-admin-consent',
+    appliesToLabel: 'Microsoft Agent 365 catalog (app-registration / managed identity)',
+    requiredBecause:
+      'When the Agent 365 catalog is exported under an app-registration or managed-identity sign-in, the app or managed-identity service principal needs the Application.Read.All application permission (admin-consented) alongside CopilotPackages.Read.All.',
+    triggeredBy: ['query.includeAgent365Info', 'query.onlyAgent365Info', 'auth.mode'],
+    severity: 'required',
+  },
+  {
+    id: 'agent365AdminRole',
+    name: 'AI Administrator or Global Administrator role',
+    group: 'environment',
+    appliesTo: 'environment-setting',
+    appliesToLabel: 'Microsoft Agent 365 catalog (interactive sign-in)',
+    requiredBecause:
+      'Under an interactive sign-in (Web login or device code), the signed-in account must hold the AI Administrator or Global Administrator directory role to read the Microsoft Agent 365 catalog. App-registration and managed-identity runs use the Application.Read.All application permission instead.',
+    triggeredBy: ['query.includeAgent365Info', 'query.onlyAgent365Info', 'auth.mode'],
+    severity: 'required',
+  },
+  {
+    id: 'agent365License',
+    name: 'Microsoft Agent 365 license / enrollment',
+    group: 'environment',
+    appliesTo: 'environment-setting',
+    appliesToLabel: 'Microsoft Agent 365 catalog',
+    requiredBecause:
+      'The tenant must be enrolled in and licensed for Microsoft Agent 365 for the catalog to return data. Without it, PAX skips the Agent 365 step and continues with the rest of the run.',
+    triggeredBy: ['query.includeAgent365Info', 'query.onlyAgent365Info'],
+    severity: 'required',
+  },
+
   // ---- Runtime / environment ---------------------------------------------
   {
     id: 'pythonRuntimeRollup',

@@ -60,7 +60,7 @@ namespace PAXCookbook.Tests;
 public class NativeBrokerHostStage3gTests
 {
     private const string PaxScriptBaselineHash =
-        "007AD1A7F6D40B40E873C684D10B2A79B4D1DD03A1900ADE19B6E482CC10C728";
+        "44F5461213510A772650F8933515E1E7FD782BB34764BD395C6D741CF8EC2685";
 
     // A valid Crockford-base32 ULID (uppercase, no I L O U). 26 chars.
     private const string SampleRecipeId     = "01HQRC7N5VRSXG8K9MZTABCDEF";

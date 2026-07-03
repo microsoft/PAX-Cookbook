@@ -186,6 +186,10 @@ internal static class PaxAdapter
             queryMode = JsonModel.Str(query["mode"]);
         }
         bool isUserInfoOnly = CiEq(queryMode, "userInfoOnly");
+        bool isAgent365Only = CiEq(queryMode, "agent365Only");
+        // Agent-365-only and user-info-only both skip the audit query and its
+        // dates, filters, and fact output.
+        bool skipAuditShape = isUserInfoOnly || isAgent365Only;
 
         // Pre-read destinations.userInfo.
         Dictionary<string, object?>? dest = GetChild(recipe, "destinations");
@@ -232,11 +236,26 @@ internal static class PaxAdapter
 
         Dictionary<string, object?>? entraUserData = ingredients is null ? null : GetChild(ingredients, "entraUserData");
         bool includeUserInfo = entraUserData is not null && entraUserData.ContainsKey("includeUserInfo") && JsonModel.Bool(entraUserData["includeUserInfo"]);
+        // Bring-your-own-directory (-UserInfoFile). When present it supplies the
+        // directory from a file and SUPPRESSES -IncludeUserInfo (PAX derives user
+        // info from the file). Audit-shape only; the normalizer strips it elsewhere.
+        string userInfoFile = entraUserData is not null && entraUserData.ContainsKey("userInfoFile")
+            ? JsonModel.Str(entraUserData["userInfoFile"]) : string.Empty;
+        // Microsoft Agent 365 catalog toggle (alongside an audit run).
+        Dictionary<string, object?>? agent365Ing = ingredients is null ? null : GetChild(ingredients, "agent365");
+        bool includeAgent365Info = agent365Ing is not null && agent365Ing.ContainsKey("includeAgent365Info") && JsonModel.Bool(agent365Ing["includeAgent365Info"]);
 
         if (isUserInfoOnly)
         {
             tokens.Add("-OnlyUserInfo");
             tokens.Add("-IncludeUserInfo");
+        }
+        else if (isAgent365Only)
+        {
+            // Agent-365-only: export just the Microsoft Agent 365 catalog. The
+            // audit query, user info, rollup, and audit output switches are all
+            // skipped. -Deidentify (engine-wide) is still emitted below.
+            tokens.Add("-OnlyAgent365Info");
         }
         else
         {
@@ -264,7 +283,19 @@ internal static class PaxAdapter
                     tokens.Add(fillerLabelText);
                 }
             }
-            if (includeUserInfo || projectingUserInfoDest) { tokens.Add("-IncludeUserInfo"); }
+            // Bring-your-own-directory suppresses -IncludeUserInfo: -UserInfoFile
+            // supplies the directory from a file and already implies user info.
+            if (userInfoFile.Length > 0)
+            {
+                tokens.Add("-UserInfoFile");
+                tokens.Add(userInfoFile);
+            }
+            else if (includeUserInfo || projectingUserInfoDest)
+            {
+                tokens.Add("-IncludeUserInfo");
+            }
+            // Microsoft Agent 365 catalog alongside the audit run.
+            if (includeAgent365Info) { tokens.Add("-IncludeAgent365Info"); }
         }
 
         // -Deidentify anonymizes the raw audit + EntraUsers output and threads
@@ -279,7 +310,7 @@ internal static class PaxAdapter
             if (query.ContainsKey("startDate")) { startDate = JsonModel.Str(query["startDate"]); }
             if (query.ContainsKey("endDate")) { endDate = JsonModel.Str(query["endDate"]); }
         }
-        if (!isUserInfoOnly)
+        if (!skipAuditShape)
         {
             if (startDate.Length > 0) { tokens.Add("-StartDate"); tokens.Add(startDate); }
             if (endDate.Length > 0) { tokens.Add("-EndDate"); tokens.Add(endDate); }
@@ -348,7 +379,7 @@ internal static class PaxAdapter
         }
 
         // Filter / agent / prompt switches (audit only).
-        if (!isUserInfoOnly && query is not null)
+        if (!skipAuditShape && query is not null)
         {
             AddArrayValues(tokens, query, "activityTypes", "-ActivityTypes");
             AddArrayValues(tokens, query, "userIds", "-UserIds");
@@ -385,7 +416,7 @@ internal static class PaxAdapter
         }
 
         // Fact destination (audit only, unified mode).
-        if (!isUserInfoOnly)
+        if (!skipAuditShape)
         {
             string factMode = string.Empty, factAppendBeh = string.Empty, factAppendFile = string.Empty;
             if (factHash is not null)
@@ -420,6 +451,26 @@ internal static class PaxAdapter
         else if (CiEq(uiMode, "append"))
         {
             if (uiAppendFile.Length > 0) { tokens.Add("-AppendUserInfo"); tokens.Add(uiAppendFile); }
+        }
+
+        // Microsoft Agent 365 catalog destination. Emitted whenever the catalog
+        // is produced (agent-365-only via -OnlyAgent365Info, or alongside an audit
+        // run via -IncludeAgent365Info). outputPath -> -OutputPathAgent365Info
+        // (write-new / co-locate); append -> -AppendAgent365Info.
+        Dictionary<string, object?>? a365Hash = dest is null ? null : GetChild(dest, "agent365");
+        if (a365Hash is not null && (isAgent365Only || includeAgent365Info))
+        {
+            string aMode = a365Hash.ContainsKey("mode") ? JsonModel.Str(a365Hash["mode"]) : string.Empty;
+            string aPath = a365Hash.ContainsKey("path") ? JsonModel.Str(a365Hash["path"]) : string.Empty;
+            string aAppendFile = a365Hash.ContainsKey("appendFile") ? JsonModel.Str(a365Hash["appendFile"]) : string.Empty;
+            if (CiEq(aMode, "outputPath"))
+            {
+                if (aPath.Length > 0) { tokens.Add("-OutputPathAgent365Info"); tokens.Add(aPath); }
+            }
+            else if (CiEq(aMode, "append"))
+            {
+                if (aAppendFile.Length > 0) { tokens.Add("-AppendAgent365Info"); tokens.Add(aAppendFile); }
+            }
         }
 
         // -ExcludeCopilotInteraction (audit + includeM365 only).

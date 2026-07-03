@@ -240,12 +240,32 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
         applied.push(mk('IncludeUserInfo', 'Include user info (Step 3)', 'On'));
         break;
       }
+      case 'UserInfoFile': {
+        const v = unquote(rawValue);
+        state.query.userInfoFile = v;
+        state.query.includeUserInfo = true;
+        noteTier(notes, detectTier(v));
+        applied.push(mk('UserInfoFile', 'Bring your own directory (Step 3)', `Directory file -> ${v}`));
+        break;
+      }
       case 'OnlyUserInfo': {
         state.query.mode = 'user-info-only';
         state.query.includeUserInfo = true;
         state.query.onlyUserInfo = true;
         state.ingredients = { preset: 'userInfoOnly' };
         applied.push(mk('OnlyUserInfo', 'Data scope (Step 3)', 'User info only'));
+        break;
+      }
+      case 'IncludeAgent365Info': {
+        state.query.includeAgent365Info = true;
+        applied.push(mk('IncludeAgent365Info', 'Microsoft Agent 365 (Step 3)', 'On'));
+        break;
+      }
+      case 'OnlyAgent365Info': {
+        state.query.mode = 'agent365-only';
+        state.query.onlyAgent365Info = true;
+        state.ingredients = { preset: 'agent365CatalogOnly' };
+        applied.push(mk('OnlyAgent365Info', 'Data scope (Step 3)', 'Microsoft Agent 365 only'));
         break;
       }
       case 'ActivityTypes': {
@@ -334,6 +354,22 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
         const v = unquote(rawValue);
         state.destinations.userInfo = { mode: 'append', path: v };
         applied.push(mk('AppendUserInfo', 'User-info output (Step 4)', `Append -> ${v}`));
+        break;
+      }
+      case 'OutputPathAgent365Info': {
+        const v = unquote(rawValue);
+        const tier = detectTier(v);
+        state.destinations.agent365 = { mode: 'write-new', path: v };
+        noteTier(notes, tier);
+        applied.push(mk('OutputPathAgent365Info', 'Agent 365 output (Step 4)', `Write new -> ${v}`));
+        break;
+      }
+      case 'AppendAgent365Info': {
+        const v = unquote(rawValue);
+        const tier = detectTier(v);
+        state.destinations.agent365 = { mode: 'append', path: v };
+        noteTier(notes, tier);
+        applied.push(mk('AppendAgent365Info', 'Agent 365 output (Step 4)', `Append -> ${v}`));
         break;
       }
       case 'Auth': {

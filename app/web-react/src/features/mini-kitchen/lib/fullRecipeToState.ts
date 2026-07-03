@@ -130,19 +130,39 @@ export function fullRecipeToState(recipe: unknown): FullRecipeOpenResult {
 
   // ---- Query mode + ingredients flags ----
   const fullQuery = isObject(recipe.query) ? recipe.query : {};
+  const fullMode = asString(fullQuery.mode);
   const queryMode: QueryMode =
-    asString(fullQuery.mode) === 'userInfoOnly' ? 'user-info-only' : 'audit-query';
+    fullMode === 'userInfoOnly'
+      ? 'user-info-only'
+      : fullMode === 'agent365Only'
+        ? 'agent365-only'
+        : 'audit-query';
   state.query.mode = queryMode;
 
   const ingredients = isObject(recipe.ingredients) ? recipe.ingredients : {};
   const m365Usage = isObject(ingredients.m365Usage) ? ingredients.m365Usage : {};
   const entraUserData = isObject(ingredients.entraUserData) ? ingredients.entraUserData : {};
+  const agent365 = isObject(ingredients.agent365) ? ingredients.agent365 : {};
 
   state.query.includeM365Usage = asBool(m365Usage.includeM365Usage) === true;
   state.query.includeUserInfo = asBool(entraUserData.includeUserInfo) === true;
   // includeCopilotInteraction === false is how the full schema encodes the
   // lite "exclude Copilot interaction" flag (only expressible with M365 on).
   state.query.excludeCopilotInteraction = asBool(m365Usage.includeCopilotInteraction) === false;
+
+  // Bring-your-own-directory (-UserInfoFile): the user/org directory came from a
+  // file. Restore it so the builder reopens with the BYOD field populated.
+  const userInfoFile = asString(entraUserData.userInfoFile);
+  if (userInfoFile) {
+    state.query.userInfoFile = userInfoFile;
+  }
+  // Microsoft Agent 365 catalog toggles.
+  if (asBool(agent365.includeAgent365Info) === true) {
+    state.query.includeAgent365Info = true;
+  }
+  if (queryMode === 'agent365-only' || asBool(agent365.onlyAgent365Info) === true) {
+    state.query.onlyAgent365Info = true;
+  }
 
   // ---- Audit query fields ----
   const startDate = asString(fullQuery.startDate);
@@ -239,6 +259,17 @@ export function fullRecipeToState(recipe: unknown): FullRecipeOpenResult {
     state.destinations.userInfo = {
       mode: uiMode,
       ...(ui.path ? { path: ui.path } : {}),
+    };
+  }
+
+  // Microsoft Agent 365 catalog destination.
+  const agent365Raw = destinations.agent365;
+  if (isObject(agent365Raw)) {
+    const a = inverseDestination(agent365Raw);
+    const aMode: UserInfoOutputMode = a.mode === 'append' ? 'append' : 'write-new';
+    state.destinations.agent365 = {
+      mode: aMode,
+      ...(a.path ? { path: a.path } : {}),
     };
   }
 

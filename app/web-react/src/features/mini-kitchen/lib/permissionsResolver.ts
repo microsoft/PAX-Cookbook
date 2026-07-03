@@ -63,6 +63,8 @@ interface ResolverContext {
   hasGroupNames: boolean;
   /** True when rollup is active (rollup or rollup-plus-raw). */
   hasRollup: boolean;
+  /** True when the Microsoft Agent 365 catalog is exported (include or only). */
+  hasAgent365: boolean;
 }
 
 type RulePredicate = (ctx: ResolverContext) => RulePredicateOutcome;
@@ -85,10 +87,13 @@ export function resolvePermissions(state: MiniKitchenRecipeState): PermissionsRe
   const userInfoTier = normalized.destinations.userInfo.path
     ? guessUserInfoTier(normalized.destinations.userInfo.path)
     : undefined;
+  const agent365Tier = normalized.destinations.agent365.path
+    ? guessUserInfoTier(normalized.destinations.agent365.path)
+    : undefined;
 
-  const hasLocalOutput = factTier === 'local' || userInfoTier === 'local';
-  const hasSharePointOutput = factTier === 'sharepoint' || userInfoTier === 'sharepoint';
-  const hasFabricOutput = factTier === 'fabric' || userInfoTier === 'fabric';
+  const hasLocalOutput = factTier === 'local' || userInfoTier === 'local' || agent365Tier === 'local';
+  const hasSharePointOutput = factTier === 'sharepoint' || userInfoTier === 'sharepoint' || agent365Tier === 'sharepoint';
+  const hasFabricOutput = factTier === 'fabric' || userInfoTier === 'fabric' || agent365Tier === 'fabric';
 
   const triggersUserInfo =
     normalized.query.includeUserInfo === true ||
@@ -103,6 +108,11 @@ export function resolvePermissions(state: MiniKitchenRecipeState): PermissionsRe
     normalized.processing.rollup === 'rollup' ||
     normalized.processing.rollup === 'rollup-plus-raw';
 
+  const hasAgent365 =
+    normalized.query.mode === 'agent365-only' ||
+    normalized.query.includeAgent365Info === true ||
+    normalized.query.onlyAgent365Info === true;
+
   const ctx: ResolverContext = {
     state: normalized,
     advanced,
@@ -112,6 +122,7 @@ export function resolvePermissions(state: MiniKitchenRecipeState): PermissionsRe
     triggersUserInfo,
     hasGroupNames,
     hasRollup,
+    hasAgent365,
   };
 
   const requiredById = new Map<string, PermissionEntry>();
@@ -149,6 +160,27 @@ export function resolvePermissions(state: MiniKitchenRecipeState): PermissionsRe
 // -----------------------------------------------------------------------------
 // Predicates
 // -----------------------------------------------------------------------------
+
+/** True for the app-only auth modes (no interactive sign-in). */
+function isAppOnlyAuth(mode: MiniKitchenRecipeState['auth']['mode']): boolean {
+  return (
+    mode === 'AppRegistrationSecret' ||
+    mode === 'AppRegistrationCertificate' ||
+    mode === 'ManagedIdentity'
+  );
+}
+
+/** Field paths that influence the Microsoft Agent 365 permission rules. */
+function agent365Triggers(ctx: ResolverContext): readonly string[] {
+  const triggers: string[] = [];
+  if (ctx.state.query.mode === 'agent365-only' || ctx.state.query.onlyAgent365Info === true) {
+    triggers.push('query.onlyAgent365Info');
+  }
+  if (ctx.state.query.includeAgent365Info === true) {
+    triggers.push('query.includeAgent365Info');
+  }
+  return triggers.length > 0 ? triggers : ['query.includeAgent365Info'];
+}
 
 const RULE_PREDICATES: Record<string, RulePredicate> = {
   // Audit query
@@ -216,6 +248,40 @@ const RULE_PREDICATES: Record<string, RulePredicate> = {
       return null;
     }
     return { kind: 'required', triggeredBy: ['processing.groupNames'] };
+  },
+
+  // Microsoft Agent 365 catalog. CopilotPackages.Read.All + a license are
+  // always required; then EXACTLY ONE of Application.Read.All (app-only auth)
+  // or the AI/Global Administrator role (interactive auth) fires.
+  agent365CatalogRead: (ctx) => {
+    if (!ctx.hasAgent365) {
+      return null;
+    }
+    return { kind: 'required', triggeredBy: agent365Triggers(ctx) };
+  },
+  agent365ApplicationRead: (ctx) => {
+    if (!ctx.hasAgent365) {
+      return null;
+    }
+    if (!isAppOnlyAuth(ctx.state.auth.mode)) {
+      return null;
+    }
+    return { kind: 'required', triggeredBy: [...agent365Triggers(ctx), 'auth.mode'] };
+  },
+  agent365AdminRole: (ctx) => {
+    if (!ctx.hasAgent365) {
+      return null;
+    }
+    if (isAppOnlyAuth(ctx.state.auth.mode)) {
+      return null;
+    }
+    return { kind: 'required', triggeredBy: [...agent365Triggers(ctx), 'auth.mode'] };
+  },
+  agent365License: (ctx) => {
+    if (!ctx.hasAgent365) {
+      return null;
+    }
+    return { kind: 'required', triggeredBy: agent365Triggers(ctx) };
   },
 
   // Runtime / environment

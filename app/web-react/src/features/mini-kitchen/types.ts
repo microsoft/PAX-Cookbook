@@ -21,11 +21,12 @@ export type PresetId =
   | 'm365UsageAnalyticsDashboard'
   | 'customAuditExport'
   | 'userInfoOnly'
+  | 'agent365CatalogOnly'
   | 'importLiteRecipeJson'
   | 'importPaxRecipeJson';
 
 /** Top-level query mode. Drives which fields are active in the recipe. */
-export type QueryMode = 'audit-query' | 'user-info-only';
+export type QueryMode = 'audit-query' | 'user-info-only' | 'agent365-only';
 
 /**
  * Audit date-range mode.
@@ -124,6 +125,25 @@ export interface LiteRecipeQuery {
   excludeCopilotInteraction?: boolean;
   includeUserInfo?: boolean;
   onlyUserInfo?: boolean;
+  /**
+   * Also export the Microsoft Agent 365 catalog alongside a normal audit run.
+   * Maps to `-IncludeAgent365Info`. Ignored in the Agent-365-only and
+   * user-info-only modes.
+   */
+  includeAgent365Info?: boolean;
+  /**
+   * Microsoft Agent 365 catalog only — the audit query is skipped. Maps to
+   * `-OnlyAgent365Info` and backs the `'agent365-only'` query mode.
+   */
+  onlyAgent365Info?: boolean;
+  /**
+   * Bring-your-own-directory (BYOD): supply the user / organization directory
+   * from a CSV file instead of pulling it live from Microsoft Entra. Maps to
+   * `-UserInfoFile <path>`. Providing it implies user info, and it cannot be
+   * combined with group filtering (`-GroupNames`). The path may be local,
+   * SharePoint, or Fabric / OneLake.
+   */
+  userInfoFile?: string;
 }
 
 export interface LiteRecipeAgentFilter {
@@ -171,9 +191,21 @@ export interface LiteRecipeUserInfoDestination {
   path?: string;
 }
 
+/**
+ * Microsoft Agent 365 catalog destination. Reuses the same three modes as the
+ * user-info stream: `default-colocate` writes beside the audit output,
+ * `write-new` maps to `-OutputPathAgent365Info`, `append` maps to
+ * `-AppendAgent365Info`.
+ */
+export interface LiteRecipeAgent365Destination {
+  mode: UserInfoOutputMode;
+  path?: string;
+}
+
 export interface LiteRecipeDestinations {
   fact: LiteRecipeFactDestination;
   userInfo: LiteRecipeUserInfoDestination;
+  agent365: LiteRecipeAgent365Destination;
 }
 
 /**
@@ -414,6 +446,9 @@ export interface PresetOverrides {
   outputMode?: OutputMode;
   storageTier?: StorageTier;
   userInfoOutputMode?: UserInfoOutputMode;
+  includeAgent365Info?: boolean;
+  onlyAgent365Info?: boolean;
+  agent365OutputMode?: UserInfoOutputMode;
 }
 
 export interface DashboardPresetDefinition {

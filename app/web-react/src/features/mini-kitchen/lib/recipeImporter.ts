@@ -53,10 +53,11 @@ const PRESET_IDS: ReadonlySet<PresetId> = new Set([
   'm365UsageAnalyticsDashboard',
   'customAuditExport',
   'userInfoOnly',
+  'agent365CatalogOnly',
   'importLiteRecipeJson',
   'importPaxRecipeJson',
 ]);
-const QUERY_MODES: ReadonlySet<QueryMode> = new Set(['audit-query', 'user-info-only']);
+const QUERY_MODES: ReadonlySet<QueryMode> = new Set(['audit-query', 'user-info-only', 'agent365-only']);
 const DATE_RANGE_MODES: ReadonlySet<DateRangeMode> = new Set(['previous-day', 'custom']);
 const ROLLUP_MODES: ReadonlySet<RollupMode> = new Set(['none', 'rollup', 'rollup-plus-raw']);
 const DASHBOARD_TARGETS: ReadonlySet<DashboardTarget> = new Set(['aio', 'aibv']);
@@ -230,7 +231,7 @@ function rebuildLiteRecipe(
       targetPaxVersion:
         typeof compatibility.targetPaxVersion === 'string'
           ? compatibility.targetPaxVersion
-          : '1.11.9',
+          : '1.11.12',
       switchCatalogVersion:
         typeof compatibility.switchCatalogVersion === 'string'
           ? compatibility.switchCatalogVersion
@@ -311,6 +312,7 @@ function liteRecipeBlockToState(
   const queryMode = readEnum<QueryMode>(query.mode, QUERY_MODES, fallback.query.mode);
   const factDestRaw = isObject(destinations.fact) ? destinations.fact : {};
   const userInfoDestRaw = isObject(destinations.userInfo) ? destinations.userInfo : {};
+  const agent365DestRaw = isObject(destinations.agent365) ? destinations.agent365 : {};
   const agentFilterRaw = isObject(processing.agentFilter) ? processing.agentFilter : undefined;
 
   const state: MiniKitchenRecipeState = {
@@ -330,6 +332,9 @@ function liteRecipeBlockToState(
       excludeCopilotInteraction: readBoolean(query.excludeCopilotInteraction),
       includeUserInfo: readBoolean(query.includeUserInfo),
       onlyUserInfo: readBoolean(query.onlyUserInfo),
+      includeAgent365Info: readBoolean(query.includeAgent365Info),
+      onlyAgent365Info: readBoolean(query.onlyAgent365Info),
+      userInfoFile: readString(query.userInfoFile),
     },
     processing: {
       activityTypes: readStringList(processing.activityTypes),
@@ -369,6 +374,14 @@ function liteRecipeBlockToState(
           fallback.destinations.userInfo.mode,
         ),
         path: readString(userInfoDestRaw.path),
+      },
+      agent365: {
+        mode: readEnum<UserInfoOutputMode>(
+          agent365DestRaw.mode,
+          USER_INFO_OUTPUT_MODES,
+          fallback.destinations.agent365.mode,
+        ),
+        path: readString(agent365DestRaw.path),
       },
     },
     auth: {

@@ -10,7 +10,7 @@
 
 # PAX Cookbook — User Guide
 
-<p align="center"><strong>PAX Cookbook v1.1.0</strong> · Last updated: June 23, 2026</p>
+<p align="center"><strong>PAX Cookbook v1.3.0</strong> · Last updated: July 3, 2026</p>
 
 Welcome to **PAX Cookbook**. This guide explains everything you need to collect Microsoft 365 Copilot adoption and usage data and turn it into reports — even if you have never written a line of code.
 
@@ -371,6 +371,13 @@ This step controls **which days** of data to collect.
 
 If you have advanced needs, you can add or remove specific operations to fine-tune exactly what gets collected.
 
+This step is also where you choose the **scope** of the pull and a few related data sources:
+
+- **Scope** — pick what the run collects: **Audit activity** (the default), **User info only** (just the Entra user and organization directory, with no audit query), or **Microsoft Agent 365 only** (just the Microsoft Agent 365 catalog). Choosing a user-info-only or Agent 365 only scope hides the date range, audit operations, and filters, because no audit query runs.
+- **Include Entra user info** — adds the user and organization directory (names, departments, managers) alongside the audit data, so reports can group and roll up by person and org hierarchy.
+- **Include Microsoft Agent 365 catalog** — adds the Microsoft Agent 365 catalog alongside an audit run. (To collect *only* the catalog, choose the **Microsoft Agent 365 only** scope above.)
+- **Bring your own directory** — instead of pulling the user and organization directory live from Microsoft Entra, you can supply it from a CSV file (a local path, a SharePoint document, or a Microsoft Fabric / OneLake file). Providing it counts as your user info, so you don't also need the Include Entra user info toggle, and it can't be combined with group filtering. Only a `UserPrincipalName` column is required; `DisplayName`, `Department`, `JobTitle`, and `ManagerUpn` are recommended for full org-hierarchy fidelity.
+
 > 📸 **Screenshot:** Step 4 Audit Operations showing the preset's default selections.
 
 #### 4.2.5 Step 5: Output
@@ -386,6 +393,7 @@ Two related choices also live on this step:
 - **Rollup mode and dashboard target** — most presets produce dashboard-ready summary files (a *rollup*) shaped for a specific **dashboard target**, such as AI-in-One. The dashboard target is chosen together with the rollup option here, and you'll see it again later on the bake detail view.
 - **Hierarchy filler** — when a rollup is on, you can choose what fills empty levels of the org / manager hierarchy: leave them **blank** (the default), **repeat the person**, **repeat their manager**, or stamp a **custom label** you type. It applies only to rollup output and not to the M365 usage bundle.
 - **De-identify output** — an optional privacy toggle (off by default) that anonymizes people in both the audit output and the Entra user-info output, and in the rollup built from them. It is one-way: the original identities can't be recovered from the de-identified files. If you append to an existing file, only append to one that is already de-identified.
+- **Microsoft Agent 365 catalog output** — when the recipe collects the Agent 365 catalog (either the *Microsoft Agent 365 only* scope or the *Include Microsoft Agent 365 catalog* toggle from Step 4), choose where the catalog lands: **co-located** next to the audit output (the default; not available for an Agent 365 only run), a **separate file** you name, or **appended** to an existing catalog file.
 - **Combined or separate files** — when a recipe collects **two or more** activity types, you can choose whether they're written to one combined file or kept as separate files. With only a single activity type this option doesn't appear, because there's nothing to combine.
 
 > 📸 **Screenshot:** Step 5 Output with a local folder selected.

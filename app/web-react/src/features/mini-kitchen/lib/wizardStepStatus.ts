@@ -18,8 +18,11 @@ export interface WizardStepStatusInputs {
   stepsNeedingAttention: ReadonlySet<number>;
   /** The recipe name as typed (trimmed internally). */
   recipeName: string;
-  /** True for a user-info-only pull, where the audit date range is not used. */
-  isUserInfoOnly: boolean;
+  /**
+   * True when the run skips the audit query (user-info-only OR agent-365-only),
+   * so the audit date range is not used and the Date Range step reads 'valid'.
+   */
+  skipAuditShape: boolean;
   /**
    * Audit date-range mode. `'previous-day'` deliberately omits both dates and is
    * a complete, valid configuration; `undefined`/`'custom'` use the date inputs.
@@ -58,7 +61,7 @@ export function computeWizardStepStatus(
   const {
     stepsNeedingAttention,
     recipeName,
-    isUserInfoOnly,
+    skipAuditShape,
     dateMode,
     startDate,
     endDate,
@@ -79,7 +82,7 @@ export function computeWizardStepStatus(
     case 2: // Authentication — a sign-in method is always chosen.
       return 'valid';
     case 3: // Date Range.
-      if (isUserInfoOnly) {
+      if (skipAuditShape) {
         return 'valid';
       }
       // Previous-day mode deliberately omits both dates and is a complete,

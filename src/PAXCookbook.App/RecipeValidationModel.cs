@@ -116,7 +116,24 @@ internal static class RecipeValidationModel
                     ("entraUserData", new SchemaNode
                     {
                         Type = "object", AdditionalPropertiesFalse = true, Required = new[] { "includeUserInfo" },
-                        Properties = P(("includeUserInfo", new SchemaNode { Type = "boolean" }))
+                        Properties = P(
+                            ("includeUserInfo", new SchemaNode { Type = "boolean" }),
+                            // Bring-your-own-directory (v1.11.11 -UserInfoFile): the user/org
+                            // directory is supplied from a CSV instead of a live Entra pull.
+                            // Optional; when present includeUserInfo is true (BYOD implies user info).
+                            ("userInfoFile", new SchemaNode { Type = "string", MinLength = 1 }))
+                    }),
+                    // Microsoft Agent 365 catalog toggles (v1.11.10 re-enable). Optional
+                    // section; when the catalog is exported alongside an audit run
+                    // (includeAgent365Info) or as the only output (onlyAgent365Info, which
+                    // backs query.mode='agent365Only'). Same access requirements are surfaced
+                    // in the permissions report; no secret ever lives here.
+                    ("agent365", new SchemaNode
+                    {
+                        Type = "object", AdditionalPropertiesFalse = true,
+                        Properties = P(
+                            ("includeAgent365Info", new SchemaNode { Type = "boolean" }),
+                            ("onlyAgent365Info", new SchemaNode { Type = "boolean" }))
                     }))
             }),
             ("query", new SchemaNode
@@ -130,7 +147,7 @@ internal static class RecipeValidationModel
                     // day; QueryShapeGate recognizes it (and the both-absent shape)
                     // and skips the date-required rule. 'custom'/absent require both.
                     ("dateMode", new SchemaNode { Type = "string", Enum = new[] { "previous-day", "custom" } }),
-                    ("mode", new SchemaNode { Type = "string", Enum = new[] { "audit", "userInfoOnly" } }),
+                    ("mode", new SchemaNode { Type = "string", Enum = new[] { "audit", "userInfoOnly", "agent365Only" } }),
                     ("activityTypes", new SchemaNode { Type = "array", MinItems = 1, Items = new SchemaNode { Type = "string", MinLength = 1 } }),
                     ("userIds", new SchemaNode { Type = "array", MinItems = 1, Items = new SchemaNode { Type = "string", MinLength = 1 } }),
                     ("groupNames", new SchemaNode { Type = "array", MinItems = 1, Items = new SchemaNode { Type = "string", MinLength = 1 } }),
@@ -148,7 +165,14 @@ internal static class RecipeValidationModel
                 Type = "object", AdditionalPropertiesFalse = true,
                 Properties = P(
                     ("rollup", new SchemaNode { Type = "string", Enum = new[] { "Rollup", "RollupPlusRaw" } }),
-                    ("dashboard", new SchemaNode { Type = "string", Enum = new[] { "aio", "aibv" } }))
+                    ("dashboard", new SchemaNode { Type = "string", Enum = new[] { "aio", "aibv" } }),
+                    // De-identify (PAX -Deidentify): one-way anonymization; engine-wide, valid
+                    // in every run shape. Filler label (PAX -FillerLabel / -FillerLabelText):
+                    // rollup-only org/manager hierarchy filler. Added so de-identify / filler
+                    // recipes save without a 400 (the live adapter already emits them).
+                    ("deidentify", new SchemaNode { Type = "boolean" }),
+                    ("fillerLabel", new SchemaNode { Type = "string", Enum = new[] { "Self", "RepeatManager", "Fixed" } }),
+                    ("fillerLabelText", new SchemaNode { Type = "string" }))
             }),
             ("destinations", new SchemaNode
             {
@@ -166,6 +190,18 @@ internal static class RecipeValidationModel
                     ("userInfo", new SchemaNode
                     {
                         Type = "object", AdditionalPropertiesFalse = true, Required = new[] { "mode" },
+                        Properties = P(
+                            ("mode", new SchemaNode { Type = "string", Enum = new[] { "outputPath", "append" } }),
+                            ("path", new SchemaNode { Type = "string", MinLength = 1 }),
+                            ("appendFile", new SchemaNode { Type = "string", MinLength = 1 }))
+                    }),
+                    // Microsoft Agent 365 catalog destination. Reuses the userInfo output
+                    // shape (outputPath -> -OutputPathAgent365Info, append -> -AppendAgent365Info).
+                    // mode is optional so a co-located catalog (path derived from the fact dir)
+                    // still validates. Present only when the catalog is exported.
+                    ("agent365", new SchemaNode
+                    {
+                        Type = "object", AdditionalPropertiesFalse = true,
                         Properties = P(
                             ("mode", new SchemaNode { Type = "string", Enum = new[] { "outputPath", "append" } }),
                             ("path", new SchemaNode { Type = "string", MinLength = 1 }),

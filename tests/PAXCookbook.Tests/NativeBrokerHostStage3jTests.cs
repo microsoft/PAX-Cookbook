@@ -43,7 +43,7 @@ public class NativeBrokerHostStage3jTests
     // PAX baseline tripwire. Stage 3j is a BROKER-side change; the
     // PAX script does not move.
     private const string PaxScriptBaselineHash =
-        "007AD1A7F6D40B40E873C684D10B2A79B4D1DD03A1900ADE19B6E482CC10C728";
+        "44F5461213510A772650F8933515E1E7FD782BB34764BD395C6D741CF8EC2685";
 
     // ============================================================
     //  1-8. Production wiring source scans.

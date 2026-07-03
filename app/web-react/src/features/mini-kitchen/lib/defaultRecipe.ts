@@ -31,6 +31,7 @@ export function createDefaultMiniKitchenRecipe(): MiniKitchenRecipeState {
     destinations: {
       fact: { mode: 'write-new', tier: 'local' },
       userInfo: { mode: 'default-colocate' },
+      agent365: { mode: 'default-colocate' },
     },
     auth: { mode: 'WebLogin' },
     executionMode: 'local-manual',
@@ -158,6 +159,7 @@ const DETECTABLE_PRESET_IDS: readonly PresetId[] = [
   'aiBusinessValueDashboard',
   'm365UsageAnalyticsDashboard',
   'userInfoOnly',
+  'agent365CatalogOnly',
   'customAuditExport',
 ];
 
@@ -200,6 +202,7 @@ function applyOverrides(
     destinations: {
       fact: { ...state.destinations.fact },
       userInfo: { ...state.destinations.userInfo },
+      agent365: { ...state.destinations.agent365 },
     },
     auth: { ...state.auth },
     executionMode: state.executionMode,
@@ -244,6 +247,15 @@ function applyOverrides(
   }
   if (overrides.userInfoOutputMode !== undefined) {
     next.destinations.userInfo.mode = overrides.userInfoOutputMode;
+  }
+  if (overrides.includeAgent365Info !== undefined) {
+    next.query.includeAgent365Info = overrides.includeAgent365Info;
+  }
+  if (overrides.onlyAgent365Info !== undefined) {
+    next.query.onlyAgent365Info = overrides.onlyAgent365Info;
+  }
+  if (overrides.agent365OutputMode !== undefined) {
+    next.destinations.agent365.mode = overrides.agent365OutputMode;
   }
 
   return next;

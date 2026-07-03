@@ -24,7 +24,7 @@ public class NativeBrokerHostStage3iB1Tests
     // change; the PAX script itself does not move. Asserted in a
     // tripwire fact so any drift in the bundled script is loud.
     private const string PaxScriptBaselineHash =
-        "007AD1A7F6D40B40E873C684D10B2A79B4D1DD03A1900ADE19B6E482CC10C728";
+        "44F5461213510A772650F8933515E1E7FD782BB34764BD395C6D741CF8EC2685";
 
     // Deterministic ULIDs used across the tests. All match the
     // Crockford-base32 pattern `^[0-9A-HJKMNP-TV-Z]{26}$` (no I,L,O,U).

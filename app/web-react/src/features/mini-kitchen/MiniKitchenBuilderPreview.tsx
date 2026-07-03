@@ -132,6 +132,7 @@ const PRESET_LABELS: Record<PresetId, string> = {
   m365UsageAnalyticsDashboard: 'M365 Usage Analytics',
   customAuditExport: 'Custom audit export',
   userInfoOnly: 'User info only',
+  agent365CatalogOnly: 'Agent 365 catalog',
   importLiteRecipeJson: 'Imported lite recipe',
   importPaxRecipeJson: 'Imported full recipe',
 };
@@ -489,6 +490,10 @@ export function MiniKitchenBuilderPreview({
   }, [state]);
 
   const isUserInfoOnly = state.query.mode === 'user-info-only';
+  const isAgent365Only = state.query.mode === 'agent365-only';
+  // Both scopes suppress audit-shaping controls (dates, filters, rollup); the
+  // engine ignores those switches for a user-info-only or agent-365-only pull.
+  const skipAuditShape = isUserInfoOnly || isAgent365Only;
 
   // Translate the in-memory state to a full Cookbook recipe candidate. This is
   // the same pure translator the parity harness covers; wiring it into Save is
@@ -1302,8 +1307,11 @@ export function MiniKitchenBuilderPreview({
         ...prev.query,
         mode: next.mode,
         onlyUserInfo: next.mode === 'user-info-only' ? true : false,
+        onlyAgent365Info: next.mode === 'agent365-only' ? true : undefined,
         includeUserInfo:
-          next.mode === 'user-info-only' ? false : next.includeUserInfo || undefined,
+          next.mode === 'user-info-only' || next.mode === 'agent365-only'
+            ? false
+            : next.includeUserInfo || undefined,
       },
     }));
   }
@@ -1425,6 +1433,12 @@ export function MiniKitchenBuilderPreview({
         Entra: User info only
       </span>
     );
+  } else if (isAgent365Only) {
+    scopeSummary = (
+      <span className="mk-step__chip mk-step__chip--emerald">
+        Microsoft Agent 365 catalog only
+      </span>
+    );
   } else {
     const includeM365 = Boolean(state.query.includeM365Usage);
     const excludeCopilot = Boolean(state.query.excludeCopilotInteraction);
@@ -1531,14 +1545,16 @@ export function MiniKitchenBuilderPreview({
   const reviewBasicsPreset =
     state.ingredients.preset === 'customAuditExport' ? 'Custom (no preset)' : presetLabel;
   const reviewChefKey = state.auth.chefKeyId ? 'Bound' : 'Not bound';
-  const reviewDateRange = isUserInfoOnly
-    ? 'Not used for a user-info-only pull'
+  const reviewDateRange = skipAuditShape
+    ? 'Not used for this scope'
     : state.query.dateMode === 'previous-day'
     ? 'Previous day (previous full UTC day)'
     : timeStart && timeEnd
     ? `${timeStart} \u2192 ${timeEnd}`
     : 'Not set';
-  const reviewOutputPath = isUserInfoOnly
+  const reviewOutputPath = isAgent365Only
+    ? (state.destinations.agent365.path ?? '').trim() || 'Not set'
+    : isUserInfoOnly
     ? (state.destinations.userInfo.path ?? '').trim() || 'Not set'
     : (state.destinations.fact.path ?? '').trim() || 'Not set';
   const reviewScheduleText = serverSchedule
@@ -1568,7 +1584,7 @@ export function MiniKitchenBuilderPreview({
     return computeWizardStepStatus(n, {
       stepsNeedingAttention,
       recipeName: state.identity.name,
-      isUserInfoOnly,
+      skipAuditShape,
       dateMode: state.query.dateMode,
       startDate: timeStart,
       endDate: timeEnd,
@@ -1716,7 +1732,7 @@ export function MiniKitchenBuilderPreview({
               {activeStep === 3 ? (
                 <DateRangeCard
                   value={state.query}
-                  disabled={isUserInfoOnly}
+                  disabled={skipAuditShape}
                   onChange={handleQueryChange}
                 />
               ) : null}
@@ -1735,7 +1751,7 @@ export function MiniKitchenBuilderPreview({
                   />
                   <DataCollectionCard
                     value={state.query}
-                    disabled={isUserInfoOnly}
+                    disabled={skipAuditShape}
                     onChange={handleQueryChange}
                     activityTypes={state.processing.activityTypes}
                     onActivityTypesChange={next =>
@@ -1747,7 +1763,7 @@ export function MiniKitchenBuilderPreview({
                   />
                   <AuditFiltersCard
                     value={state.processing}
-                    disabled={isUserInfoOnly}
+                    disabled={skipAuditShape}
                     onChange={handleProcessingChange}
                   />
                   <AdvancedArgsCard
@@ -1775,6 +1791,10 @@ export function MiniKitchenBuilderPreview({
                     userInfoEligible={
                       isUserInfoOnly || Boolean(state.query.includeUserInfo)
                     }
+                    agent365Eligible={
+                      isAgent365Only || Boolean(state.query.includeAgent365Info)
+                    }
+                    agent365Only={isAgent365Only}
                     onChange={handleDestinationsChange}
                     onCombineModeChange={handleCombineModeChange}
                     deidentify={state.processing.deidentify === true}
@@ -1782,7 +1802,7 @@ export function MiniKitchenBuilderPreview({
                   />
                   <RollupCard
                     value={state.processing.rollup ?? 'none'}
-                    disabled={isUserInfoOnly}
+                    disabled={skipAuditShape}
                     onChange={handleRollupChange}
                   >
                   {/* Dashboard target — a subsection inside Rollup; shown only

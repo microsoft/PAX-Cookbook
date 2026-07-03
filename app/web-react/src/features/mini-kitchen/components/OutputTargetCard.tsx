@@ -1,4 +1,5 @@
 import type {
+  LiteRecipeAgent365Destination,
   LiteRecipeDestinations,
   LiteRecipeFactDestination,
   LiteRecipeUserInfoDestination,
@@ -48,6 +49,16 @@ interface OutputTargetCardProps {
    * the user-info output-mode picker and path field are rendered disabled.
    */
   userInfoEligible?: boolean;
+  /**
+   * True when the Microsoft Agent 365 catalog is exported (include alongside an
+   * audit run, or the agent-365-only scope). Shows the Agent 365 destination.
+   */
+  agent365Eligible?: boolean;
+  /**
+   * True when the recipe is agent-365-only. Hides the audit destination and
+   * disables the catalog co-locate mode (no audit output to sit beside).
+   */
+  agent365Only?: boolean;
   /**
    * Current value of the engine-wide de-identify flag (PAX `-Deidentify`).
    * Optional; `undefined`/`false` both render the toggle off.
@@ -100,6 +111,24 @@ const USER_INFO_MODES: ReadonlyArray<{ id: UserInfoOutputMode; title: string; de
     id: 'append',
     title: 'Append to existing user-info file',
     desc: 'Maps to -AppendUserInfo. Accepts a bare filename (resolved against -OutputPath) or a full path. PAX expects the file to already exist with matching columns.',
+  },
+];
+
+const AGENT365_MODES: ReadonlyArray<{ id: UserInfoOutputMode; title: string; desc: string }> = [
+  {
+    id: 'default-colocate',
+    title: 'Co-locate next to the audit output',
+    desc: 'Writes the catalog beside the audit output. PAX co-locates it by default, so no extra switch is added. Not available for Agent 365 only runs.',
+  },
+  {
+    id: 'write-new',
+    title: 'Write a separate file',
+    desc: 'Maps to -OutputPathAgent365Info. Writes the catalog to a path you choose.',
+  },
+  {
+    id: 'append',
+    title: 'Append to existing file',
+    desc: 'Maps to -AppendAgent365Info. Adds to an existing catalog file with matching columns.',
   },
 ];
 
@@ -161,6 +190,8 @@ export function OutputTargetCard({
   combineEligible = false,
   combineDisabledByM365 = false,
   userInfoEligible = true,
+  agent365Eligible = false,
+  agent365Only = false,
   deidentify = false,
   onChange,
   onCombineModeChange,
@@ -168,12 +199,16 @@ export function OutputTargetCard({
 }: OutputTargetCardProps) {
   const fact = value.fact;
   const userInfo = value.userInfo;
+  const agent365 = value.agent365;
 
   function setFact(next: Partial<LiteRecipeFactDestination>) {
     onChange({ ...value, fact: { ...fact, ...next } });
   }
   function setUserInfo(next: Partial<LiteRecipeUserInfoDestination>) {
     onChange({ ...value, userInfo: { ...userInfo, ...next } });
+  }
+  function setAgent365(next: Partial<LiteRecipeAgent365Destination>) {
+    onChange({ ...value, agent365: { ...agent365, ...next } });
   }
 
   const factPathTrimmed = (fact.path ?? '').trim();
@@ -216,7 +251,7 @@ export function OutputTargetCard({
       helpText="PAX detects the tier from the path shape at runtime. PAX Cookbook does not validate paths, URLs, libraries, or workspaces."
       titleBadge={<DashboardReqBadge scopes={USER_INFO_RUN_SCOPES} />}
     >
-      {!userInfoOnly ? (
+      {!userInfoOnly && !agent365Only ? (
         <>
           <MiniKitchenField label="Storage tier" htmlFor="mk-output-tier">
             <div
@@ -507,12 +542,20 @@ export function OutputTargetCard({
           </MiniKitchenField>
           ) : null}
         </>
+      ) : agent365Only ? (
+        <p className="mk-callout mk-callout--info">
+          Microsoft Agent 365 only recipes emit just the catalog destination below.
+          The audit and user-info destinations are hidden because no audit data or
+          Entra user-info file is produced.
+        </p>
       ) : (
         <p className="mk-callout mk-callout--info">
           User-info-only recipes only emit a user-info destination. The audit destination
           controls are hidden because no audit data file is produced.
         </p>
       )}
+      {!agent365Only ? (
+        <>
       <MiniKitchenField
         label="User info output mode"
         htmlFor="mk-output-userinfo-mode"
@@ -614,6 +657,87 @@ export function OutputTargetCard({
             </p>
           ) : null}
         </MiniKitchenField>
+      ) : null}
+        </>
+      ) : null}
+      {agent365Eligible ? (
+        <div className="mk-subsection" id="mk-agent365-output">
+          <div className="mk-subsection__head">
+            <h3 className="mk-subsection-title">Microsoft Agent 365 catalog output</h3>
+            <ContextualHelpButton topic="agent365Output" />
+          </div>
+          <MiniKitchenField label="Agent 365 output mode" htmlFor="mk-output-agent365-mode">
+            <div
+              className="mk-radio-cards mk-radio-cards--compact"
+              role="radiogroup"
+              aria-label="Agent 365 output mode"
+              id="mk-output-agent365-mode"
+            >
+              {AGENT365_MODES.map(m => {
+                const disabled = m.id === 'default-colocate' && agent365Only;
+                const inputId = `mk-output-agent365-mode-${m.id}`;
+                const selected = agent365.mode === m.id;
+                return (
+                  <label
+                    key={m.id}
+                    htmlFor={inputId}
+                    className={
+                      'mk-radio-card' +
+                      (selected ? ' mk-radio-card--selected' : '') +
+                      (disabled ? ' mk-radio-card--disabled' : '')
+                    }
+                  >
+                    <input
+                      type="radio"
+                      id={inputId}
+                      name="mk-output-agent365-mode"
+                      value={m.id}
+                      className="mk-radio-card__input"
+                      checked={selected}
+                      disabled={disabled}
+                      onChange={() =>
+                        setAgent365({
+                          mode: m.id,
+                          path: m.id === 'default-colocate' ? undefined : agent365.path,
+                        })
+                      }
+                    />
+                    <span className="mk-radio-card__title">{m.title}</span>
+                    <span className="mk-radio-card__desc">{m.desc}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </MiniKitchenField>
+          {agent365Only && agent365.mode === 'default-colocate' ? (
+            <p className="mk-field__note mk-field__note--warn" role="note">
+              Agent 365 only runs have no audit output to sit beside. Choose
+              &ldquo;Write a separate file&rdquo; and add a path.
+            </p>
+          ) : null}
+          {agent365.mode !== 'default-colocate' ? (
+            <MiniKitchenField
+              label="Agent 365 destination path"
+              htmlFor="mk-output-agent365-path"
+              hint="Same tier-detection rules apply as the audit destination. Local path, SharePoint URL, or Fabric / OneLake URL."
+            >
+              <div className="mk-path-row">
+                <input
+                  id="mk-output-agent365-path"
+                  type="text"
+                  className="mk-input mk-input--code"
+                  value={agent365.path ?? ''}
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder={'C:\\PAX\\agent365-catalog.csv'}
+                  onChange={e =>
+                    setAgent365({ path: e.target.value === '' ? undefined : e.target.value })
+                  }
+                />
+              </div>
+            </MiniKitchenField>
+          ) : null}
+        </div>
       ) : null}
       {onDeidentifyChange ? (
         <div className="mk-subsection" id="mk-deidentify">

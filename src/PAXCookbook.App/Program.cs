@@ -1561,10 +1561,11 @@ internal static class Program
             string? checkpointPath = null;
             bool force = false;
             string? chefKeyId = null;
-            string? dashboard = null;
-            bool deidentify = false;
-            string? fillerLabel = null;
-            string? fillerLabelText = null;
+            // Output-shaping switches (dashboard, deidentify, filler label) are NOT
+            // read or re-passed on resume: PAX documents -Resume as standalone
+            // (only -Force and auth overrides are accepted on the command line) and
+            // restores every other setting from the checkpoint, which is the sole
+            // source of truth on resume.
             if (body is JsonElement b && b.ValueKind == JsonValueKind.Object)
             {
                 if (b.TryGetProperty("checkpointPath", out JsonElement cpEl) &&
@@ -1582,31 +1583,11 @@ internal static class Program
                 {
                     chefKeyId = ckEl.GetString();
                 }
-                if (b.TryGetProperty("dashboard", out JsonElement dashEl) &&
-                    dashEl.ValueKind == JsonValueKind.String)
-                {
-                    dashboard = dashEl.GetString();
-                }
-                if (b.TryGetProperty("deidentify", out JsonElement deidEl))
-                {
-                    if (deidEl.ValueKind == JsonValueKind.True) { deidentify = true; }
-                    else if (deidEl.ValueKind == JsonValueKind.False) { deidentify = false; }
-                }
-                if (b.TryGetProperty("fillerLabel", out JsonElement flEl) &&
-                    flEl.ValueKind == JsonValueKind.String)
-                {
-                    fillerLabel = flEl.GetString();
-                }
-                if (b.TryGetProperty("fillerLabelText", out JsonElement fltEl) &&
-                    fltEl.ValueKind == JsonValueKind.String)
-                {
-                    fillerLabelText = fltEl.GetString();
-                }
             }
 
             (int status, object respBody) = RecipeReadModel.StartResumeCook(
                 workspacePath, versionInfo, engine, checkpointPath, force, chefKeyId,
-                dashboard, deidentify, fillerLabel, fillerLabelText, manualCookReAuthSeam, cookPwshPathOverride);
+                manualCookReAuthSeam, cookPwshPathOverride);
             return Results.Json(respBody, statusCode: status);
         });
 

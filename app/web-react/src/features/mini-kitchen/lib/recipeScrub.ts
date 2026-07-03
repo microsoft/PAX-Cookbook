@@ -38,6 +38,7 @@ export function scrubSavedRecipeState(state: MiniKitchenRecipeState): ScrubResul
     destinations: {
       fact: { ...state.destinations.fact },
       userInfo: { ...state.destinations.userInfo },
+      agent365: { ...state.destinations.agent365 },
     },
     auth: { ...state.auth },
     executionMode: state.executionMode,

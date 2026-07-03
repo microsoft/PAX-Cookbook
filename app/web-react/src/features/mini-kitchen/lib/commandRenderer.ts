@@ -351,6 +351,7 @@ export function renderPaxCommand(recipe: MiniKitchenRecipeState): RenderedComman
   emitFactOutput(ctx, state);
   emitCombineOutput(ctx, state);
   emitUserInfoOutput(ctx, state);
+  emitAgent365Output(ctx, state);
   emitDeidentify(ctx, state);
   emitAuthContext(ctx, state);
   emitAdvancedArgs(ctx, state);
@@ -451,6 +452,16 @@ function emitDataCollection(ctx: BuildContext, state: MiniKitchenRecipeState): v
     );
     return;
   }
+  if (state.query.mode === 'agent365-only') {
+    pushFlag(ctx, 'OnlyAgent365Info');
+    warn(
+      ctx,
+      'agent365-only-suppresses',
+      'info',
+      'Microsoft Agent 365 only mode exports the catalog and suppresses the audit query, audit filters, rollup, user info, and audit output switches.',
+    );
+    return;
+  }
   if (state.query.includeM365Usage === true) {
     pushFlag(ctx, 'IncludeM365Usage');
   }
@@ -461,8 +472,27 @@ function emitDataCollection(ctx: BuildContext, state: MiniKitchenRecipeState): v
   if (state.query.excludeCopilotInteraction === true) {
     pushFlag(ctx, 'ExcludeCopilotInteraction');
   }
-  if (state.query.includeUserInfo === true) {
+  // Bring your own directory: -UserInfoFile supplies the directory from a file
+  // and already implies user info, so PAX does not also emit -IncludeUserInfo.
+  // It cannot be combined with -GroupNames (a command-readiness blocker).
+  const userInfoFile = (state.query.userInfoFile ?? '').trim();
+  const groupNames = state.processing.groupNames ?? [];
+  if (userInfoFile) {
+    if (groupNames.length > 0) {
+      warnBlocking(
+        ctx,
+        'byod-groupnames-conflict',
+        'Bring your own directory and group filtering can’t be used together. Remove the group names in Step 2, or clear the directory file.',
+        'query.userInfoFile',
+      );
+    }
+    pushSwitch(ctx, 'UserInfoFile', userInfoFile);
+  } else if (state.query.includeUserInfo === true) {
     pushFlag(ctx, 'IncludeUserInfo');
+  }
+  // Microsoft Agent 365 catalog alongside the audit run.
+  if (state.query.includeAgent365Info === true) {
+    pushFlag(ctx, 'IncludeAgent365Info');
   }
 }
 
@@ -687,7 +717,65 @@ function deriveCoLocateUserInfoPath(factPath: string): string {
   return p;
 }
 
+function emitAgent365Output(ctx: BuildContext, state: MiniKitchenRecipeState): void {
+  const active =
+    state.query.mode === 'agent365-only' || state.query.includeAgent365Info === true;
+  if (!active) {
+    return;
+  }
+  const a = state.destinations.agent365;
+  const path = (a.path ?? '').trim();
+  if (a.mode === 'default-colocate') {
+    if (state.query.mode === 'agent365-only') {
+      warnBlocking(
+        ctx,
+        'agent365-only-colocate-invalid',
+        'Microsoft Agent 365 only mode has no audit output to place the catalog beside. Switch the Agent 365 output to "Write a separate file" and add a path in Step 4.',
+        'destinations.agent365.path',
+      );
+      return;
+    }
+    // Co-locate alongside the audit output: PAX co-locates the catalog by
+    // default when -IncludeAgent365Info is passed without a destination switch,
+    // so nothing is emitted here.
+    return;
+  }
+  if (a.mode === 'write-new') {
+    if (path) {
+      pushSwitch(ctx, 'OutputPathAgent365Info', path);
+    } else {
+      warnBlocking(
+        ctx,
+        'agent365-output-path-missing',
+        'Add an Agent 365 catalog output path in Step 4 (write-new mode).',
+        'destinations.agent365.path',
+      );
+    }
+  } else if (a.mode === 'append') {
+    if (path) {
+      pushSwitch(ctx, 'AppendAgent365Info', path);
+      warn(
+        ctx,
+        'append-agent365-info',
+        'info',
+        'Append mode merges into an existing Agent 365 catalog file. Verify the existing file schema matches what PAX will write.',
+      );
+    } else {
+      warnBlocking(
+        ctx,
+        'agent365-append-path-missing',
+        'Add an Agent 365 append-file path in Step 4 (append mode).',
+        'destinations.agent365.path',
+      );
+    }
+  }
+}
+
 function emitUserInfoOutput(ctx: BuildContext, state: MiniKitchenRecipeState): void {
+  // Agent-365-only runs produce no Entra user-info stream.
+  if (state.query.mode === 'agent365-only') {
+    return;
+  }
   const ui = state.destinations.userInfo;
   if (ui.mode === 'default-colocate') {
     if (state.query.mode === 'user-info-only') {

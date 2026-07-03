@@ -96,6 +96,24 @@ export const DASHBOARD_PRESETS: readonly DashboardPresetDefinition[] = [
     },
   },
   {
+    id: 'agent365CatalogOnly',
+    name: 'Microsoft Agent 365 catalog',
+    description:
+      'Export the Microsoft Agent 365 catalog only. Skips the audit query and Entra user info. Maps to -OnlyAgent365Info at the command level.',
+    notes: [
+      'Forces -OnlyAgent365Info. Audit-only fields (date range, activity types, rollup, audit output) and Entra user info are hidden.',
+      'Needs the Microsoft Agent 365 catalog permissions and a Microsoft Agent 365 license on the tenant.',
+      'Works with interactive sign-in or with app-registration / managed-identity auth.',
+    ],
+    overrides: {
+      queryMode: 'agent365-only',
+      identityName: 'Microsoft Agent 365 catalog',
+      identityDescription: 'Microsoft Agent 365 catalog export. No audit query.',
+      onlyAgent365Info: true,
+      agent365OutputMode: 'write-new',
+    },
+  },
+  {
     id: 'customAuditExport',
     name: 'Custom audit export',
     description:
@@ -124,9 +142,9 @@ export const DASHBOARD_PRESETS: readonly DashboardPresetDefinition[] = [
   },
   {
     id: 'importLiteRecipeJson',
-    name: 'Import Mini-Kitchen .paxlite Recipe',
+    name: 'Import .paxlite JSON file',
     description:
-      'Load a Mini-Kitchen .paxlite recipe file from disk. Triggers the importer instead of seeding from a preset.',
+      'Open a recipe you previously saved to a .paxlite file. Loads the saved recipe into the builder so you can review and reuse it.',
     notes: [
       'Importer fills the recipe from the .paxlite file.',
       'Permissions and command preview re-derive from the imported state.',

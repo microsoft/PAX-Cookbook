@@ -77,10 +77,6 @@ internal static partial class RecipeReadModel
         string? checkpointPath,
         bool force,
         string? chefKeyId,
-        string? dashboard,
-        bool deidentify,
-        string? fillerLabel,
-        string? fillerLabelText,
         bool reAuthVerified,
         string? pwshPathOverride)
     {
@@ -223,7 +219,7 @@ internal static partial class RecipeReadModel
         // (f, g) Project the resume invocation plan against the MANAGED engine
         // path. Pure string projection — no file read, no spawn.
         PaxAdapter.InvocationPlan plan = BuildResumeInvocationPlan(
-            checkpoint, force, resolvedChefKey, dashboard, deidentify, fillerLabel, fillerLabelText, engine.ManagedEnginePath);
+            checkpoint, force, resolvedChefKey, engine.ManagedEnginePath);
 
         // (h) Create the per-cook folder under the resume bucket.
         string cookId = NewCookId();
@@ -309,11 +305,10 @@ internal static partial class RecipeReadModel
     // (GetInvocationPlan): & '<engine>' <paxCommand>, then the
     // -NoProfile/-NoLogo/-Command spawn argv.
     private static PaxAdapter.InvocationPlan BuildResumeInvocationPlan(
-        string checkpoint, bool force, ChefKeyModel.ChefKeyResolved? resolvedChefKey, string? dashboard,
-        bool deidentify, string? fillerLabel, string? fillerLabelText, string paxScriptPath)
+        string checkpoint, bool force, ChefKeyModel.ChefKeyResolved? resolvedChefKey, string paxScriptPath)
     {
         (List<string> paxArgv, string paxCommand) = BuildResumeArgvAndCommand(
-            checkpoint, force, resolvedChefKey, dashboard, deidentify, fillerLabel, fillerLabelText);
+            checkpoint, force, resolvedChefKey);
 
         string escapedPath = paxScriptPath.Replace("'", "''");
         string commandExpr = $"& '{escapedPath}' {paxCommand}";
@@ -340,8 +335,7 @@ internal static partial class RecipeReadModel
     // values unquoted exactly as the recipe path does. The stored paxArgv keeps
     // its natural order (resume tokens, then -Force, then the auth tail).
     private static (List<string> Argv, string Command) BuildResumeArgvAndCommand(
-        string checkpoint, bool force, ChefKeyModel.ChefKeyResolved? resolvedChefKey, string? dashboard,
-        bool deidentify, string? fillerLabel, string? fillerLabelText)
+        string checkpoint, bool force, ChefKeyModel.ChefKeyResolved? resolvedChefKey)
     {
         var argv = new List<string>();
         var commandParts = new List<string>();
@@ -373,52 +367,14 @@ internal static partial class RecipeReadModel
             commandParts.Add("-Force");
         }
 
-        // Dashboard. The resume path emits only the AIBV dashboard switch, and
-        // only when the operator selected it: AIO is PAX's default (omitted) and
-        // M365 is implied by -IncludeM365Usage, which a resume never emits, so
-        // there is no -Dashboard/-IncludeM365Usage conflict to guard here. AIBV
-        // needs no quoting, so it is emitted as two bare tokens like the auth tail.
-        if (string.Equals(dashboard, "aibv", StringComparison.OrdinalIgnoreCase))
-        {
-            argv.Add("-Dashboard");
-            argv.Add("AIBV");
-            commandParts.Add("-Dashboard");
-            commandParts.Add("AIBV");
-        }
-
-        // Hierarchy filler. Like -Dashboard, the rollup is implied by the
-        // checkpoint, so the filler switch is re-supplied whenever the operator
-        // selected one. 'Fixed' carries its literal label via -FillerLabelText.
-        // The values are emitted unquoted like the auth tail, except the custom
-        // text which is quoted (it may contain spaces).
-        string fillerLabelTok = (fillerLabel ?? string.Empty).Trim();
-        if (fillerLabelTok.Length > 0)
-        {
-            argv.Add("-FillerLabel");
-            argv.Add(fillerLabelTok);
-            commandParts.Add("-FillerLabel");
-            commandParts.Add(fillerLabelTok);
-            if (string.Equals(fillerLabelTok, "Fixed", StringComparison.OrdinalIgnoreCase))
-            {
-                string fillerText = (fillerLabelText ?? string.Empty).Trim();
-                if (fillerText.Length > 0)
-                {
-                    argv.Add("-FillerLabelText");
-                    argv.Add(fillerText);
-                    commandParts.Add("-FillerLabelText");
-                    commandParts.Add(PaxAdapter.ConvertToQuotedArg(fillerText));
-                }
-            }
-        }
-
-        // De-identify. Engine-wide one-way anonymization of the resumed run's
-        // output; re-supplied so a resumed de-identify cook does not emit
-        // identified rows.
-        if (deidentify)
-        {
-            argv.Add("-Deidentify");
-            commandParts.Add("-Deidentify");
-        }
+        // Output-shaping switches (-Dashboard, -FillerLabel / -FillerLabelText,
+        // -Deidentify) are intentionally NOT re-emitted on resume. PAX documents
+        // -Resume as standalone — only -Force and auth overrides are accepted on
+        // the command line — and restores every output-shaping setting from the
+        // checkpoint, which is the sole source of truth on resume. The checkpoint
+        // persists and restores dashboard, deidentify, and the hierarchy-filler
+        // mode + literal, so re-passing them here is redundant at best and rejected
+        // by the resume allow-list at worst.
 
         // Auth tail — only when a Chef's Key was resolved. Mirrors the recipe
         // path's Get-PaxArgvArray tail: -TenantId, -Auth (AppRegistration* mapped
@@ -642,8 +598,7 @@ internal static partial class RecipeReadModel
     internal static string TestSeamBuildResumeCommand(string checkpointPath, bool force)
     {
         (_, string command) = BuildResumeArgvAndCommand(
-            (checkpointPath ?? string.Empty).Trim(), force, resolvedChefKey: null, dashboard: null,
-            deidentify: false, fillerLabel: null, fillerLabelText: null);
+            (checkpointPath ?? string.Empty).Trim(), force, resolvedChefKey: null);
         return command;
     }
 }

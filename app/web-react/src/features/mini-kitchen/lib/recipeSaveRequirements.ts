@@ -41,8 +41,19 @@ export function deriveSaveRequirements(state: MiniKitchenRecipeState): SaveRequi
   }
 
   const isUserInfoOnly = state.query.mode === 'user-info-only';
+  const isAgent365Only = state.query.mode === 'agent365-only';
 
-  if (!isUserInfoOnly) {
+  if (isAgent365Only) {
+    // Agent-365-only exports just the Microsoft Agent 365 catalog. Co-locate is
+    // invalid (there is no audit output to sit beside), so a real write-new /
+    // append catalog path is the only content gap; audit dates and fact output
+    // do not apply. Bring-your-own-directory and audit filters are stripped.
+    const a = state.destinations.agent365;
+    const aPath = (a.path ?? '').trim();
+    if (a.mode === 'default-colocate' || !aPath) {
+      reqs.push({ id: 'agent365Output', label: 'Agent 365 catalog output folder' });
+    }
+  } else if (!isUserInfoOnly) {
     // Previous-day mode deliberately omits both dates (PAX queries the previous
     // full UTC day), so the start/end-date requirements do not apply — only a
     // half-filled custom range is incomplete.

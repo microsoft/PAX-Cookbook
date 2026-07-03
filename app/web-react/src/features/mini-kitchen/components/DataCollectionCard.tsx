@@ -19,7 +19,8 @@ interface DataCollectionCardProps {
 type ToggleKey =
   | 'includeM365Usage'
   | 'excludeCopilotInteraction'
-  | 'includeUserInfo';
+  | 'includeUserInfo'
+  | 'includeAgent365Info';
 
 interface ToggleSpec {
   key: ToggleKey;
@@ -50,6 +51,12 @@ const TOGGLES: readonly ToggleSpec[] = [
     desc: 'Co-export user / organization info alongside the audit results. Mirrors the Step 3 data-scope selection.',
     switchHint: 'Adds -IncludeUserInfo. Triggers extra Graph scopes.',
     dashboardScopes: BOTH_DASHBOARD_SCOPES,
+  },
+  {
+    key: 'includeAgent365Info',
+    title: 'Include Microsoft Agent 365 catalog',
+    desc: 'Also export the Microsoft Agent 365 catalog alongside the audit run. Works with interactive sign-in or with app-registration / managed-identity auth.',
+    switchHint: 'Adds -IncludeAgent365Info. Needs the Agent 365 catalog permissions + a license.',
   },
 ];
 
@@ -119,6 +126,49 @@ export function DataCollectionCard({
             </label>
           );
         })}
+      </div>
+      <div className="mk-byod-field">
+        <label className="mk-byod-field__label" htmlFor="mk-data-userinfofile">
+          Bring your own directory <span className="mk-field__optional">optional</span>
+        </label>
+        <p className="mk-field__hint" id="mk-data-userinfofile-hint">
+          Supply the user and organization directory from a CSV file instead of
+          pulling it live from Microsoft Entra. Accepts a local path, a SharePoint
+          document, or a Fabric / OneLake file. Providing it counts as your user
+          info, so you don&rsquo;t also need the Include Entra user info toggle, and
+          it can&rsquo;t be combined with group filtering. Maps to -UserInfoFile.
+        </p>
+        <input
+          type="text"
+          id="mk-data-userinfofile"
+          className="mk-input"
+          value={value.userInfoFile ?? ''}
+          placeholder={'C:\\PAX\\directory.csv'}
+          spellCheck={false}
+          disabled={disabled}
+          aria-describedby="mk-data-userinfofile-hint"
+          onChange={e => {
+            const v = e.target.value;
+            onChange({ ...value, userInfoFile: v.trim().length > 0 ? v : undefined });
+          }}
+        />
+        <details className="mk-subcollapse">
+          <summary className="mk-subcollapse__summary">
+            <span className="mk-subcollapse__title">Directory file columns</span>
+            <span className="mk-field__optional">reference</span>
+            <span className="mk-card__chevron" aria-hidden="true" />
+          </summary>
+          <div className="mk-subcollapse__body">
+            <p className="mk-field__hint">
+              Header names are case-insensitive and alias-aware. Only{' '}
+              <code>UserPrincipalName</code> is required. <code>DisplayName</code>,{' '}
+              <code>Department</code>, <code>JobTitle</code>, and <code>ManagerUpn</code>{' '}
+              are recommended for full org-hierarchy fidelity; <code>HasLicense</code>{' '}
+              is optional (leave it blank to resolve each user online). Any extra
+              columns you include are preserved as-is.
+            </p>
+          </div>
+        </details>
       </div>
       <details className="mk-subcollapse">
         <summary className="mk-subcollapse__summary">

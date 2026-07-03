@@ -17,7 +17,7 @@ interface QueryModeCardProps {
   onChange: (next: QueryModeSelection) => void;
 }
 
-type CardKey = 'combined' | 'audit-only' | 'entra-only';
+type CardKey = 'combined' | 'audit-only' | 'entra-only' | 'agent365-only';
 
 const OPTIONS: ReadonlyArray<{
   key: CardKey;
@@ -42,15 +42,22 @@ const OPTIONS: ReadonlyArray<{
     desc: 'Skip the audit query and only export Entra user / org info. Adds -OnlyUserInfo and hides audit-only sections below.',
     dashboardScopes: ['entra-user-info'],
   },
+  {
+    key: 'agent365-only',
+    title: 'Microsoft Agent 365 only',
+    desc: 'Skip the audit query and export only the Microsoft Agent 365 catalog. Adds -OnlyAgent365Info and hides the audit-only and user-info sections below.',
+  },
 ];
 
 function keyFor(value: QueryModeSelection): CardKey {
   if (value.mode === 'user-info-only') return 'entra-only';
+  if (value.mode === 'agent365-only') return 'agent365-only';
   return value.includeUserInfo ? 'combined' : 'audit-only';
 }
 
 function selectionFor(key: CardKey): QueryModeSelection {
   if (key === 'entra-only') return { mode: 'user-info-only', includeUserInfo: false };
+  if (key === 'agent365-only') return { mode: 'agent365-only', includeUserInfo: false };
   if (key === 'combined') return { mode: 'audit-query', includeUserInfo: true };
   return { mode: 'audit-query', includeUserInfo: false };
 }

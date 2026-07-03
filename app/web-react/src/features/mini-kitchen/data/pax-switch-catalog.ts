@@ -86,6 +86,14 @@ export const PAX_SWITCH_CATALOG: readonly PaxSwitchDefinition[] = [
     since: '1.0.0',
     conflictsWith: ['IncludeM365Usage', 'IncludeUserInfo', 'ExcludeCopilotInteraction'],
   },
+  {
+    name: 'UserInfoFile',
+    kind: 'path',
+    description:
+      'Supply the user and organization directory from a CSV file instead of pulling it live from Microsoft Entra. Accepts a local path, a SharePoint document, or a Fabric / OneLake file. Only UserPrincipalName is required; DisplayName, Department, JobTitle, and ManagerUpn are recommended, and HasLicense is optional. Providing it implies user info, so you do not also need to request user info separately; it cannot be combined with -GroupNames.',
+    since: '1.11.11',
+    conflictsWith: ['GroupNames'],
+  },
 
   // ---- Audit filters -------------------------------------------------------
   {
@@ -179,6 +187,48 @@ export const PAX_SWITCH_CATALOG: readonly PaxSwitchDefinition[] = [
     description:
       'One-way anonymization of the raw audit + EntraUsers output, threaded into the rollup processor. Engine-wide: valid for raw audit, rollup, and user-info-only runs. Omitted = off (the PAX default).',
     since: '1.11.8',
+  },
+
+  // ---- Microsoft Agent 365 catalog ----------------------------------------
+  {
+    name: 'IncludeAgent365Info',
+    kind: 'flag',
+    description:
+      'Also export the Microsoft Agent 365 catalog alongside the audit run. Requires an AI Administrator or Global Administrator role for interactive sign-in, or the CopilotPackages.Read.All + Application.Read.All application permissions for an app-registration or managed-identity run, plus a Microsoft Agent 365 license on the tenant.',
+    since: '1.11.10',
+  },
+  {
+    name: 'OnlyAgent365Info',
+    kind: 'flag',
+    description:
+      'Export only the Microsoft Agent 365 catalog; the audit query is skipped. Same access requirements as -IncludeAgent365Info.',
+    since: '1.11.10',
+    conflictsWith: ['OnlyUserInfo'],
+  },
+  {
+    name: 'OutputPathAgent365Info',
+    kind: 'path',
+    description:
+      'Write the Microsoft Agent 365 catalog export to a new file at this path. Accepts a local path, a SharePoint document-library URL, or a Fabric OneLake URL.',
+    since: '1.11.10',
+    conflictsWith: ['AppendAgent365Info'],
+  },
+  {
+    name: 'AppendAgent365Info',
+    kind: 'path',
+    description:
+      'Append the Microsoft Agent 365 catalog export to an existing file. Accepts a bare filename (resolved against -OutputPath’s directory) or a full path — local, SharePoint URL, or Fabric OneLake URL.',
+    since: '1.11.10',
+    conflictsWith: ['OutputPathAgent365Info'],
+  },
+
+  // ---- Diagnostics ---------------------------------------------------------
+  {
+    name: 'SkipVersionCheck',
+    kind: 'flag',
+    description:
+      'Suppress the brief informational startup line that compares the running PAX script against the latest published version. Useful on offline or locked-down hosts. Recognized in Advanced arguments; not surfaced as a guided option.',
+    since: '1.11.10',
   },
 
   // ---- Fact output ---------------------------------------------------------
@@ -402,16 +452,7 @@ export const PAX_SWITCH_CATALOG: readonly PaxSwitchDefinition[] = [
  *      These will be removed in a future release; presence is functionally
  *      a no-op today.
  *
- *   2. **Temporarily-disabled gate** (PAX v1.11.3, lines 1635–1647).
- *      Triggers `exit 0` with a "temporarily disabled" message when present.
- *      Members: -IncludeAgent365Info, -OnlyAgent365Info,
- *      -OutputPathAgent365Info, -AppendAgent365Info.
- *      These are expected to re-enable after further testing; until then,
- *      passing them prevents PAX from doing any work.
- *
- * Names below match the param() block exactly (case-sensitive). Earlier
- * Mini-Kitchen drafts used the wrong names (`Agent365Info`,
- * `Agent365InfoOnly`, `RawInputCSV`) — those have been corrected.
+ * Names below match the param() block exactly (case-sensitive).
  */
 export const REMOVED_OR_UNSUPPORTED_SWITCHES: readonly RemovedSwitch[] = [
   // ---- Deprecated (PAX exits gracefully when present) --------------------
@@ -434,34 +475,6 @@ export const REMOVED_OR_UNSUPPORTED_SWITCHES: readonly RemovedSwitch[] = [
     name: 'ExplodeDeep',
     reason:
       'Deprecated in PAX — the runtime exits immediately if this switch is present. CSV output no longer exposes the deep array expansion.',
-  },
-
-  // ---- Temporarily disabled (PAX exits gracefully when present) ----------
-  // userFacingName replaces the literal switch name in warnings so the UI
-  // never echoes identifiers that name the gated feature.
-  {
-    name: 'IncludeAgent365Info',
-    userFacingName: 'an unsupported PAX switch',
-    reason:
-      'Temporarily disabled in PAX — the runtime exits immediately if this switch is present.',
-  },
-  {
-    name: 'OnlyAgent365Info',
-    userFacingName: 'an unsupported PAX switch',
-    reason:
-      'Temporarily disabled in PAX — the runtime exits immediately if this switch is present.',
-  },
-  {
-    name: 'OutputPathAgent365Info',
-    userFacingName: 'an unsupported PAX switch',
-    reason:
-      'Temporarily disabled in PAX — the runtime exits immediately if this switch is present.',
-  },
-  {
-    name: 'AppendAgent365Info',
-    userFacingName: 'an unsupported PAX switch',
-    reason:
-      'Temporarily disabled in PAX — the runtime exits immediately if this switch is present.',
   },
 ] as const;
 

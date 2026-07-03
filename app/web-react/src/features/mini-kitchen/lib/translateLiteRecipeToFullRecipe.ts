@@ -44,7 +44,7 @@ import { containsLikelySecret } from './secretScanner';
 // -----------------------------------------------------------------------------
 
 /** Full Cookbook query mode (renamed from the lite `'audit-query' | 'user-info-only'`). */
-export type FullQueryMode = 'audit' | 'userInfoOnly';
+export type FullQueryMode = 'audit' | 'userInfoOnly' | 'agent365Only';
 
 /** Full Cookbook agent-filter mode (renamed from the lite hyphenated form). */
 export type FullAgentFilterMode = 'agentIds' | 'agentsOnly' | 'excludeAgents';
@@ -62,6 +62,21 @@ export interface FullCookbookIngredients {
   };
   entraUserData: {
     includeUserInfo: boolean;
+    /**
+     * Bring-your-own-directory (v1.11.11 -UserInfoFile): the user / organization
+     * directory is supplied from a CSV instead of a live Entra pull. Present only
+     * on audit-shape recipes; implies includeUserInfo.
+     */
+    userInfoFile?: string;
+  };
+  /**
+   * Microsoft Agent 365 catalog export (v1.11.10). `includeAgent365Info` exports
+   * the catalog alongside an audit run; `onlyAgent365Info` is the catalog-only
+   * scope (backs query.mode='agent365Only'). Optional so older candidates omit it.
+   */
+  agent365?: {
+    includeAgent365Info: boolean;
+    onlyAgent365Info: boolean;
   };
 }
 
@@ -137,6 +152,7 @@ export interface FullCookbookRecipeCandidate {
   destinations: {
     fact?: FullCookbookDestination;
     userInfo?: FullCookbookDestination;
+    agent365?: FullCookbookDestination;
   };
   auth: FullCookbookAuth;
   advanced?: { extraArguments: string };
@@ -204,7 +220,7 @@ const DEFAULT_RECIPE_ID = '0123456789ABCDEFGHJKMNPQRS';
 // server-stamps `paxAdapterVersion` from the managed engine's VERSION.json
 // (RecipeMutationService), so this value never reaches persisted identity; it
 // only keeps the local pre-save candidate aligned with the bundled engine.
-const DEFAULT_PAX_ADAPTER_VERSION = '1.11.9';
+const DEFAULT_PAX_ADAPTER_VERSION = '1.11.12';
 const DEFAULT_TIMESTAMP = '2026-01-01T00:00:00.000Z';
 const DEFAULT_CREATED_BY = 'mini-kitchen-lite';
 
@@ -251,7 +267,15 @@ export function translateLiteRecipeToFullRecipe(
   }
 
   const isUserInfoOnly = state.query.mode === 'user-info-only';
-  const fullQueryMode: FullQueryMode = isUserInfoOnly ? 'userInfoOnly' : 'audit';
+  const isAgent365Only = state.query.mode === 'agent365-only';
+  // Agent-365-only and user-info-only both skip the audit query, its dates,
+  // filters, and fact output.
+  const skipAuditShape = isUserInfoOnly || isAgent365Only;
+  const fullQueryMode: FullQueryMode = isUserInfoOnly
+    ? 'userInfoOnly'
+    : isAgent365Only
+      ? 'agent365Only'
+      : 'audit';
 
   // ---- Identity ----
   const name = (state.identity.name ?? '').trim();
@@ -285,8 +309,8 @@ export function translateLiteRecipeToFullRecipe(
   }
 
   // ---- Ingredients ----
-  const includeM365Usage = !isUserInfoOnly && state.query.includeM365Usage === true;
-  const includeUserInfo = isUserInfoOnly || state.query.includeUserInfo === true;
+  const includeM365Usage = !skipAuditShape && state.query.includeM365Usage === true;
+  const includeUserInfo = isUserInfoOnly || (!isAgent365Only && state.query.includeUserInfo === true);
 
   const m365Usage: FullCookbookIngredients['m365Usage'] = { includeM365Usage };
   const excludeCopilot = state.query.excludeCopilotInteraction === true;
@@ -309,14 +333,28 @@ export function translateLiteRecipeToFullRecipe(
     }
   }
 
+  // Bring-your-own-directory: carried on entraUserData so the broker + adapter
+  // treat the file as the directory source. Audit-shape only (the normalizer
+  // strips it from user-info-only and agent-365-only recipes).
+  const userInfoFile = !skipAuditShape ? (state.query.userInfoFile ?? '').trim() : '';
+  const entraUserData: FullCookbookIngredients['entraUserData'] = { includeUserInfo };
+  if (userInfoFile) {
+    entraUserData.userInfoFile = userInfoFile;
+  }
+
   const ingredients: FullCookbookIngredients = {
     m365Usage,
-    entraUserData: { includeUserInfo },
+    entraUserData,
+    agent365: {
+      // Alongside an audit run; never alongside the only-catalog scope.
+      includeAgent365Info: !isAgent365Only && state.query.includeAgent365Info === true,
+      onlyAgent365Info: isAgent365Only,
+    },
   };
 
   // ---- Query ----
   const query: FullCookbookQuery = { mode: fullQueryMode };
-  if (!isUserInfoOnly) {
+  if (!skipAuditShape) {
     if (state.query.dateMode === 'previous-day') {
       // Previous-day mode deliberately omits both -StartDate and -EndDate so PAX
       // queries the previous full UTC day. Carry dateMode through so the broker
@@ -440,7 +478,7 @@ export function translateLiteRecipeToFullRecipe(
     fillerLabel?: FillerLabelMode;
     fillerLabelText?: string;
   } = {};
-  if (!isUserInfoOnly) {
+  if (!skipAuditShape) {
     const rollup = state.processing.rollup;
     if (rollup === 'rollup') {
       processing.rollup = 'Rollup';
@@ -517,9 +555,13 @@ export function translateLiteRecipeToFullRecipe(
   }
 
   // ---- Destinations ----
-  const destinations: { fact?: FullCookbookDestination; userInfo?: FullCookbookDestination } = {};
+  const destinations: {
+    fact?: FullCookbookDestination;
+    userInfo?: FullCookbookDestination;
+    agent365?: FullCookbookDestination;
+  } = {};
 
-  if (!isUserInfoOnly) {
+  if (!skipAuditShape) {
     const fact = state.destinations.fact;
     const factPath = (fact.path ?? '').trim();
     if (fact.tier === 'sharepoint' || fact.tier === 'fabric') {
@@ -550,6 +592,35 @@ export function translateLiteRecipeToFullRecipe(
   });
   if (userInfoDest) {
     destinations.userInfo = userInfoDest;
+  }
+
+  // ---- Agent 365 catalog destination ----
+  // Emitted when the catalog is produced (agent-365-only, or alongside an audit
+  // run via includeAgent365Info). Co-locate emits no switch: PAX co-locates the
+  // catalog with the audit output by default. Agent-365-only co-locate is invalid
+  // (there is no audit output to sit beside).
+  if (isAgent365Only || ingredients.agent365?.includeAgent365Info === true) {
+    const a = state.destinations.agent365;
+    const aPath = (a.path ?? '').trim();
+    if (a.mode === 'default-colocate') {
+      if (isAgent365Only) {
+        needsPrepReasons.push(
+          'Agent 365 only mode needs its own catalog output path. Choose “Write a separate file” and add a path.',
+        );
+      }
+    } else if (a.mode === 'write-new') {
+      if (aPath) {
+        destinations.agent365 = { mode: 'outputPath', path: aPath };
+      } else {
+        needsPrepReasons.push('Agent 365 catalog write-new mode requires an output path.');
+      }
+    } else if (a.mode === 'append') {
+      if (aPath) {
+        destinations.agent365 = { mode: 'append', appendFile: aPath };
+      } else {
+        needsPrepReasons.push('Agent 365 catalog append mode requires an append-file path.');
+      }
+    }
   }
 
   // ---- Auth ----

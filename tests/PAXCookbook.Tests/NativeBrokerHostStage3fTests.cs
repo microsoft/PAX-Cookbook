@@ -33,7 +33,7 @@ namespace PAXCookbook.Tests;
 public class NativeBrokerHostStage3fTests
 {
     private const string PaxScriptBaselineHash =
-        "007AD1A7F6D40B40E873C684D10B2A79B4D1DD03A1900ADE19B6E482CC10C728";
+        "44F5461213510A772650F8933515E1E7FD782BB34764BD395C6D741CF8EC2685";
 
     // Bounded receive timeout for live-tail polls. The tailer's poll
     // cadence is 250ms; 5s gives the test 20 poll cycles to observe a

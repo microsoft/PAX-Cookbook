@@ -55,7 +55,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$expectedEngineSha = '007AD1A7F6D40B40E873C684D10B2A79B4D1DD03A1900ADE19B6E482CC10C728'
+$expectedEngineSha = '44F5461213510A772650F8933515E1E7FD782BB34764BD395C6D741CF8EC2685'
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path.TrimEnd('\','/')
 Set-Location $root

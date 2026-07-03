@@ -34,6 +34,7 @@ export type ContextualHelpTopicId =
   | 'dataScope'
   | 'whatToCollect'
   | 'includeEntraUserInfo'
+  | 'userInfoFile'
   | 'excludeCopilotInteraction'
   | 'customActivityTypes'
   | 'dateRange'
@@ -48,6 +49,7 @@ export type ContextualHelpTopicId =
   | 'agentIds'
   | 'promptFilter'
   | 'outputDestination'
+  | 'agent365Output'
   | 'auditDataOutputMode'
   | 'userInfoOutputMode'
   | 'auditActivityOutput'
@@ -168,6 +170,10 @@ export const CONTEXTUAL_HELP_TOPICS: Record<
     title: 'Include Entra user info',
     body: 'Adds Entra user details alongside the audit export. It is a point-in-time snapshot and is not limited by the audit date range.',
   },
+  userInfoFile: {
+    title: 'Bring your own directory (BYOD)',
+    body: 'Supply the user and organization directory from a CSV file instead of pulling it live from Microsoft Entra. Point it at a local path, a SharePoint document, or a Fabric / OneLake file. Only UserPrincipalName is required. Providing it counts as your user info, so you do not also need the user-info toggle, and it can’t be combined with group filtering.',
+  },
   excludeCopilotInteraction: {
     title: 'Exclude CopilotInteraction',
     body: 'Leaves CopilotInteraction records out of the audit pull. Use this when your analysis should exclude those events.',
@@ -227,6 +233,10 @@ export const CONTEXTUAL_HELP_TOPICS: Record<
   outputDestination: {
     title: 'Output destination',
     body: 'Choose where PAX should write results when the command runs. The builder builds the path into the command but cannot check whether the location exists or whether you have access.',
+  },
+  agent365Output: {
+    title: 'Agent 365 catalog output',
+    body: 'Where the Microsoft Agent 365 catalog export lands. Co-locate writes it beside the audit output; write-new and append send it to a path you choose. The builder builds the path into the command but does not check the location.',
   },
   auditDataOutputMode: {
     title: 'Audit data output mode',

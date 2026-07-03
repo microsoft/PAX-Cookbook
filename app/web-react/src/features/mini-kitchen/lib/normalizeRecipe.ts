@@ -48,6 +48,7 @@ export function normalizeRecipe(state: MiniKitchenRecipeState): MiniKitchenRecip
     destinations: {
       fact: { ...state.destinations.fact },
       userInfo: { ...state.destinations.userInfo },
+      agent365: { ...state.destinations.agent365 },
     },
     auth: { ...state.auth },
     executionMode: state.executionMode,
@@ -70,6 +71,34 @@ export function normalizeRecipe(state: MiniKitchenRecipeState): MiniKitchenRecip
     delete next.processing.rollup;
     delete next.processing.dashboard;
     delete next.processing.outputCombineMode;
+    // A live Entra directory pull has no Agent 365 catalog and no file source.
+    delete next.query.includeAgent365Info;
+    delete next.query.onlyAgent365Info;
+    delete next.query.userInfoFile;
+  } else if (next.query.mode === 'agent365-only') {
+    // Microsoft Agent 365 catalog only — the audit query, user-info pull, and
+    // bring-your-own-directory source are all skipped. `deidentify` is
+    // engine-wide and intentionally kept.
+    next.query.onlyAgent365Info = true;
+    delete next.query.dateMode;
+    delete next.query.startDate;
+    delete next.query.endDate;
+    delete next.query.includeM365Usage;
+    delete next.query.excludeCopilotInteraction;
+    delete next.query.includeUserInfo;
+    delete next.query.onlyUserInfo;
+    delete next.query.includeAgent365Info;
+    delete next.query.userInfoFile;
+    delete next.processing.activityTypes;
+    delete next.processing.userIds;
+    delete next.processing.groupNames;
+    delete next.processing.agentFilter;
+    delete next.processing.promptFilter;
+    delete next.processing.rollup;
+    delete next.processing.dashboard;
+    delete next.processing.outputCombineMode;
+    delete next.processing.fillerLabel;
+    delete next.processing.fillerLabelText;
   } else {
     if (next.query.onlyUserInfo === true) {
       next.query.includeUserInfo = true;
@@ -84,6 +113,13 @@ export function normalizeRecipe(state: MiniKitchenRecipeState): MiniKitchenRecip
     }
     // ExcludeCopilotInteraction is standalone in PAX v1.11.3 — do not clear
     // it when IncludeM365Usage is falsy.
+    // onlyAgent365Info is a scope-only flag; never let it linger on an
+    // audit-query recipe.
+    delete next.query.onlyAgent365Info;
+    // Bring your own directory supplies the directory, so it implies user info.
+    if ((next.query.userInfoFile ?? '').trim() !== '') {
+      next.query.includeUserInfo = true;
+    }
   }
 
   return next;

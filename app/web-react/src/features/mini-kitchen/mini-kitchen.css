@@ -860,6 +860,27 @@ details[open] > .mk-subcollapse__summary .mk-card__chevron {
 }
 
 /* ---------------------------------------------------------------------------
+ * Bring-your-own-directory (-UserInfoFile) field
+ * ------------------------------------------------------------------------- */
+.mk-byod-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.mk-byod-field__label {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--c-ink-strong);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------------------
  * Inputs
  * ------------------------------------------------------------------------- */
 .mk-input {
