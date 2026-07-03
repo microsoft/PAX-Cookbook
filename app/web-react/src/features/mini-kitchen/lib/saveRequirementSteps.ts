@@ -29,6 +29,8 @@ const REQUIREMENT_STEPS: Record<string, SaveRequirementStep> = {
   agentIds: { label: 'Audit operations', step: 4, stepName: 'Audit Operations' },
   factOutput: { label: 'Output folder', step: 5, stepName: 'Output' },
   userInfoOutput: { label: 'User info output folder', step: 5, stepName: 'Output' },
+  agent365Output: { label: 'Agent 365 catalog output folder', step: 5, stepName: 'Output' },
+  fillerLabelText: { label: 'Custom filler label text', step: 5, stepName: 'Output' },
 };
 
 const REVIEW_STEP = { step: 7, stepName: 'Review + Save' } as const;

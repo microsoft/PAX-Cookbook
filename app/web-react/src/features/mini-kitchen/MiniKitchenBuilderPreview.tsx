@@ -1531,11 +1531,15 @@ export function MiniKitchenBuilderPreview({
     agentIds: 4, // Audit Operations
     factOutput: 5, // Output
     userInfoOutput: 5, // Output
+    agent365Output: 5, // Output (Agent 365 catalog destination)
+    fillerLabelText: 5, // Output (custom hierarchy-filler text)
   };
   const reviewIssues = saveRequirements.map(req => ({
     id: req.id,
     label: req.label,
-    step: STEP_FOR_REQUIREMENT[req.id] ?? 1,
+    // Unmapped ids route to Review + Save (7), never Basics (1) — the full
+    // requirements checklist is always shown there.
+    step: STEP_FOR_REQUIREMENT[req.id] ?? 7,
   }));
   const stepsNeedingAttention = new Set<number>(reviewIssues.map(issue => issue.step));
   const outstandingCount = reviewIssues.length;
