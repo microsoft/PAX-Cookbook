@@ -55,6 +55,7 @@ const START_CARDS: readonly StartCard[] = [
   { kind: 'preset', id: 'aiBusinessValueDashboard', title: 'AI Business Value Dashboard', desc: 'Copilot ROI superset for the AI Business Value dashboard.', presetId: 'aiBusinessValueDashboard', pills: 'repo' },
   { kind: 'preset', id: 'm365UsageAnalyticsDashboard', title: 'M365 Usage Analytics Dashboard', desc: 'Broad M365 usage (Exchange, SharePoint, OneDrive, Teams) for the M365 Usage dashboard.', presetId: 'm365UsageAnalyticsDashboard', pills: 'repo' },
   { kind: 'preset', id: 'userInfoOnly', title: 'Entra Directory Export', desc: 'Export Entra user directory metadata — departments, managers, locations — without pulling audit logs.', presetId: 'userInfoOnly', pills: 'none' },
+  { kind: 'preset', id: 'agent365CatalogOnly', title: 'Microsoft Agent 365 catalog', desc: 'Export the Microsoft Agent 365 catalog only — skips the audit query and Entra user info.', presetId: 'agent365CatalogOnly', pills: 'none' },
   { kind: 'preset', id: 'customAuditExport', title: 'Custom Audit Export', desc: 'Blank-slate audit export — choose your own scope and filters.', presetId: 'customAuditExport', pills: 'none' },
   { kind: 'preset', id: 'importPaxRecipeJson', title: 'Import PAX Cookbook .pax Recipe', desc: 'Open a full .pax recipe export from disk.', presetId: 'importPaxRecipeJson', pills: 'filetype-pax' },
   { kind: 'preset', id: 'importLiteRecipeJson', title: 'Import Mini-Kitchen .paxlite Recipe', desc: 'Open a Mini-Kitchen .paxlite recipe from disk.', presetId: 'importLiteRecipeJson', pills: 'filetype-paxlite' },
@@ -73,7 +74,7 @@ const TEMPLATE_CATEGORIES: ReadonlyArray<{ id: string; title: string; cardIds: s
   {
     id: 'exports',
     title: 'Specialized Exports',
-    cardIds: ['userInfoOnly', 'customAuditExport'],
+    cardIds: ['userInfoOnly', 'agent365CatalogOnly', 'customAuditExport'],
   },
   {
     id: 'import',

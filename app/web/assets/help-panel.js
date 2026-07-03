@@ -204,6 +204,68 @@
                 '<p>Adds the <code>-IncludeUserInfo</code> switch, joining each row with Entra directory attributes such as job title, department, and manager.</p>'
             ]
         },
+
+        'recipes.agent365': {
+            id: 'recipes.agent365', category: 'recipes',
+            title: 'Microsoft Agent 365 catalog',
+            keywords: ['agent 365', 'agent365', 'catalog', 'copilot packages', 'IncludeAgent365Info', 'OnlyAgent365Info', 'CopilotPackages'],
+            body: [
+                '<p>Exports the <strong>Microsoft Agent 365 catalog</strong> &mdash; the tenant&rsquo;s registered Copilot agents and their details. There are two ways to collect it:</p>',
+                '<ul>',
+                    '<li><strong>Alongside an audit run</strong> &mdash; the <em>Include Microsoft Agent 365 catalog</em> toggle adds <code>-IncludeAgent365Info</code> to a normal audit recipe, writing the catalog beside the audit output.</li>',
+                    '<li><strong>Catalog only</strong> &mdash; the <em>Microsoft Agent 365 only</em> scope (and the matching preset card) adds <code>-OnlyAgent365Info</code>, which skips the audit query and Entra user info entirely.</li>',
+                '</ul>',
+                '<p>Choose where the catalog lands with the Agent 365 catalog output control: co-located beside the audit output (default; not available for an Agent 365 only run), a new file you name (<code>-OutputPathAgent365Info</code>), or appended to an existing catalog file (<code>-AppendAgent365Info</code>).</p>',
+                '<p>Collecting the catalog needs a Microsoft Agent 365 license on the tenant plus <code>CopilotPackages.Read.All</code>, and either an AI Administrator / Global Administrator role for interactive sign-in or <code>Application.Read.All</code> for an app-registration or managed-identity run. It works with WebLogin, DeviceCode, app registration (secret or certificate), and managed identity.</p>'
+            ]
+        },
+
+        'recipes.byod': {
+            id: 'recipes.byod', category: 'recipes',
+            title: 'Bring your own directory (BYOD)',
+            keywords: ['BYOD', 'bring your own directory', 'UserInfoFile', 'user info file', 'directory', 'csv', 'offline'],
+            body: [
+                '<p><strong>Bring your own directory (BYOD)</strong> supplies the user and organization directory from a CSV file instead of pulling it live from Microsoft Entra. Adds <code>-UserInfoFile</code>. Point it at a local path, a SharePoint document, or a Fabric / OneLake file.</p>',
+                '<p>Providing a directory file counts as your user info, so you do not also need the Include Entra user info toggle, and it cannot be combined with group filtering &mdash; choose one directory source.</p>',
+                '<p>Headers are matched case-insensitively and common aliases (for example <code>UPN</code>, <code>Name</code>, <code>Organization</code>, <code>Title</code>, <code>ManagerEmail</code>, <code>HasCopilotLicense</code>) are recognized automatically. Any extra columns are preserved as provided.</p>',
+                '<ul>',
+                    '<li><code>UserPrincipalName</code> &mdash; required. The user&rsquo;s sign-in name (UPN).</li>',
+                    '<li><code>DisplayName</code> &mdash; recommended. Full name for reporting.</li>',
+                    '<li><code>Department</code> &mdash; recommended. Used for grouping and the org hierarchy.</li>',
+                    '<li><code>JobTitle</code> &mdash; recommended. Shown in reporting.</li>',
+                    '<li><code>ManagerUpn</code> &mdash; recommended. The manager&rsquo;s UPN; builds the org / manager hierarchy.</li>',
+                    '<li><code>HasLicense</code> &mdash; optional. Leave blank to resolve the license online, or set it (true / false) to skip the online check. If every row sets it, the directory builds fully offline.</li>',
+                '</ul>'
+            ]
+        },
+
+        'recipes.deidentify': {
+            id: 'recipes.deidentify', category: 'recipes',
+            title: 'De-identify output',
+            keywords: ['deidentify', 'de-identify', 'anonymize', 'anonymise', 'privacy', 'Deidentify', 'pseudonymize'],
+            body: [
+                '<p><strong>De-identify output</strong> anonymizes people in both the audit output and the Entra user-info output, and in the rollup built from them. Adds <code>-Deidentify</code>.</p>',
+                '<p>It is one-way: each identity is replaced with a stable, irreversible token, so the same person maps to the same token across runs but the original UPN cannot be recovered from the de-identified files.</p>',
+                '<p>If you append to an existing file, only append to one that is already de-identified &mdash; mixing de-identified and raw rows in one file is not supported.</p>'
+            ]
+        },
+
+        'recipes.hierarchy-filler': {
+            id: 'recipes.hierarchy-filler', category: 'recipes',
+            title: 'Hierarchy filler',
+            keywords: ['filler', 'FillerLabel', 'FillerLabelText', 'hierarchy', 'org', 'manager', 'rollup'],
+            body: [
+                '<p>The <strong>hierarchy filler</strong> chooses what to write into empty org / manager-hierarchy levels in the rollup output. Adds <code>-FillerLabel</code> (and <code>-FillerLabelText</code> for a custom label).</p>',
+                '<ul>',
+                    '<li><strong>Blank</strong> &mdash; leave empty levels empty (the default).</li>',
+                    '<li><strong>Repeat the person</strong> &mdash; carry the person down into the empty levels.</li>',
+                    '<li><strong>Repeat their manager</strong> &mdash; carry their manager down.</li>',
+                    '<li><strong>Custom text</strong> &mdash; stamp a fixed label you type.</li>',
+                '</ul>',
+                '<p>It applies only to rollup output and does not affect the M365 usage bundle.</p>'
+            ]
+        },
+
         'recipes.tenant': {
             id: 'recipes.tenant', category: 'recipes',
             title: 'Tenant',

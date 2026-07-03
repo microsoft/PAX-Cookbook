@@ -320,6 +320,8 @@ From the **Recipes** page, click **New Recipe** to open the seven-step builder. 
 
 **Already have a recipe file?** The New Recipe options also let you **import** a recipe someone shared with you. Choose **Import PAX Cookbook recipe (`.pax`)** or **Import Mini-Kitchen recipe (`.paxlite`)**, pick the file from the browse dialog, and the builder opens pre-filled with that recipe's settings — ready for you to review and save.
 
+**Recovering an interrupted run?** From the Recipes page's **Import or Resume** section, choose **Resume from Checkpoint**. Point it at the interrupted run's checkpoint file and PAX Cookbook builds a `-Resume` command that continues from where the run stopped. The output-shaping settings — de-identify, hierarchy filler, and each stream's output destination — are restored automatically from the checkpoint, so you don't re-enter them.
+
 > 📸 **Screenshot:** The New Recipe screen showing the dashboard presets alongside the Import `.pax` and Import `.paxlite` options.
 
 #### 4.2.1 Step 1: Basics
@@ -330,6 +332,7 @@ Give your recipe a clear **name**, then choose a **dashboard preset**. The prese
 - **AI Business Value** — focuses on return-on-investment and business impact metrics. Produces a wider set of columns designed for the AI Business Value dashboard.
 - **M365 Usage Analytics** — broader Microsoft 365 usage, beyond just Copilot.
 - **Entra Directory Export** — exports user directory information (from Microsoft Entra ID), useful for enriching usage data with details about who your users are.
+- **Microsoft Agent 365 catalog only** — exports just the Microsoft Agent 365 catalog (your tenant's registered Copilot agents), with no audit query and no Entra user info. Available here in Step 1 and from the Recipes page's **Specialized Exports** section.
 - **Custom** — start from a blank slate and choose everything yourself. Best for advanced or unusual needs.
 
 > 📸 **Screenshot:** Step 1 Basics, with the recipe name field and the dashboard preset selector.
@@ -376,7 +379,7 @@ This step is also where you choose the **scope** of the pull and a few related d
 - **Scope** — pick what the run collects: **Audit activity** (the default), **User info only** (just the Entra user and organization directory, with no audit query), or **Microsoft Agent 365 only** (just the Microsoft Agent 365 catalog). Choosing a user-info-only or Agent 365 only scope hides the date range, audit operations, and filters, because no audit query runs.
 - **Include Entra user info** — adds the user and organization directory (names, departments, managers) alongside the audit data, so reports can group and roll up by person and org hierarchy.
 - **Include Microsoft Agent 365 catalog** — adds the Microsoft Agent 365 catalog alongside an audit run. (To collect *only* the catalog, choose the **Microsoft Agent 365 only** scope above.)
-- **Bring your own directory** — instead of pulling the user and organization directory live from Microsoft Entra, you can supply it from a CSV file (a local path, a SharePoint document, or a Microsoft Fabric / OneLake file). Providing it counts as your user info, so you don't also need the Include Entra user info toggle, and it can't be combined with group filtering. Only a `UserPrincipalName` column is required; `DisplayName`, `Department`, `JobTitle`, and `ManagerUpn` are recommended for full org-hierarchy fidelity.
+- **Bring your own directory (BYOD)** — instead of pulling the user and organization directory live from Microsoft Entra, you can supply it from a CSV file (a local path, a SharePoint document, or a Microsoft Fabric / OneLake file). Providing it counts as your user info, so you don't also need the Include Entra user info toggle, and it can't be combined with group filtering. Only a `UserPrincipalName` column is required; `DisplayName`, `Department`, `JobTitle`, and `ManagerUpn` are recommended for full org-hierarchy fidelity, and `HasLicense` is optional (leave it blank to resolve the license online, or set it to build the directory fully offline). Header names are matched case-insensitively — common aliases such as `UPN` or `ManagerEmail` are recognized — and any extra columns you include are preserved.
 
 > 📸 **Screenshot:** Step 4 Audit Operations showing the preset's default selections.
 
