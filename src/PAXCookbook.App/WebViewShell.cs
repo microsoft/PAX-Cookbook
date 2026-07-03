@@ -243,6 +243,14 @@ internal static class WebViewShell
             {
                 throw new WebView2RuntimeMissingException("No WebView2 runtime version reported.");
             }
+            // Record the Evergreen WebView2 runtime version at launch. The
+            // Evergreen runtime auto-updates independently of this app, and its
+            // Chromium build governs WebAuthn / Windows Hello ceremony behavior,
+            // so capturing the version lets a later investigation correlate any
+            // ceremony symptom with the exact runtime present. Read-only
+            // instrumentation: a version string only, written to the local
+            // startup log, never surfaced in the UI or sent off-device.
+            StartupLog.Mark("WebView2 runtime version: " + available);
         }
         catch (WebView2RuntimeNotFoundException ex)
         {

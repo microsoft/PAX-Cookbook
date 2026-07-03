@@ -43,6 +43,20 @@
     var OVERLAY_ID    = 'cookbook-lock-overlay';
     var BODY_CLASS    = 'cookbook-lock-active';
 
+    // Hard client-side timeout for the REGISTRATION (create()) ceremony only.
+    // The WebAuthn create() advisory timeout (60s, carried on the broker
+    // challenge) is frequently ignored by the platform authenticator, which is
+    // the suspected cause of the reported multi-minute "hang" where no verdict
+    // ever returns. This AbortController backstop guarantees the ceremony
+    // resolves to a diagnosable timeout instead of hanging indefinitely.
+    // 120s is deliberately generous -- 2x the 60s advisory timeout and 4x the
+    // 30s non-fatal progress watchdog -- so it leaves ample room for a real
+    // Windows Hello prompt that opened on another monitor / behind the window
+    // plus human reaction time (it never pre-empts the seconds-scale
+    // late-success window the watchdog was tuned for), while still bounding a
+    // genuine indefinite hang. The unlock (get()) ceremony is NOT wrapped.
+    var CREATE_CEREMONY_TIMEOUT_MS = 120 * 1000;
+
 
     // Module-scoped state. A second event firing while the overlay is
     // already up does NOT remount it -- we just refresh the message.
@@ -1272,10 +1286,19 @@
             // rejection (e.g. NotAllowedError after the platform
             // authenticator rejected the ceremony).
             // ----------------------------------------------------------
+            var createAbort     = (typeof AbortController === 'function') ? new AbortController() : null;
+            var createTimedOut  = false;
+            var createTimeoutId = createAbort
+                ? setTimeout(function () { createTimedOut = true; try { createAbort.abort(); } catch (eAb) {} }, CREATE_CEREMONY_TIMEOUT_MS)
+                : null;
             var createPromise;
             try {
-                createPromise = window.navigator.credentials.create({ publicKey: publicKey });
+                createPromise = window.navigator.credentials.create({
+                    publicKey: publicKey,
+                    signal:    createAbort ? createAbort.signal : undefined
+                });
             } catch (eSync) {
+                if (createTimeoutId) { clearTimeout(createTimeoutId); }
                 recordDiag({
                     phase:                     'bootstrap_create_sync_throw',
                     errorName:                 (eSync && eSync.name)    || 'sync_throw',
@@ -1290,6 +1313,7 @@
             }
 
             return createPromise.then(function (cred) {
+                if (createTimeoutId) { clearTimeout(createTimeoutId); }
                 recordDiag({ phase: 'bootstrap_create_resolved' });
                 logUnlock(state.lastDiagnostics);
                 if (!cred || !cred.response) { return { ok: false, reason: 'no_credential' }; }
@@ -1343,6 +1367,17 @@
                     return { ok: false, reason: 'broker_network_error' };
                 });
             }, function (err) {
+                if (createTimeoutId) { clearTimeout(createTimeoutId); }
+                if (createTimedOut) {
+                    recordDiag({
+                        phase:           'bootstrap_create_timeout',
+                        errorName:       'CreateTimeout',
+                        errorMessage:    'create() aborted after ' + CREATE_CEREMONY_TIMEOUT_MS + 'ms; no verdict returned',
+                        createTimeoutMs: CREATE_CEREMONY_TIMEOUT_MS
+                    });
+                    logUnlock(state.lastDiagnostics);
+                    return { ok: false, reason: 'create_timeout', errName: 'CreateTimeout' };
+                }
                 // navigator.credentials.create rejection. UX-1H3:
                 // technical failures do NOT silently fall back;
                 // performUnlock() surfaces a diagnostic and an
@@ -1701,10 +1736,19 @@
         setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
 
         var startMs = Date.now();
+        var createAbort     = (typeof AbortController === 'function') ? new AbortController() : null;
+        var createTimedOut  = false;
+        var createTimeoutId = createAbort
+            ? setTimeout(function () { createTimedOut = true; try { createAbort.abort(); } catch (eAb) {} }, CREATE_CEREMONY_TIMEOUT_MS)
+            : null;
         var createPromise;
         try {
-            createPromise = window.navigator.credentials.create({ publicKey: prepared.publicKey });
+            createPromise = window.navigator.credentials.create({
+                publicKey: prepared.publicKey,
+                signal:    createAbort ? createAbort.signal : undefined
+            });
         } catch (eSync) {
+            if (createTimeoutId) { clearTimeout(createTimeoutId); }
             recordDiag({
                 phase:                     'bootstrap_create_sync_throw',
                 errorName:                 (eSync && eSync.name)    || 'sync_throw',
@@ -1774,6 +1818,7 @@
         }, 30 * 1000);
 
         return createPromise.then(function (cred) {
+            if (createTimeoutId) { clearTimeout(createTimeoutId); }
             if (watchdogFired) {
                 recordDiag({
                     phase:           'bootstrap_create_resolved_after_watchdog',
@@ -1844,6 +1889,24 @@
                 return finishBootstrapFailure('broker_network_error', null);
             });
         }, function (err) {
+            if (createTimeoutId) { clearTimeout(createTimeoutId); }
+            if (createTimedOut) {
+                recordDiag({
+                    phase:           'bootstrap_create_timeout',
+                    errorName:       'CreateTimeout',
+                    errorMessage:    'create() aborted after ' + CREATE_CEREMONY_TIMEOUT_MS + 'ms; no verdict returned',
+                    createTimeoutMs: CREATE_CEREMONY_TIMEOUT_MS,
+                    createElapsedMs: (Date.now() - startMs)
+                });
+                logUnlock(state.lastDiagnostics);
+                state.preparedBootstrap       = null;
+                state.preparedBootstrapStatus = 'idle';
+                state.unlockInFlight          = false;
+                state.lastFailureMessage      = 'Windows Hello didn\u2019t respond in time. The prompt may have opened on another monitor or behind this window \u2014 check there, then select "Copy diagnostics" below and "Retry".';
+                renderLockedView();
+                setUnlockUi(state.lastFailureMessage, false, 'Retry');
+                return;
+            }
             if (watchdogFired) {
                 recordDiag({
                     phase:                     'bootstrap_create_rejected_after_watchdog',
@@ -2164,6 +2227,23 @@
                     finishUnlockSuccess();
                     return;
                 }
+                if (result.reason === 'create_timeout') {
+                    recordDiag({
+                        phase:        'browser_ceremony_timeout',
+                        resultOk:     false,
+                        resultDetail: 'create_timeout',
+                        errorName:    (result.errName || 'CreateTimeout'),
+                        errorMessage: 'Windows Hello create() ceremony timed out with no verdict'
+                    });
+                    logUnlock(state.lastDiagnostics);
+                    state.unlockInFlight = false;
+                    setUnlockUi(
+                        'Windows Hello didn\u2019t respond in time. The prompt may have opened on another monitor or behind this window \u2014 check there, then select "Unlock" to try again.',
+                        false,
+                        'Unlock'
+                    );
+                    return;
+                }
                 if (result.reason === 'user_cancelled') {
                     recordDiag({
                         phase:        'user_cancelled',
@@ -2313,7 +2393,7 @@
         var p = state.preparedBootstrap;
         var lines = [
             '=== PAX Cookbook unlock diagnostics ===',
-            'expected script version: lock-overlay.js?v=uxr19',
+            'expected script version: lock-overlay.js?v=ux11b',
             'collected at: ' + new Date().toISOString(),
             '',
             '--- last unlock attempt ---',
