@@ -1,0 +1,4 @@
+# Treat the PAX engine script as binary so its committed bytes check out
+# identically on every client and platform, regardless of core.autocrlf.
+# This keeps the source-archive engine hash equal to the shipped payload hash.
+app/resources/pax/PAX_Purview_Audit_Log_Processor.ps1 -text
