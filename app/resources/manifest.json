@@ -3,16 +3,16 @@
   "channel": "stable",
   "releaseTimestamp": null,
   "latestCookbook": {
-    "version": "1.3.1",
+    "version": "1.3.2",
     "packageUrl": "<TODO_RELEASE_URL_PACKAGE_ZIP>",
     "sha256": "<TODO_RELEASE_ZIP_SHA256>",
     "releaseNotesUrl": "<TODO_RELEASE_NOTES_URL>"
   },
   "includedPaxScript": {
     "name": "PAX Purview Audit Log Processor",
-    "version": "1.11.13",
+    "version": "1.11.14",
     "relativePath": "resources/pax/PAX_Purview_Audit_Log_Processor.ps1",
-    "sha256": "F88C7939428601DE308A00ED418D9F2711D1EFE1F5D2BB5FBFC6859209C2C5F2",
+    "sha256": "99AB97232C76022771197B84AF880ED48D9E4B83F678F05262C38A223D3814C9",
     "acquisitionPolicy": "external",
     "exportEnabled": false,
     "engineManifestUrl": "https://github.com/microsoft/PAX/releases/latest/download/approved-engine-manifest.json",

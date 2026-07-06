@@ -10,7 +10,7 @@
 
 # PAX Cookbook — User Guide
 
-<p align="center"><strong>PAX Cookbook v1.3.1</strong> · Last updated: July 6, 2026</p>
+<p align="center"><strong>PAX Cookbook v1.3.2</strong> · Last updated: July 6, 2026</p>
 
 Welcome to **PAX Cookbook**. This guide explains everything you need to collect Microsoft 365 Copilot adoption and usage data and turn it into reports — even if you have never written a line of code.
 

@@ -22,9 +22,9 @@ namespace PAXCookbookSetup.Tests;
 public sealed class EngineSourceTreeImmutabilityTests
 {
     // Mirrors Build-Setup.ps1 $expectedEngineSha and versions.json
-    // current.engine.sha256 (PAX engine v1.11.13). Compared case-insensitively.
+    // current.engine.sha256 (PAX engine v1.11.14). Compared case-insensitively.
     private const string ExpectedEngineSha256 =
-        "F88C7939428601DE308A00ED418D9F2711D1EFE1F5D2BB5FBFC6859209C2C5F2";
+        "99AB97232C76022771197B84AF880ED48D9E4B83F678F05262C38A223D3814C9";
 
     // Repo-relative path to the canonical bundled engine script.
     private const string EngineRelativePath =
