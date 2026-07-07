@@ -7,15 +7,15 @@
  * Installed app, PAX Engine, Update checking, Support details, and a short
  * "Before updating" guidance card.
  *
- * This build has no online update-check endpoint, so this surface never claims
- * an update result and never says the app is current. It states plainly that
- * online update checking is not available in this build and points the user at
- * the internal release package.
+ * This surface runs a real update check and shows the result inline: up to
+ * date, an available update with an Update now action, or a specific reason
+ * when a check can't complete. Applying an update is an explicit user action
+ * that hands off to the broker's updater, and the download is verified before
+ * it is installed.
  *
- * Updates NEVER runs PAX, NEVER cooks, bakes, or schedules, NEVER downloads or
- * installs anything, NEVER starts an installer or update process, and NEVER
- * shows a secret. Every value shown reflects state the broker already reports;
- * missing values fall back to a plain "Not reported by this build".
+ * Updates NEVER runs PAX, NEVER cooks, bakes, or schedules, and NEVER shows a
+ * secret. Every value shown reflects state the broker already reports; missing
+ * values fall back to a plain "Not reported by this build".
  */
 import { useEffect, useRef, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
@@ -80,6 +80,30 @@ function formatLastCheckedLabel(iso: string | null): string | null {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+// Human-readable "Update checking" line for the Support details panel. Both the
+// stable and experimental channels have a working update check now, so this
+// reflects the most recent check instead of the old (and now false) static
+// "Not available in this build".
+function updateCheckingLabel(
+  state: 'idle' | 'checking' | 'uptodate' | 'available' | 'unavailable',
+  lastCheckedLabel: string | null,
+): string {
+  switch (state) {
+    case 'checking':
+      return 'Checking now\u2026';
+    case 'uptodate':
+      return lastCheckedLabel ? `Up to date (checked ${lastCheckedLabel})` : 'Up to date';
+    case 'available':
+      return 'An update is available';
+    case 'unavailable':
+      return lastCheckedLabel
+        ? `Last check didn\u2019t complete (last succeeded ${lastCheckedLabel})`
+        : 'Last check didn\u2019t complete';
+    default:
+      return 'Not checked yet';
+  }
 }
 
 // Friendly date for a build timestamp. Accepts both the app's dashed UTC build
@@ -258,7 +282,7 @@ export function UpdatesWorkspace() {
       ['Release channel', channel],
       ['PAX engine', engineStatus],
       ['Engine fingerprint', engineSha ?? NOT_REPORTED],
-      ['Update checking', 'Not available in this build'],
+      ['Update checking', updateCheckingLabel(checkState, formatLastCheckedLabel(lastChecked))],
     ];
     const labelWidth = Math.max(...rows.map(([key]) => key.length)) + 2;
     const body = rows
@@ -284,6 +308,9 @@ export function UpdatesWorkspace() {
   // dot; opening this page instead CLEARS that dot.
   const [checkState, setCheckState] =
     useState<'idle' | 'checking' | 'uptodate' | 'available' | 'unavailable'>('idle');
+  // Specific, user-facing reason for an 'unavailable' result (e.g. a GitHub rate
+  // limit), shown instead of the generic "make sure you're online" line.
+  const [checkDetail, setCheckDetail] = useState<string | null>(null);
   const [allComponents, setAllComponents] = useState<UpdateComponentStatus[]>([]);
   const [lastChecked, setLastChecked] = useState<string | null>(() => getLastCheckedUtc());
   const [applying, setApplying] = useState(false);
@@ -301,10 +328,13 @@ export function UpdatesWorkspace() {
     setLastChecked(getLastCheckedUtc());
     setAllComponents(result.allComponents);
     if (result.status === 'up-to-date') {
+      setCheckDetail(null);
       setCheckState('uptodate');
     } else if (result.status === 'updates-available') {
+      setCheckDetail(null);
       setCheckState('available');
     } else {
+      setCheckDetail(result.detail ?? null);
       setCheckState('unavailable');
     }
   }
@@ -420,7 +450,8 @@ export function UpdatesWorkspace() {
       ) : checkState === 'unavailable' ? (
         <div className="upd-status upd-status--warn" role="status">
           <span className="upd-status__text">
-            Couldn&rsquo;t check for updates just now. Make sure you are online, then try again.
+            {checkDetail ??
+              'Couldn\u2019t check for updates just now. Make sure you are online, then try again.'}
           </span>
         </div>
       ) : checkState === 'available' || checkState === 'uptodate' ? (
@@ -627,7 +658,9 @@ export function UpdatesWorkspace() {
             </div>
             <div className="settings-kv__row">
               <dt className="settings-kv__key">Update checking</dt>
-              <dd className="settings-kv__val">Not available in this build</dd>
+              <dd className="settings-kv__val">
+                {updateCheckingLabel(checkState, lastCheckedLabel)}
+              </dd>
             </div>
             <div className="settings-kv__row">
               <dt className="settings-kv__key">Engine fingerprint</dt>

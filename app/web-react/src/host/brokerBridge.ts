@@ -936,6 +936,100 @@ export async function getPantryRepo(
   return parsed as unknown as PantryRepoResult;
 }
 
+/**
+ * Result of GET /api/v1/updates/experimental-manifest. The broker discovers the
+ * newest experimental PRE-RELEASE server-side (calling the GitHub Releases API
+ * from the broker process, not the browser) and returns that release's
+ * versions.json text plus a specific state so the UI can explain a failure
+ * instead of a generic "make sure you're online". Only used by the experimental
+ * channel — the stable channel reads main/versions.json directly (unchanged).
+ */
+export interface ExperimentalManifestResult {
+  ok: boolean;
+  /**
+   * ok            — a newest pre-release manifest was fetched (manifestJson set)
+   * no_prerelease — no experimental build published yet (benign empty state)
+   * rate_limited  — GitHub rate-limited the request (403/429)
+   * network_error — the broker could not reach GitHub
+   * github_error  — GitHub returned another HTTP error
+   * bad_response  — releases/manifest JSON was malformed or unexpected
+   * locked        — the appliance is locked (423)
+   * unreachable   — the broker itself could not be reached
+   */
+  state:
+    | 'ok'
+    | 'no_prerelease'
+    | 'rate_limited'
+    | 'network_error'
+    | 'github_error'
+    | 'bad_response'
+    | 'locked'
+    | 'unreachable';
+  /** Raw versions.json text of the newest pre-release (present only when state === 'ok'). */
+  manifestJson?: string;
+  /** Human-readable reason for a non-ok state, safe to show in the UI. */
+  detail?: string;
+}
+
+const EXPERIMENTAL_MANIFEST_PATH = '/api/v1/updates/experimental-manifest';
+
+/**
+ * GET /api/v1/updates/experimental-manifest. The broker performs the GitHub
+ * Releases API lookup server-side (sidestepping WebView CORS, corporate-proxy
+ * behavior, and api.github.com's per-IP rate limit) and returns the newest
+ * pre-release's versions.json text plus a typed state. Never throws — transport
+ * failures resolve to a clean { ok:false, state:'unreachable' }.
+ */
+export async function getExperimentalUpdateManifest(
+  options: RecipeRequestOptions = {},
+): Promise<ExperimentalManifestResult> {
+  adoptBootstrapToken();
+
+  const controller = new AbortController();
+  const timeoutMs =
+    typeof options.timeoutMs === 'number' ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (options.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(EXPERIMENTAL_MANIFEST_PATH, {
+      method: 'GET',
+      headers: buildHeaders(false),
+      signal: controller.signal,
+    });
+  } catch {
+    clearTimeout(timer);
+    return { ok: false, state: 'unreachable', detail: 'Unable to reach PAX Cookbook.' };
+  }
+  clearTimeout(timer);
+
+  if (response.status === 423) {
+    return { ok: false, state: 'locked', detail: 'The appliance is locked.' };
+  }
+
+  const rawText = await safeText(response);
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    parsed = JSON.parse(rawText) as Record<string, unknown>;
+  } catch {
+    parsed = null;
+  }
+
+  if (!parsed || typeof parsed.ok !== 'boolean' || typeof parsed.state !== 'string') {
+    return { ok: false, state: 'bad_response', detail: 'PAX Cookbook returned an unexpected response.' };
+  }
+
+  // The broker owns the response shape; pass it through as the typed result.
+  return parsed as unknown as ExperimentalManifestResult;
+}
+
 /** One entry in a Pantry repository directory listing (a file or a folder). */
 export interface PantryContentItem {
   name: string;

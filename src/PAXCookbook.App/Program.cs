@@ -921,6 +921,24 @@ internal static class Program
             (Func<HttpContext, Task<IResult>>)((ctx) =>
                 PantryProxy.HandleContentsAsync(ctx, versionInfo)));
 
+        // Experimental update-check proxy. Read-only GET that discovers the
+        // experimental channel's newest build server-side: it calls the GitHub
+        // Releases API (fixed URL, our repo), picks the newest PRE-RELEASE by
+        // created_at, fetches that release's versions.json asset (host-validated
+        // to GitHub), and returns the manifest plus a specific state
+        // (ok / no_prerelease / rate_limited / network_error / github_error /
+        // bad_response) so the UI can explain a failure instead of a generic
+        // message. The BROKER makes the outbound calls (not the WebView2
+        // renderer), matching the Pantry pattern and sidestepping browser-side
+        // CORS / corporate-proxy / api.github.com per-IP rate-limit issues. Same
+        // Bearer + lock-gated posture as every other /api/v1 route; single GET,
+        // no cookies/credentials, byte-capped, time-bounded; never runs PAX,
+        // mutates state, or reads a secret. The STABLE channel does NOT use this
+        // route (it reads raw main/versions.json directly, unchanged).
+        app.MapGet("/api/v1/updates/experimental-manifest",
+            (Func<HttpContext, Task<IResult>>)((ctx) =>
+                ExperimentalUpdateProxy.HandleAsync(ctx, versionInfo)));
+
         // Pantry file download proxy. Read-only GET that fetches one file from
         // GitHub and streams it back so the SPA can preview or save it in-app
         // (the README, file tree, and file previews never leave the appliance

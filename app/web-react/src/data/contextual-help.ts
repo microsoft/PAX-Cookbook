@@ -364,7 +364,7 @@ export const CONTEXTUAL_HELP_TOPICS: Record<
   },
   cookbookUpdates: {
     title: 'Updates',
-    body: 'Updates shows the version and status of the build installed on this PC: the app version and release channel, the managed PAX engine version and fingerprint, and clear support details. Online update checking is not available in this build, so PAX Cookbook never contacts an update service and never downloads or installs updates. To move to a newer build, install the release package you were given for internal testing; your saved recipes stay on this PC.',
+    body: 'Updates shows the version and status of the build installed on this PC: the app version and release channel, the managed PAX engine version and fingerprint, and clear support details. PAX Cookbook checks for updates automatically when it starts, and you can also check manually here; when a newer build is available you can apply it in one step, and the download is verified before it is installed. Your saved recipes stay on this PC.',
   },
 
   // ---------------------------------------------------------------------------

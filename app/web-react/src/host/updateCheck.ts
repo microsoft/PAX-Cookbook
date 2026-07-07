@@ -13,14 +13,16 @@
  * immutable per release, so in practice the app version is what moves.
  */
 import { getRuntimeVersion, getPaxEngineState } from './systemInfo';
+import { getExperimentalUpdateManifest } from './brokerBridge';
 
 const VERSIONS_URL =
   'https://raw.githubusercontent.com/microsoft/PAX-Cookbook/main/versions.json';
-// Experimental channel discovery: the GitHub releases API. Production (stable)
-// never touches this URL; only a build whose installed channel is exactly
-// 'experimental' queries it (see resolveChannel — anything else is stable).
-const RELEASES_API_URL =
-  'https://api.github.com/repos/microsoft/PAX-Cookbook/releases';
+// Experimental channel discovery now runs SERVER-SIDE through the broker
+// (/api/v1/updates/experimental-manifest) — the broker calls the GitHub
+// Releases API from its own process, never the WebView2 renderer. This matches
+// the Pantry pattern and sidesteps browser-context CORS, corporate-proxy
+// behavior, and api.github.com's per-IP rate limit. The stable channel below
+// still reads main/versions.json directly (unchanged).
 const LAST_CHECK_KEY = 'pax.updates.lastCheckedUtc';
 
 export interface UpdateComponent {
@@ -38,6 +40,13 @@ export interface UpdateComponent {
 
 export interface UpdateCheckResult {
   status: 'up-to-date' | 'updates-available' | 'unavailable';
+  /**
+   * A specific, user-facing reason when status is 'unavailable' (e.g. a GitHub
+   * rate limit or an unexpected response). Undefined for a successful check.
+   * The Updates page shows this instead of the generic "make sure you're
+   * online" message when present.
+   */
+  detail?: string;
   components: UpdateComponent[];
   /**
    * Both components (app + engine) ALWAYS, each flagged with whether it has an
@@ -137,6 +146,10 @@ function setLastCheckedUtc(iso: string): void {
  * in versions.json (only its payload SHA moves per pre-release), so the SHA
  * compare already handles it and parseVersion/isNewer never see a release tag.
  */
+function unavailable(detail?: string): UpdateCheckResult {
+  return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null, detail };
+}
+
 export async function checkForUpdates(): Promise<UpdateCheckResult> {
   // Runtime + engine state first: the runtime channel decides the source, and
   // both branches need these values anyway. Fetch order does not affect the
@@ -145,16 +158,39 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   const channel = resolveChannel(ver.ok && ver.data ? ver.data.releaseChannel : null);
 
   let remote: unknown;
-  try {
-    remote =
-      channel === 'experimental'
-        ? await fetchExperimentalManifest()
-        : await fetchStableManifest();
-  } catch {
-    return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
-  }
-  if (remote == null || typeof remote !== 'object') {
-    return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
+  if (channel === 'experimental') {
+    // Experimental discovery runs SERVER-SIDE through the broker — never a
+    // browser-direct api.github.com fetch — so it is not subject to WebView
+    // CORS, corporate proxy behavior, or api.github.com's per-IP rate limit.
+    // The broker returns a specific state so a failure can be explained rather
+    // than shown as a generic "make sure you're online".
+    const exp = await getExperimentalUpdateManifest();
+    if (exp.state === 'ok' && exp.manifestJson) {
+      try {
+        remote = JSON.parse(exp.manifestJson);
+      } catch {
+        return unavailable('The experimental update information was unreadable.');
+      }
+    } else if (exp.state === 'no_prerelease') {
+      return unavailable('No experimental builds are currently published.');
+    } else {
+      return unavailable(
+        exp.detail ?? 'Couldn\u2019t check for experimental updates just now.',
+      );
+    }
+    if (remote == null || typeof remote !== 'object') {
+      return unavailable('The experimental update information was unreadable.');
+    }
+  } else {
+    // Stable channel — UNCHANGED: read the fixed main/versions.json directly.
+    try {
+      remote = await fetchStableManifest();
+    } catch {
+      return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
+    }
+    if (remote == null || typeof remote !== 'object') {
+      return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
+    }
   }
 
   const checkedAtUtc = new Date().toISOString();
@@ -184,60 +220,6 @@ async function fetchStableManifest(): Promise<unknown> {
     return null;
   }
   return await res.json();
-}
-
-/**
- * Experimental manifest: the newest GitHub PRE-RELEASE, selected by created_at
- * (descending) — NOT by version parsing — then that release's attached
- * versions.json asset (which carries the payload SHA gate). Returns null on any
- * miss so the caller reports 'unavailable' and stays silent.
- */
-async function fetchExperimentalManifest(): Promise<unknown> {
-  const res = await fetch(`${RELEASES_API_URL}?per_page=100&cb=${Date.now()}`, {
-    method: 'GET',
-    cache: 'no-store',
-    headers: { Accept: 'application/vnd.github+json' },
-  });
-  if (!res.ok) {
-    return null;
-  }
-  const releases = await res.json();
-  if (!Array.isArray(releases)) {
-    return null;
-  }
-  const prereleases = releases.filter(
-    (r) =>
-      r &&
-      typeof r === 'object' &&
-      (r as { prerelease?: unknown }).prerelease === true &&
-      (r as { draft?: unknown }).draft !== true,
-  );
-  if (prereleases.length === 0) {
-    return null;
-  }
-  // Newest first by created_at. This — not isNewer/parseVersion — is how the
-  // experimental channel decides WHICH release to compare against.
-  prereleases.sort(
-    (a, b) =>
-      Date.parse((b as { created_at?: string }).created_at ?? '') -
-      Date.parse((a as { created_at?: string }).created_at ?? ''),
-  );
-  const newest = prereleases[0] as { assets?: unknown };
-  const assets = Array.isArray(newest.assets) ? newest.assets : [];
-  const manifestAsset = assets.find(
-    (a) => a && typeof a === 'object' && (a as { name?: unknown }).name === 'versions.json',
-  ) as { browser_download_url?: unknown } | undefined;
-  if (!manifestAsset || typeof manifestAsset.browser_download_url !== 'string') {
-    return null;
-  }
-  const mres = await fetch(`${manifestAsset.browser_download_url}?cb=${Date.now()}`, {
-    method: 'GET',
-    cache: 'no-store',
-  });
-  if (!mres.ok) {
-    return null;
-  }
-  return await mres.json();
 }
 
 /**
