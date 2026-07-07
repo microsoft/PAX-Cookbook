@@ -147,10 +147,7 @@ a:focus-visible {
 
 .app {
     display: grid;
-    /* Leading auto row hosts the experimental-channel banner. It collapses to
-       zero height when the banner is empty (stable builds), so the topbar/body/
-       footer sit exactly where they did before this row existed. */
-    grid-template-rows: auto var(--topbar-h) 1fr;
+    grid-template-rows: var(--topbar-h) 1fr;
     min-height: 100vh;
 }
 
@@ -4310,7 +4307,14 @@ body.ux-redesign {
     overflow: hidden;
 }
 body.ux-redesign .app {
-    grid-template-rows: var(--ux-topbar-h) 1fr auto;
+    /* Leading auto row hosts the experimental-channel banner. This is the ACTIVE
+       shell grid (body is always .ux-redesign), so the banner track must live
+       here - not on the base .app rule, which this overrides. The auto row sizes
+       to the banner's own content: zero height when the banner is empty (stable
+       builds) and ~one line of small text on experimental builds. The topbar
+       (var(--ux-topbar-h)), body (1fr), and footer (auto) rows are unchanged, so
+       the banner is the only added track and nothing else shifts on stable. */
+    grid-template-rows: auto var(--ux-topbar-h) 1fr auto;
     height: 100vh;
     min-height: 0;
 }

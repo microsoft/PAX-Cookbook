@@ -69,12 +69,43 @@ public sealed class Win32ShortcutWriter : IShortcutWriter
 
         var bytes = File.ReadAllBytes(lnk);
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+        // The .lnk is now fully written and flushed: IPersistFile.Save commits and
+        // closes the file synchronously, and the File.ReadAllBytes above proves it
+        // is complete and unlocked on disk. Release the shell-link COM object, then
+        // notify the shell that a new item exists so Explorer and the Start Menu
+        // app list re-index it immediately instead of waiting for their own
+        // folder-watch to notice a programmatically written .lnk. SHCNE_CREATE
+        // targets the .lnk; SHCNE_UPDATEDIR refreshes the parent folder for the
+        // Start Menu cache. Advisory only — a notification failure must never fail
+        // the install, since the shortcut is already written and verified above.
+        try
+        {
+            Marshal.FinalReleaseComObject(shellLink);
+            SHChangeNotify(SHCNE_CREATE, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, lnk, IntPtr.Zero);
+            SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, folderPath, IntPtr.Zero);
+        }
+        catch { /* shell notification is best-effort; the .lnk is already on disk */ }
+
         return new ShortcutWriteResult(lnk, sha, excludeAttempted, excludeOk);
     }
 
     public void Delete(string lnkPath)
     {
-        if (File.Exists(lnkPath)) File.Delete(lnkPath);
+        if (!File.Exists(lnkPath)) return;
+        File.Delete(lnkPath);
+
+        // Symmetric with Write: notify the shell the item is gone so Explorer and
+        // the Start Menu app list drop it promptly rather than showing a stale
+        // entry until their own folder-watch catches up. Advisory only.
+        try
+        {
+            SHChangeNotify(SHCNE_DELETE, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, lnkPath, IntPtr.Zero);
+            var parent = Path.GetDirectoryName(lnkPath);
+            if (!string.IsNullOrEmpty(parent))
+                SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, parent, IntPtr.Zero);
+        }
+        catch { /* shell notification is best-effort */ }
     }
 
     // Read-only .lnk metadata via IShellLinkW (the same WDAC-safe COM path used
@@ -207,6 +238,25 @@ public sealed class Win32ShortcutWriter : IShortcutWriter
 
     [DllImport("ole32.dll")]
     private static extern int PropVariantClear(ref PROPVARIANT pvar);
+
+    // Shell change notification — tells Explorer / the Start Menu that a shortcut
+    // was created or removed so its cached app list updates immediately, rather
+    // than relying on the shell's own best-effort folder-watch (which can miss a
+    // programmatically written .lnk, leaving it absent from the Start Menu app
+    // list even though it exists on disk). SHChangeNotify has no A/W variants; the
+    // SHCNF_PATHW flag selects the wide-string form of dwItem1/dwItem2.
+    [DllImport("shell32.dll", ExactSpelling = true)]
+    private static extern void SHChangeNotify(int wEventId, uint uFlags, [MarshalAs(UnmanagedType.LPWStr)] string dwItem1, IntPtr dwItem2);
+
+    // SHCNE_* event IDs and SHCNF_* flags for SHChangeNotify. For SHCNE_CREATE,
+    // SHCNE_DELETE and SHCNE_UPDATEDIR only dwItem1 is used (dwItem2 is null).
+    // SHCNF_PATHW marks dwItem1 as a wide-string path; SHCNF_FLUSHNOWAIT forces
+    // the notification to be dispatched immediately without blocking the caller.
+    private const int SHCNE_CREATE = 0x00000002;
+    private const int SHCNE_DELETE = 0x00000004;
+    private const int SHCNE_UPDATEDIR = 0x00001000;
+    private const uint SHCNF_PATHW = 0x0005;
+    private const uint SHCNF_FLUSHNOWAIT = 0x2000;
 
     private sealed class PropVariantString : IDisposable
     {
