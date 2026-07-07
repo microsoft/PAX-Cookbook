@@ -1655,6 +1655,64 @@ export function setAutostartEnabled(
   return request<AutostartSetResult>('POST', AUTOSTART_PATH, { enabled }, options);
 }
 
+const ANNOUNCEMENT_PATH = '/api/v1/system/announcement';
+
+/** One archived What's New entry (feature D). */
+export interface WhatsNewEntryDto {
+  id: string;
+  title: string;
+  date: string | null;
+  /** Per-entry "show this at startup" preference (the checkbox state). */
+  showAgain: boolean;
+  bodyMarkdown: string;
+  /** filename -> data: URI for LOCAL images in this entry's own sandboxed folder. */
+  images: Record<string, string>;
+}
+
+/** Body of GET /api/v1/system/announcement — the full What's New history. */
+export interface AnnouncementHistory {
+  /** Entries newest-first. */
+  entries: WhatsNewEntryDto[];
+  /**
+   * True only right after an in-app update while the NEWEST entry is still
+   * "show at startup" — NEVER on a fresh Setup or manual-kit install.
+   */
+  autoShow: boolean;
+  newestId: string | null;
+}
+
+/** Body of POST /api/v1/system/announcement. */
+export interface AnnouncementPreferenceResult {
+  ok: boolean;
+  id: string;
+  showAgain: boolean;
+}
+
+/**
+ * GET /api/v1/system/announcement — archive any newly-shipped entry (only after
+ * an in-app update; NEVER on a fresh install) and return the full What's New
+ * history newest-first, with sandboxed local image data-URIs, plus the autoShow
+ * decision. Used by BOTH the startup auto-popup and the on-demand browser.
+ */
+export function getAnnouncementHistory(
+  options: RecipeRequestOptions = {},
+): Promise<BrokerResponse<AnnouncementHistory>> {
+  return request<AnnouncementHistory>('GET', ANNOUNCEMENT_PATH, undefined, options);
+}
+
+/**
+ * POST /api/v1/system/announcement — record the per-entry "show this at startup"
+ * choice. `false` is a one-way per-entry dismiss (that entry stops auto-showing
+ * but stays browsable on demand); `true` (re)enables it.
+ */
+export function setAnnouncementShowAgain(
+  id: string,
+  showAgain: boolean,
+  options: RecipeRequestOptions = {},
+): Promise<BrokerResponse<AnnouncementPreferenceResult>> {
+  return request<AnnouncementPreferenceResult>('POST', ANNOUNCEMENT_PATH, { id, showAgain }, options);
+}
+
 const OPEN_PATH_PATH = '/api/v1/open-path';
 
 /** Body of POST /api/v1/open-path. */

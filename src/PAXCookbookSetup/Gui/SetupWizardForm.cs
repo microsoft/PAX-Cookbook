@@ -35,6 +35,12 @@ internal sealed class SetupWizardForm : Form
     private PictureBox _logoBox = null!;
     private PictureBox _msLogoBox = null!;
     private Label _headerTitle = null!;
+    // Experimental (test-channel) chrome. Stamped into this installer at build
+    // time (AssemblyMetadata "PaxChannel", set by tools\release\Build-Setup.ps1).
+    // The SAME single flag drives BOTH the "(Experimental)" title marker and the
+    // one-line banner below — no other trigger. Stable builds get neither.
+    private readonly bool _isExperimental = SetupChannel.IsExperimental(SetupChannel.Resolve());
+    private Panel? _experimentalBanner;
 
     // Footer
     private Button _btnBack = null!, _btnNext = null!, _btnCancel = null!;
@@ -80,7 +86,13 @@ internal sealed class SetupWizardForm : Form
     // -----------------------------------------------------------------
     private void BuildForm()
     {
-        Text = "PAX Cookbook Setup";
+        // Experimental (pre-release) installers carry an "(Experimental)" title
+        // marker plus a one-line banner (added below) so a tester can never
+        // mistake a test build's wizard for the production installer. Stable
+        // installers keep the bare title and show no banner.
+        Text = _isExperimental
+            ? "PAX Cookbook Setup (Experimental)"
+            : "PAX Cookbook Setup";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = true;
@@ -106,8 +118,15 @@ internal sealed class SetupWizardForm : Form
             Controls.Add(p);
         }
         // Header and footer are added last so they keep their docked edges
-        // above the fill panels in z-order.
+        // above the fill panels in z-order. On experimental builds the banner is
+        // added AFTER the header so it claims the very top edge (above the
+        // header), across every wizard step.
         Controls.Add(_header);
+        if (_isExperimental)
+        {
+            _experimentalBanner = BuildExperimentalBanner();
+            Controls.Add(_experimentalBanner);
+        }
         Controls.Add(_footerPanel);
     }
 
@@ -137,6 +156,33 @@ internal sealed class SetupWizardForm : Form
         _header.Controls.Add(_msLogoBox);
         _header.Controls.Add(_headerTitle);
         _header.Controls.Add(rule);
+    }
+
+    // A thin, unmissable-but-not-alarming notice strip shown ONLY on
+    // experimental builds (SetupChannel.IsExperimental at build time). Soft amber
+    // "info" tone — deliberately not error-red; this is a label, not a fault.
+    // Docked at the very top of the form so it reads on every wizard step.
+    private Panel BuildExperimentalBanner()
+    {
+        var banner = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 28,
+            BackColor = Color.FromArgb(0xFF, 0xF4, 0xCE),
+        };
+        var rule = new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Color.FromArgb(0xE6, 0xC9, 0x6B) };
+        var label = new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "Experimental test build \u2014 not for production",
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(0x5A, 0x3D, 0x00),
+            AutoSize = false,
+        };
+        banner.Controls.Add(label);
+        banner.Controls.Add(rule);
+        return banner;
     }
 
     private void BuildFooter()

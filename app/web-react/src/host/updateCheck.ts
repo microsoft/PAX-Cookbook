@@ -16,6 +16,11 @@ import { getRuntimeVersion, getPaxEngineState } from './systemInfo';
 
 const VERSIONS_URL =
   'https://raw.githubusercontent.com/microsoft/PAX-Cookbook/main/versions.json';
+// Experimental channel discovery: the GitHub releases API. Production (stable)
+// never touches this URL; only a build whose installed channel is exactly
+// 'experimental' queries it (see resolveChannel — anything else is stable).
+const RELEASES_API_URL =
+  'https://api.github.com/repos/microsoft/PAX-Cookbook/releases';
 const LAST_CHECK_KEY = 'pax.updates.lastCheckedUtc';
 
 export interface UpdateComponent {
@@ -123,25 +128,129 @@ function setLastCheckedUtc(iso: string): void {
 /**
  * Check GitHub for a newer release and compare against the installed build.
  * Never throws — failures resolve to `status: 'unavailable'`.
+ *
+ * Channel-aware: the installed channel (from runtime/version) selects the
+ * discovery source. 'stable' (and anything that is NOT exactly 'experimental')
+ * reads main/versions.json exactly as before. 'experimental' reads the newest
+ * GitHub pre-release's attached versions.json instead. The comparison logic is
+ * identical for both — an experimental build keeps the plain cookbook version
+ * in versions.json (only its payload SHA moves per pre-release), so the SHA
+ * compare already handles it and parseVersion/isNewer never see a release tag.
  */
 export async function checkForUpdates(): Promise<UpdateCheckResult> {
+  // Runtime + engine state first: the runtime channel decides the source, and
+  // both branches need these values anyway. Fetch order does not affect the
+  // result (independent reads).
+  const [ver, eng] = await Promise.all([getRuntimeVersion(), getPaxEngineState()]);
+  const channel = resolveChannel(ver.ok && ver.data ? ver.data.releaseChannel : null);
+
   let remote: unknown;
   try {
-    const res = await fetch(`${VERSIONS_URL}?cb=${Date.now()}`, {
-      method: 'GET',
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
-    }
-    remote = await res.json();
+    remote =
+      channel === 'experimental'
+        ? await fetchExperimentalManifest()
+        : await fetchStableManifest();
   } catch {
+    return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
+  }
+  if (remote == null || typeof remote !== 'object') {
     return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null };
   }
 
   const checkedAtUtc = new Date().toISOString();
   setLastCheckedUtc(checkedAtUtc);
 
+  return buildUpdateResult(remote, ver, eng, checkedAtUtc);
+}
+
+/**
+ * Fail-safe channel resolution: the experimental discovery path runs ONLY when
+ * the installed channel is EXACTLY 'experimental'. Missing, malformed,
+ * 'unknown', 'stable', or any other value collapses to 'stable' so a production
+ * build can never accidentally follow the pre-release path.
+ */
+function resolveChannel(raw: string | null | undefined): 'stable' | 'experimental' {
+  const c = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return c === 'experimental' ? 'experimental' : 'stable';
+}
+
+/** Stable manifest: the fixed versions.json on main (production, unchanged). */
+async function fetchStableManifest(): Promise<unknown> {
+  const res = await fetch(`${VERSIONS_URL}?cb=${Date.now()}`, {
+    method: 'GET',
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    return null;
+  }
+  return await res.json();
+}
+
+/**
+ * Experimental manifest: the newest GitHub PRE-RELEASE, selected by created_at
+ * (descending) — NOT by version parsing — then that release's attached
+ * versions.json asset (which carries the payload SHA gate). Returns null on any
+ * miss so the caller reports 'unavailable' and stays silent.
+ */
+async function fetchExperimentalManifest(): Promise<unknown> {
+  const res = await fetch(`${RELEASES_API_URL}?per_page=100&cb=${Date.now()}`, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) {
+    return null;
+  }
+  const releases = await res.json();
+  if (!Array.isArray(releases)) {
+    return null;
+  }
+  const prereleases = releases.filter(
+    (r) =>
+      r &&
+      typeof r === 'object' &&
+      (r as { prerelease?: unknown }).prerelease === true &&
+      (r as { draft?: unknown }).draft !== true,
+  );
+  if (prereleases.length === 0) {
+    return null;
+  }
+  // Newest first by created_at. This — not isNewer/parseVersion — is how the
+  // experimental channel decides WHICH release to compare against.
+  prereleases.sort(
+    (a, b) =>
+      Date.parse((b as { created_at?: string }).created_at ?? '') -
+      Date.parse((a as { created_at?: string }).created_at ?? ''),
+  );
+  const newest = prereleases[0] as { assets?: unknown };
+  const assets = Array.isArray(newest.assets) ? newest.assets : [];
+  const manifestAsset = assets.find(
+    (a) => a && typeof a === 'object' && (a as { name?: unknown }).name === 'versions.json',
+  ) as { browser_download_url?: unknown } | undefined;
+  if (!manifestAsset || typeof manifestAsset.browser_download_url !== 'string') {
+    return null;
+  }
+  const mres = await fetch(`${manifestAsset.browser_download_url}?cb=${Date.now()}`, {
+    method: 'GET',
+    cache: 'no-store',
+  });
+  if (!mres.ok) {
+    return null;
+  }
+  return await mres.json();
+}
+
+/**
+ * Compare a resolved manifest against installed runtime/engine state and build
+ * the result. Shared verbatim by both channels — the only channel difference is
+ * where `remote` came from (see fetchStableManifest / fetchExperimentalManifest).
+ */
+function buildUpdateResult(
+  remote: unknown,
+  ver: Awaited<ReturnType<typeof getRuntimeVersion>>,
+  eng: Awaited<ReturnType<typeof getPaxEngineState>>,
+  checkedAtUtc: string,
+): UpdateCheckResult {
   const current =
     remote && typeof remote === 'object'
       ? ((remote as { current?: Record<string, unknown> }).current ?? {})
@@ -160,7 +269,6 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   const remoteEngineVer = typeof engine.version === 'string' ? engine.version : null;
   const remoteEngineSha = typeof engine.sha256 === 'string' ? engine.sha256 : null;
 
-  const [ver, eng] = await Promise.all([getRuntimeVersion(), getPaxEngineState()]);
   const installedApp = ver.ok && ver.data ? ver.data.cookbookVersion : null;
   const installedBuildTs = ver.ok && ver.data ? ver.data.buildTimestamp : null;
   const installedPayloadSha = ver.ok && ver.data ? ver.data.installedPayloadSha256 : null;

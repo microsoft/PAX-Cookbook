@@ -25,6 +25,14 @@ internal static class Program
     private const string AppName = "PAX Cookbook";
     private const string RuntimeKind = "dotnet-kestrel";
 
+    // The native window title. Experimental (test-channel) builds append an
+    // " — Experimental" suffix so a tester can never confuse a pre-release
+    // window with a production one. Stable builds keep the bare product name.
+    private static string WindowTitle(VersionInfo versionInfo)
+        => string.Equals(versionInfo.ReleaseChannel, "experimental", StringComparison.OrdinalIgnoreCase)
+            ? AppName + " \u2014 Experimental"
+            : AppName;
+
     // Stable Windows taskbar identity. MUST exactly match
     // PAXCookbook.Shared.ProductConstants.Aumid — the value the Start-menu
     // shortcut is stamped with (the App project does not reference Shared, so the
@@ -554,7 +562,7 @@ internal static class Program
                 int attachExit = 0;
                 try
                 {
-                    WebViewShell.Run(attachUrl, AppName, iconPath, attachUserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir, showTray: false);
+                    WebViewShell.Run(attachUrl, WindowTitle(versionInfo), iconPath, attachUserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir, showTray: false);
                 }
                 catch (WebView2RuntimeMissingException ex)
                 {
@@ -1316,6 +1324,26 @@ internal static class Program
             return Results.Json(body, statusCode: status);
         });
 
+        // "What's New" release-history (feature D). Behind the same Bearer + CSRF
+        // + broker-lock gate as the other routes (enforced upstream). GET archives
+        // any newly-shipped entry (only after a successful in-app update — never a
+        // fresh install) and returns the full history newest-first + the autoShow
+        // decision + sandboxed image data-URIs. POST { id, showAgain } records the
+        // per-entry "show this again at startup" choice. The on-demand browser
+        // uses the same GET and works any time (empty until an update archives).
+        app.MapGet("/api/v1/system/announcement", () =>
+        {
+            (int status, object body) = AnnouncementModel.GetHistory(appRoot);
+            return Results.Json(body, statusCode: status);
+        });
+
+        app.MapPost("/api/v1/system/announcement", async (HttpContext context) =>
+        {
+            object? announcementBody = await JsonModel.ReadBodyAsync(context);
+            (int status, object body) = AnnouncementModel.SetShowAgain(announcementBody, appRoot);
+            return Results.Json(body, statusCode: status);
+        });
+
         // POST /api/v1/updates/apply — start an in-place update by handing off to
         // the installed Setup's `update` verb (which downloads the latest payload,
         // stops every PAX Cookbook process, and copies the new files). Bearer +
@@ -1911,7 +1939,7 @@ internal static class Program
         StartupLog.Mark("Startup complete \u2014 opening application window");
         try
         {
-            WebViewShell.Run(url, AppName, iconPath, webView2UserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir);
+            WebViewShell.Run(url, WindowTitle(versionInfo), iconPath, webView2UserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir);
         }
         catch (WebView2RuntimeMissingException ex)
         {

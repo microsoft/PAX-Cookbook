@@ -31,7 +31,7 @@ import {
   listUpcomingScheduled,
 } from '../host/brokerBridge';
 import { postCloseDecision } from '../host/closeHandoff';
-import { setUpdatesBadge } from './shellNav';
+import { setUpdatesBadge, requestWhatsNew } from './shellNav';
 import {
   getRuntimeVersion,
   getPaxEngineState,
@@ -394,6 +394,23 @@ export function UpdatesWorkspace() {
         helpTopic="cookbookUpdates"
         accent="var(--c-slate)"
       />
+
+      {/* On-demand "What's New" highlight reel (feature D). Always available,
+          independent of the auto-popup gating; opens to the newest entry. */}
+      <div className="upd-whatsnew">
+        <button
+          type="button"
+          className="upd-whatsnew__btn"
+          onClick={() => requestWhatsNew()}
+        >
+          <span className="upd-whatsnew__spark" aria-hidden="true">✨</span>
+          <span className="upd-whatsnew__label">
+            <span className="upd-whatsnew__title">What&apos;s New</span>
+            <span className="upd-whatsnew__sub">See the latest feature highlights</span>
+          </span>
+          <span className="upd-whatsnew__chevron" aria-hidden="true">›</span>
+        </button>
+      </div>
 
       {checkState === 'checking' ? (
         <div className="upd-status upd-status--checking" role="status">

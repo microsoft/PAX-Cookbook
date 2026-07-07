@@ -50,6 +50,7 @@ param(
     [string]$AppVersion    = '',
     [string]$SetupVersion  = '',
     [string]$BuildId       = '',
+    [string]$Channel       = '',
     [switch]$SkipReactBuild
 )
 
@@ -67,9 +68,20 @@ $versionJson = Join-Path $root 'app\VERSION.json'
 if (-not (Test-Path $versionJson)) { throw "VERSION.json missing at: $versionJson" }
 $versionInfo = Get-Content $versionJson -Raw | ConvertFrom-Json
 $canonicalVersion = $versionInfo.cookbook.version
-$channel = $versionInfo.channel
+# Channel resolution: an explicit -Channel wins; else the source VERSION.json's
+# channel; else 'stable'. Only 'stable' and 'experimental' are valid — anything
+# else is a hard error so a typo can never silently mislabel a build.
+if (-not [string]::IsNullOrWhiteSpace($Channel)) {
+    $channel = $Channel
+} else {
+    $channel = $versionInfo.channel
+    if ([string]::IsNullOrWhiteSpace($channel)) { $channel = 'stable' }
+}
+$channel = ([string]$channel).Trim().ToLowerInvariant()
+if ($channel -ne 'stable' -and $channel -ne 'experimental') {
+    throw "Invalid -Channel '$channel'. Valid values: stable, experimental."
+}
 if ([string]::IsNullOrWhiteSpace($canonicalVersion)) { throw 'VERSION.json: cookbook.version is empty.' }
-if ([string]::IsNullOrWhiteSpace($channel)) { $channel = 'stable' }
 if ([string]::IsNullOrWhiteSpace($AppVersion))   { $AppVersion   = $canonicalVersion }
 if ([string]::IsNullOrWhiteSpace($SetupVersion)) { $SetupVersion = $canonicalVersion }
 
@@ -186,8 +198,17 @@ Invoke-Step '[3/7] stage payload tree' {
     } else {
         $vj.cookbook | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue $buildTimestamp
     }
+    # Stamp the resolved channel (stable|experimental) into the staged VERSION.json
+    # so the app can read its OWN channel at runtime and pick the matching update
+    # path. A stable build stamps 'stable' (the field is always present + explicit).
+    if ($vj.PSObject.Properties.Name -contains 'channel') {
+        $vj.channel = $channel
+    } else {
+        $vj | Add-Member -NotePropertyName 'channel' -NotePropertyValue $channel
+    }
     $vj | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $stagedVersionJson -Encoding UTF8
     Log "  stamped build timestamp into staged VERSION.json: $buildTimestamp"
+    Log "  stamped channel into staged VERSION.json: $channel"
 
     # Defensive scrub: never ship dev/build artifacts in the payload.
     Get-ChildItem $appDest -Recurse -Force -Directory |
@@ -215,6 +236,7 @@ Invoke-Step '[4/7] publish Setup stage-1 (self-contained, no payload)' {
         -c $Configuration -r win-x64 --self-contained true `
         -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:EnableCompressionInSingleFile=true -p:DebugType=embedded `
+        -p:PaxChannel=$channel `
         -o $pubSetupStage --nologo 2>&1 |
         Tee-Object -Append -FilePath $logFile | Out-Null
 }
@@ -236,6 +258,7 @@ Invoke-Step '[4b/8] publish Setup framework-dependent (payload\Setup)' {
     dotnet publish (Join-Path $root 'src\PAXCookbookSetup\PAXCookbookSetup.csproj') `
         -c $Configuration --self-contained false `
         -p:UseAppHost=false -p:DebugType=none -p:DebugSymbols=false `
+        -p:PaxChannel=$channel `
         -o $pubSetupFd --nologo 2>&1 |
         Tee-Object -Append -FilePath $logFile | Out-Null
 }
@@ -385,6 +408,7 @@ Invoke-Step '[7/8] publish Setup (self-contained, no payload)' {
         -c $Configuration -r win-x64 --self-contained true `
         -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:EnableCompressionInSingleFile=true -p:DebugType=embedded `
+        -p:PaxChannel=$channel `
         -o $pubSetupFinal --nologo 2>&1 |
         Tee-Object -Append -FilePath $logFile | Out-Null
 }
@@ -446,6 +470,7 @@ Invoke-Step 'update versions.json manifest' {
         schemaVersion = 1
         current = [ordered]@{
             version = $AppVersion
+            channel = $channel
             builtAtUtc = $builtAtUtc
             payload = [ordered]@{
                 filename = 'PAX_Cookbook_Payload.zip'
@@ -465,7 +490,7 @@ Invoke-Step 'update versions.json manifest' {
         }
     }
     $vm | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $versionsPath -Encoding UTF8
-    Log "  versions.json updated: payload sha=$payloadHash setup sha=$finalHash engine=$($versionInfo.paxScript.version) builtAtUtc=$builtAtUtc"
+    Log "  versions.json updated: channel=$channel payload sha=$payloadHash setup sha=$finalHash engine=$($versionInfo.paxScript.version) builtAtUtc=$builtAtUtc"
 }
 
 # ---------------------------------------------------------------------

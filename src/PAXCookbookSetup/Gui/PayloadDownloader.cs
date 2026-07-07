@@ -41,14 +41,56 @@ public sealed class PayloadDownloader
             catch { /* best-effort */ }
         }
 
-        // Fetch the versions manifest once up front. If it can't be reached or
-        // parsed, we degrade to zip-integrity-only checking (offline / proxy /
-        // air-gapped scenarios still install) rather than blocking the install.
-        var expectation = await new ManifestVerifier(_log).TryFetchAsync(cancel);
-        if (expectation is null)
+        // Resolve the download source for THIS installer's channel. The channel
+        // is stamped into the Setup assembly at build time (SetupChannel), so no
+        // caller-supplied URL crosses the trust boundary — an experimental
+        // installer discovers its own pre-release; a stable installer keeps the
+        // fixed release/manifest URLs unchanged.
+        string payloadUrl = PayloadUrl;
+        ManifestVerifier.PayloadExpectation? expectation;
+
+        if (SetupChannel.IsExperimental(SetupChannel.Resolve()))
         {
-            _progress("Version manifest unavailable — verifying download integrity only.");
-            _log.Write("payload-sha-skipped-no-manifest", "warning");
+            using var gh = new HttpPrereqDownloader();
+            var located = ExperimentalReleaseLocator.Locate(gh);
+            if (located is null)
+            {
+                _log.Write("experimental-release-locate-failed", "warning");
+                return new DownloadResult(false, null,
+                    "No experimental (pre-release) build was found. " +
+                    $"You can download builds manually from {ManualDownloadUrl}");
+            }
+
+            payloadUrl = located.PayloadUrl;
+            _log.Write("experimental-release-located", "info",
+                new Dictionary<string, object?>
+                {
+                    ["payloadUrl"] = located.PayloadUrl,
+                    ["manifestUrl"] = located.ManifestUrl
+                });
+
+            // The pre-release's attached versions.json carries the payload SHA
+            // gate. Fetch it through the host-validated downloader and parse it
+            // with the same parser the stable path uses.
+            string? manifestJson = gh.GetText(located.ManifestUrl, "application/json");
+            expectation = ManifestVerifier.Parse(manifestJson ?? string.Empty);
+            if (expectation is null)
+            {
+                _progress("Version manifest unavailable — verifying download integrity only.");
+                _log.Write("payload-sha-skipped-no-manifest", "warning");
+            }
+        }
+        else
+        {
+            // Stable: fetch the versions manifest once up front. If it can't be
+            // reached or parsed (offline / proxy / air-gapped), we degrade to
+            // zip-integrity-only checking rather than blocking the install.
+            expectation = await new ManifestVerifier(_log).TryFetchAsync(cancel);
+            if (expectation is null)
+            {
+                _progress("Version manifest unavailable — verifying download integrity only.");
+                _log.Write("payload-sha-skipped-no-manifest", "warning");
+            }
         }
 
         string? lastError = null;
@@ -56,7 +98,7 @@ public sealed class PayloadDownloader
         {
             try
             {
-                var result = await TryDownloadAsync(destPath, attempt, expectation, cancel);
+                var result = await TryDownloadAsync(destPath, attempt, expectation, payloadUrl, cancel);
                 if (result.Success)
                     return result;
 
@@ -109,13 +151,13 @@ public sealed class PayloadDownloader
     
     private async Task<DownloadResult> TryDownloadAsync(
         string destPath, int attempt, ManifestVerifier.PayloadExpectation? expectation,
-        CancellationToken cancel)
+        string payloadUrl, CancellationToken cancel)
     {
         // Validate the URL is allowed
-        if (!PrereqDownloadHosts.IsAllowed(PayloadUrl))
+        if (!PrereqDownloadHosts.IsAllowed(payloadUrl))
         {
             return new DownloadResult(false, null,
-                $"Payload URL not in allowed host list: {PayloadUrl}");
+                $"Payload URL not in allowed host list: {payloadUrl}");
         }
         
         using var handler = new HttpClientHandler
@@ -127,7 +169,7 @@ public sealed class PayloadDownloader
             Timeout = TimeSpan.FromMinutes(10)
         };
         
-        var url = PayloadUrl;
+        var url = payloadUrl;
         int redirectCount = 0;
         const int maxRedirects = 5;
         

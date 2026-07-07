@@ -16,7 +16,18 @@
          Setup EXE's Win32 resources so File Explorer and the wizard title bar
          show the product icon. -->
     <ApplicationIcon>..\..\app\web\images\pax-cookbook-app-icon.ico</ApplicationIcon>
+    <!--
+      Distribution channel stamped at build time by tools\release\Build-Setup.ps1
+      via -p:PaxChannel=<stable|experimental>. Defaults to 'stable' so a plain
+      build (and every test build of this project) is a stable installer. The
+      wizard reads this back through AssemblyMetadata to show the "(Experimental)"
+      marker on pre-release installers.
+    -->
+    <PaxChannel Condition="'$(PaxChannel)' == ''">stable</PaxChannel>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="PaxChannel" Value="$(PaxChannel)" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PAXCookbook.Shared\PAXCookbook.Shared.csproj" />
   </ItemGroup>

@@ -64,6 +64,24 @@ export const PENDING_IMPORT_COMMAND_KEY = 'cookbook.pendingImportCommand';
 /** Key used to hand a just-started cook from the editor to the Bakes surface. */
 export const PENDING_BAKE_SELECT_KEY = 'cookbook.pendingSelectBake';
 
+/**
+ * In-page signal to open the "What's New" history browser on demand (feature D).
+ * The Updates workspace calls requestWhatsNew(); App.tsx registers the listener
+ * and opens the modal. This is a plain module-level callback (both live in the
+ * same React app), independent of the auto-popup gating.
+ */
+let whatsNewListener: (() => void) | null = null;
+export function setWhatsNewListener(fn: (() => void) | null): void {
+  whatsNewListener = fn;
+}
+export function requestWhatsNew(): void {
+  try {
+    whatsNewListener?.();
+  } catch {
+    /* no listener mounted — harmless no-op */
+  }
+}
+
 function isEmbedded(): boolean {
   try {
     return typeof window !== 'undefined' && window.parent !== window;

@@ -13,7 +13,7 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactEl
 import { SHELL_SECTIONS } from './shell/sections';
 import { consultNavigationGuard } from './shell/navigationGuard';
 import { shellSectionHash, type ShellSectionId } from './shell/shellNav';
-import { setUpdatesBadge, requestShellSection, setUpdateAvailableStatus } from './shell/shellNav';
+import { setUpdatesBadge, requestShellSection, setUpdateAvailableStatus, setWhatsNewListener } from './shell/shellNav';
 import {
   clearImportTicketFromUrl,
   consumeImport,
@@ -28,11 +28,12 @@ import {
   postCloseDecision,
   subscribeHostCloseRequest,
 } from './host/closeHandoff';
-import { listCooks, shutdownBroker, applyUpdate } from './host/brokerBridge';
+import { listCooks, shutdownBroker, applyUpdate, getAnnouncementHistory, setAnnouncementShowAgain, type WhatsNewEntryDto } from './host/brokerBridge';
 import { setUpdateResultListener, runUpdateCheck } from './host/updateController';
 import type { UpdateComponent } from './host/updateCheck';
 import { UpdateAvailableModal } from './components/UpdateAvailableModal';
 import { StartupUpdateModal } from './components/StartupUpdateModal';
+import { AnnouncementModal } from './components/AnnouncementModal';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
 
 // Embedded content-only mode. When the React surface is hosted inside the
@@ -117,6 +118,16 @@ function App() {
   const autoUpdateDoneRef = useRef(false);
   const autoUpdateHasUpdatesRef = useRef(false);
   const startupModalResolvedRef = useRef(false);
+  // "What's New" history browser (feature D). Auto-appears after an in-app
+  // update, defaulting to the NEWEST entry, while that entry is still "show at
+  // startup"; also opened on demand from the Updates page (independent of the
+  // gating). entries are newest-first; selectedId drives the content pane.
+  const [whatsNew, setWhatsNew] = useState<{ open: boolean; entries: WhatsNewEntryDto[]; selectedId: string | null }>({
+    open: false,
+    entries: [],
+    selectedId: null,
+  });
+  const announcementResolvedRef = useRef(false);
   useEffect(() => {
     setUpdateResultListener((result) => {
       // The startup auto-check lights the subtle Settings nav dot (secondary
@@ -200,6 +211,96 @@ function App() {
       }
     };
   }, []);
+
+  // Release-announcement check. Runs once, AFTER Windows Hello unlock (the
+  // /api/v1/system/announcement route is lock-gated). The broker decides whether
+  // to show it (never on a fresh install); we just render the returned Markdown.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const tick = async (): Promise<void> => {
+      if (cancelled || announcementResolvedRef.current) {
+        return;
+      }
+      let lockState: string | null = null;
+      try {
+        lockState = await fetchLockState();
+      } catch {
+        lockState = null;
+      }
+      if (cancelled) {
+        return;
+      }
+      if (lockState !== 'Unlocked') {
+        timer = window.setTimeout(() => void tick(), LOCK_POLL_INTERVAL_MS);
+        return;
+      }
+      announcementResolvedRef.current = true;
+      try {
+        const res = await getAnnouncementHistory();
+        // Auto-open only when the broker says so (right after an in-app update,
+        // newest entry still "show at startup") — NEVER on a fresh install.
+        if (!cancelled && res.ok && res.data && res.data.autoShow && res.data.entries.length > 0) {
+          setWhatsNew({
+            open: true,
+            entries: res.data.entries,
+            selectedId: res.data.newestId ?? res.data.entries[0].id,
+          });
+        }
+      } catch {
+        /* any failure -> no popup (silent, like the update auto-check) */
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, []);
+
+  // On-demand "What's New": the Updates page calls requestWhatsNew(); we load
+  // the full history and open the browser to the newest entry, regardless of the
+  // auto-popup gating — works even after every entry has been dismissed (and on
+  // a fresh install it simply shows the empty state).
+  useEffect(() => {
+    setWhatsNewListener(() => {
+      void (async () => {
+        try {
+          const res = await getAnnouncementHistory();
+          const entries = res.ok && res.data ? res.data.entries : [];
+          const newestId = res.ok && res.data ? res.data.newestId : null;
+          setWhatsNew({
+            open: true,
+            entries,
+            selectedId: newestId ?? (entries.length > 0 ? entries[0].id : null),
+          });
+        } catch {
+          setWhatsNew({ open: true, entries: [], selectedId: null });
+        }
+      })();
+    });
+    return () => setWhatsNewListener(null);
+  }, []);
+
+  const handleWhatsNewClose = () => {
+    setWhatsNew((s) => ({ ...s, open: false }));
+    // Closing never changes any "show at startup" preference — the checkbox does.
+  };
+
+  const handleWhatsNewSelect = (id: string) => {
+    setWhatsNew((s) => ({ ...s, selectedId: id }));
+  };
+
+  const handleWhatsNewShowAgainChange = (id: string, showAgain: boolean) => {
+    // Reflect the toggle immediately, then persist the per-entry choice.
+    setWhatsNew((s) => ({
+      ...s,
+      entries: s.entries.map((e) => (e.id === id ? { ...e, showAgain } : e)),
+    }));
+    void setAnnouncementShowAgain(id, showAgain);
+  };
 
   const handleStartupViewUpdates = () => {
     setStartupUpdateOpen(false);
@@ -576,6 +677,15 @@ function App() {
           onViewUpdates={handleStartupViewUpdates}
           onNotNow={handleStartupNotNow}
         />
+
+        <AnnouncementModal
+          open={whatsNew.open}
+          entries={whatsNew.entries}
+          selectedId={whatsNew.selectedId}
+          onSelect={handleWhatsNewSelect}
+          onShowAgainChange={handleWhatsNewShowAgainChange}
+          onClose={handleWhatsNewClose}
+        />
       </div>
     );
   }
@@ -706,6 +816,15 @@ function App() {
         open={startupUpdateOpen}
         onViewUpdates={handleStartupViewUpdates}
         onNotNow={handleStartupNotNow}
+      />
+
+      <AnnouncementModal
+        open={whatsNew.open}
+        entries={whatsNew.entries}
+        selectedId={whatsNew.selectedId}
+        onSelect={handleWhatsNewSelect}
+        onShowAgainChange={handleWhatsNewShowAgainChange}
+        onClose={handleWhatsNewClose}
       />
     </div>
   );
