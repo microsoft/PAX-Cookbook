@@ -257,6 +257,21 @@
                 if (appVer) {
                     setText('app-footer-app', 'App ' + String(appVer));
                 }
+                // Experimental-channel banner. Gated PURELY on the installed
+                // channel from this same runtime/version payload (releaseChannel -
+                // the field the native window-title suffix also uses). Fail-safe:
+                // reveal ONLY when the value is EXACTLY "experimental"; stable,
+                // missing, or anything else leaves the banner empty and
+                // zero-height, so a stable build shows nothing.
+                var channel = (v.releaseChannel == null ? '' : String(v.releaseChannel))
+                    .trim().toLowerCase();
+                if (channel === 'experimental') {
+                    var banner = document.getElementById('experimental-banner');
+                    if (banner) {
+                        banner.textContent = 'Experimental test build \u2014 not for production';
+                        banner.classList.add('is-experimental');
+                    }
+                }
             }
         }).catch(function () { /* footer keeps its default text on failure */ });
 

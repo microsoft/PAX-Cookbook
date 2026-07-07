@@ -147,8 +147,33 @@ a:focus-visible {
 
 .app {
     display: grid;
-    grid-template-rows: var(--topbar-h) 1fr;
+    /* Leading auto row hosts the experimental-channel banner. It collapses to
+       zero height when the banner is empty (stable builds), so the topbar/body/
+       footer sit exactly where they did before this row existed. */
+    grid-template-rows: auto var(--topbar-h) 1fr;
     min-height: 100vh;
+}
+
+/* Experimental-channel banner (app-wide chrome). Gated purely at runtime by
+   integrated-shell.js on the runtime/version releaseChannel == "experimental" -
+   the SAME single signal as the window-title suffix and the Setup wizard
+   banner. Empty by default: no text, no padding, no border, so the leading grid
+   row is zero-height and a stable build shows nothing. When the channel is
+   experimental the shell sets the text + .is-experimental, which applies the
+   same soft-amber scheme as the Setup wizard banner (BuildExperimentalBanner). */
+.experimental-banner {
+    grid-row: 1;
+}
+.experimental-banner.is-experimental {
+    background: #FFF4CE;
+    border-bottom: 1px solid #E6C96B;
+    color: #5A3D00;
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.01em;
+    text-align: center;
+    padding: 3px var(--space-4);
+    line-height: 1.35;
 }
 
 .app-body {
