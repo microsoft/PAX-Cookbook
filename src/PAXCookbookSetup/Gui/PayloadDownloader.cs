@@ -7,6 +7,13 @@ namespace PAXCookbookSetup.Gui;
 // Used when the Setup exe does not embed the payload (lightweight bootstrapper).
 public sealed class PayloadDownloader
 {
+    public enum DownloadRoute
+    {
+        Stable,
+        Experimental,
+        Unavailable
+    }
+
     public const string PayloadUrl =
         "https://github.com/microsoft/PAX-Cookbook/releases/latest/download/PAX_Cookbook_Payload.zip";
 
@@ -29,9 +36,24 @@ public sealed class PayloadDownloader
     }
     
     public sealed record DownloadResult(bool Success, string? ZipPath, string? Error);
+
+    public static DownloadRoute ResolveDownloadRoute(string? channel)
+        => SetupChannel.Normalize(channel) switch
+        {
+            SetupChannel.Experimental => DownloadRoute.Experimental,
+            SetupChannel.Internal => DownloadRoute.Unavailable,
+            _ => DownloadRoute.Stable
+        };
     
     public async Task<DownloadResult> DownloadAsync(CancellationToken cancel = default)
     {
+        var route = ResolveDownloadRoute(SetupChannel.Resolve());
+        if (route == DownloadRoute.Unavailable)
+        {
+            return new DownloadResult(false, null,
+                "Internal validation builds require an explicit local payload and do not download production releases.");
+        }
+
         var destPath = Path.Combine(_tempPath, "PAXCookbook_Payload.zip");
         
         // Clean up any prior partial download
@@ -49,7 +71,7 @@ public sealed class PayloadDownloader
         string payloadUrl = PayloadUrl;
         ManifestVerifier.PayloadExpectation? expectation;
 
-        if (SetupChannel.IsExperimental(SetupChannel.Resolve()))
+        if (route == DownloadRoute.Experimental)
         {
             using var gh = new HttpPrereqDownloader();
             var located = ExperimentalReleaseLocator.Locate(gh);
@@ -57,7 +79,7 @@ public sealed class PayloadDownloader
             {
                 _log.Write("experimental-release-locate-failed", "warning");
                 return new DownloadResult(false, null,
-                    "No experimental (pre-release) build was found. " +
+                    SetupUiText.NoPreReleaseBuildFound +
                     $"You can download builds manually from {ManualDownloadUrl}");
             }
 

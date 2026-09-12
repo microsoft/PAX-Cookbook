@@ -110,6 +110,8 @@ export interface FullCookbookAuth {
   mode: AuthMode;
   tenantId?: string;
   chefKeyId?: string;
+  /** Opaque organization-provided key reference. Never both with `chefKeyId`. */
+  organizationKeyId?: string;
 }
 
 /**
@@ -627,6 +629,7 @@ export function translateLiteRecipeToFullRecipe(
   const auth: FullCookbookAuth = { mode: state.auth.mode };
   const tenantId = (state.auth.tenantId ?? '').trim();
   const chefKeyId = (state.auth.chefKeyId ?? '').trim();
+  const organizationKeyId = (state.auth.organizationKeyId ?? '').trim();
 
   const isAppReg =
     state.auth.mode === 'AppRegistrationSecret' || state.auth.mode === 'AppRegistrationCertificate';
@@ -658,6 +661,12 @@ export function translateLiteRecipeToFullRecipe(
   // App-registration recipe still produces a candidate (readiness blocks it).
   if (chefKeyId) {
     auth.chefKeyId = chefKeyId;
+  } else if (organizationKeyId) {
+    // Cycle 14/14s. The recipe carries the OPAQUE organization identifier and
+    // NOTHING else: no tenant/client reference, no certificate reference, no
+    // thumbprint, no secret. It is mutually exclusive with chefKeyId, and an
+    // organization-bound recipe is always organization_key_not_yet_runnable.
+    auth.organizationKeyId = organizationKeyId;
   }
 
   // ---- Advanced ----

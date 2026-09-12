@@ -47,6 +47,105 @@ else
 {
     NativeConsole.AttachToParent();
 }
+
+// Bounded pre-unlock provider repair CLI (support-suitable). Intercepted before
+// the main verb dispatch; it never unlocks the app and never authenticates
+// through the selected provider.
+if (args.Length > 0 && ProviderRepairCli.IsRequested(args[0]))
+{
+    return ProviderRepairCli.Run(args, Console.Out);
+}
+
+// Cycle-59 INTERNAL installation-anchor operation, intercepted here for the
+// same reason as the provider-repair CLI above: it is deliberately NOT a member
+// of ArgParser.KnownVerbs and never appears in public help, so it must be
+// dispatched BEFORE ArgParser.Parse would reject it as an unknown verb.
+//
+// NEITHER VERB IS REACHED BY ORDINARY SETUP. install, update, repair, status,
+// uninstall, version, help and apply-update do not match either spelling, so
+// the GUI wizard and every ordinary CLI install fall straight through to Run
+// and create no service-related ProgramData state. Completing this operation is
+// NOT service enablement: its only durable effect is one installation-anchor
+// record naming the non-elevated initiating user.
+if (args.Length > 0 && PAXCookbookSetup.Service.ServiceAnchorElevationVerbs.IsElevatedHelperRequested(args[0]))
+{
+    return PAXCookbookSetup.Service.ServiceAnchorElevatedHelperDispatch.Run(args);
+}
+
+if (args.Length > 0 && PAXCookbookSetup.Service.ServiceAnchorElevationVerbs.IsInitiatorRequested(args[0]))
+{
+    // The initiator verb takes NO argument at all; anything after it is a usage
+    // refusal rather than a silently ignored token.
+    if (args.Length != 1)
+    {
+        return SetupExitCodes.UsageError;
+    }
+    return PAXCookbookSetup.Service.ServiceAnchorElevationCoordinator.Run()
+        == PAXCookbookSetup.Service.ServiceAnchorElevationOutcome.Completed
+        ? SetupExitCodes.Ok
+        : SetupExitCodes.GenericError;
+}
+
+// Cycle-62 INTERNAL service-enablement operation, intercepted here for the same
+// reason as the anchor verbs above: it is deliberately NOT a member of
+// ArgParser.KnownVerbs and never appears in public help.
+//
+// ONLY THE NON-ELEVATED INITIATOR IS DISPATCHED FROM SETUP. The elevated half
+// lives in the separate, directly launched service administrative helper PE and
+// is NOT reachable through this executable at all - dotnet.exe loading a
+// user-writable Setup DLL is prohibited as the service-enablement trust boundary
+// (cycle-60 ruling).
+//
+// ORDINARY SETUP NEVER REACHES IT. install, update, repair, apply-update,
+// uninstall, status, version and help do not match this spelling, so the GUI
+// wizard and every ordinary CLI install fall straight through to Run and create
+// no service state of any kind. Nothing in cycle 62 invoked this verb.
+//
+// CYCLE 67 - THE ONE BOUNDED DIAGNOSTIC. This hidden internal verb, and ONLY
+// this verb, writes EXACTLY ONE line to stderr before returning. It is composed
+// entirely of fixed lowercase tokens from ServiceEnableFailureContract and can
+// carry no path, identity, native status, timestamp, process identifier or
+// exception text. Every ordinary verb, and public help, remain byte-identical.
+// The process exit stays NONZERO for every non-completed disposition.
+if (args.Length > 0 && PAXCookbookSetup.Service.ServiceEnableVerbs.IsInitiatorRequested(args[0]))
+{
+    PAXCookbookSetup.Service.ServiceEnableCoordinatorResult serviceEnableResult =
+        PAXCookbookSetup.Service.ServiceEnableCoordinator.RunDetailed(args);
+
+    Console.Error.WriteLine(
+        PAXCookbookSetup.Service.ServiceEnableFailureContract.FormatDiagnostic(
+            serviceEnableResult.Cause, serviceEnableResult.Disposition));
+
+    return serviceEnableResult.Outcome == PAXCookbookSetup.Service.ServiceEnableCoordinatorOutcome.Completed
+        ? SetupExitCodes.Ok
+        : SetupExitCodes.GenericError;
+}
+
+// Cycle-63R INTERNAL service-disable operation. Same reasoning, same boundary:
+// not a member of ArgParser.KnownVerbs, absent from public help, and only the
+// NON-ELEVATED initiator is dispatched from Setup. Disable is owner-bound and
+// there is no override verb, option or flag to intercept. Nothing in this cycle
+// invoked it.
+if (args.Length > 0 && PAXCookbookSetup.Service.ServiceDisableVerbs.IsInitiatorRequested(args[0]))
+{
+    return PAXCookbookSetup.Service.ServiceDisableCoordinator.Run(args)
+        == PAXCookbookSetup.Service.ServiceDisableCoordinatorOutcome.Completed
+        ? SetupExitCodes.Ok
+        : SetupExitCodes.GenericError;
+}
+
+#if MANAGED_INVENTORY_PROVISIONING
+// Cycle-8 gated managed-inventory provisioning verb. Compiled ONLY under
+// /p:ManagedInventoryProvisioning=true; the DEFAULT product build omits this
+// block, so the verb falls through to the ordinary ArgParser and is rejected as
+// an unknown verb (usage error) before any machine access. Even in the gated
+// build the dispatch performs NO live execution this cycle.
+if (args.Length > 0 && PAXCookbookSetup.Provisioning.ManagedInventoryProvisioningDispatch.IsRequested(args[0]))
+{
+    return PAXCookbookSetup.Provisioning.ManagedInventoryProvisioningDispatch.Run(args);
+}
+#endif
+
 return Run(args);
 
 // True when this Setup invocation is an interactive Add/Remove Programs action
@@ -83,6 +182,54 @@ static int Run(string[] argv)
     }
 
     var installRoot = parsed.InstallRootOverride ?? AppPaths.InstallRoot();
+
+    // Authoritative test-isolation invariant (build-gated). Enforced BEFORE the
+    // Setup log, self-handoff, any download, copy, shell write, process stop, or
+    // relaunch. Under isolation a mutating verb REQUIRES an explicit --install-root
+    // equal to the descriptor's isolated root (never the real per-user install),
+    // real-machine shell integration is suppressed, and the network payload
+    // download is forbidden. Any missing / real-root / network attempt returns a
+    // distinct nonzero exit here. A stable/customer build has no activation path,
+    // so this is a no-op in production.
+    {
+        int? isoExit = SetupTestIsolation.TryActivate(parsed.TestIsolationDescriptor, out var isoErrors);
+        if (isoExit is int rejectCode)
+        {
+            Console.Error.WriteLine("test-isolation descriptor rejected (fail closed):");
+            foreach (var e in isoErrors) Console.Error.WriteLine("  " + e);
+            return rejectCode;
+        }
+        if (SetupTestIsolation.IsActive)
+        {
+            // Force real-machine shell suppression regardless of environment.
+            Environment.SetEnvironmentVariable(TestShellGate.EnvVar, "1");
+            if (SetupTestIsolation.IsMutatingVerb(parsed.Verb))
+            {
+                if (!SetupTestIsolation.ValidateInstallRoot(parsed.InstallRootOverride, out string reason))
+                {
+                    Console.Error.WriteLine("test-isolation invariant: " + reason);
+                    return SetupExitCodes.TestIsolationViolation;
+                }
+                installRoot = SetupTestIsolation.Context!.InstallRoot;
+
+                // Forbid the network payload path while isolated. A payload must
+                // be supplied locally (--payload-root inside the isolated root)
+                // or embedded; Setup must never reach the network under isolation.
+                bool wouldNeedNetwork = parsed.Verb is "install" or "update" or "repair" or "apply-update";
+                if (wouldNeedNetwork
+                    && !SetupTestIsolation.Context!.NetworkPayloadDownloadEnabled
+                    && string.IsNullOrEmpty(parsed.PayloadRoot)
+                    && !EmbeddedPayloadSourceResolver.HasEmbeddedPayload())
+                {
+                    Console.Error.WriteLine(
+                        "test-isolation invariant: network payload download is forbidden; "
+                        + "supply --payload-root inside the isolated root");
+                    return SetupExitCodes.TestIsolationViolation;
+                }
+            }
+        }
+    }
+
     var logsDir = Path.Combine(installRoot, "Logs", "Setup");
     using var log = new SetupLogger(logsDir);
     var runningExe = Process.GetCurrentProcess().MainModule?.FileName

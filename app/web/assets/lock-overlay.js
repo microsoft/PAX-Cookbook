@@ -1,7 +1,7 @@
-// PAX Cookbook -- Lock + Re-Auth overlay (Phase AF).
+// PAX Cookbook -- Lock overlay (Phase AF).
 //
 // Owns exactly ONE full-viewport modal element (#cookbook-lock-overlay)
-// and listens to TWO window-scoped events dispatched by api.js:
+// and listens to ONE window-scoped event dispatched by api.js:
 //
 //   'cookbook:brokerLocked'    -> broker returned 423 with body code
 //                                 'brokerLocked'. Shows the unlock
@@ -9,14 +9,6 @@
 //                                 /api/v1/broker/unlock. Sticky:
 //                                 stays mounted until the unlock POST
 //                                 succeeds (state == Unlocked).
-//
-//   'cookbook:reAuthRequired'  -> broker returned 401 with body code
-//                                 'reAuthRequired'. Shows the per-op
-//                                 re-auth verdict and an explanation
-//                                 message. NOT sticky: dismisses on
-//                                 user acknowledgement. The chef
-//                                 re-issues the original gated action
-//                                 themselves (the SPA does not retry).
 //
 // Doctrine (verbatim, in force):
 //   - The SPA NEVER collects, hashes, compares, or proxies the Windows
@@ -58,7 +50,63 @@
     var CREATE_CEREMONY_TIMEOUT_MS = 120 * 1000;
 
 
-    // Module-scoped state. A second event firing while the overlay is
+    // ----------------------------------------------------------------
+    // PHASE-2 attended Hello capability ceremony sink (cycle-01r).
+    // MEASUREMENT ONLY. Entirely inert unless the native host injected the
+    // read-only window.__paxHelloAttendedDiag marker (build-gated isolated app
+    // only — no env flag). It exposes window.__paxHelloAttendedDiagCeremony with
+    // ONLY three bounded fields — enrollActive (gate), ceremonyInvoked (did the
+    // create() call fire), and createFailureClass (a bounded class derived SOLELY
+    // from a DOMException NAME). It never captures the DOMException message/stack,
+    // any credential/challenge bytes, or any identity material, and it changes no
+    // ceremony behavior. The enrollActive gate ensures ONLY the enroll (create())
+    // ceremony is observed — the unlock (get()) ceremony is never recorded.
+    // ----------------------------------------------------------------
+    function attendedCeremonyEnabled() {
+        try { return !!(window.__paxHelloAttendedDiag && window.__paxHelloAttendedDiag.enabled); }
+        catch (e) { return false; }
+    }
+
+    function classifyAttendedCreateFailure(name) {
+        switch (name) {
+            case 'NotAllowedError': return 'not_allowed';
+            case 'SecurityError':   return 'security';
+            case 'AbortError':      return 'abort';
+            case 'TimeoutError':    return 'timeout';
+            case 'ConstraintError': return 'constraint';
+            default:                return 'unknown';
+        }
+    }
+
+    function attendedCeremonySink() {
+        if (!attendedCeremonyEnabled()) { return null; }
+        var sink = null;
+        try { sink = window.__paxHelloAttendedDiagCeremony; } catch (e) { sink = null; }
+        if (!sink || typeof sink !== 'object') {
+            sink = { enrollActive: false, ceremonyInvoked: false, createFailureClass: null };
+            try { window.__paxHelloAttendedDiagCeremony = sink; } catch (e) { return null; }
+        }
+        return sink;
+    }
+
+    function attendedSetEnrollActive(active) {
+        var s = attendedCeremonySink();
+        if (s) { s.enrollActive = (active === true); }
+    }
+
+    function attendedMarkCeremonyInvoked() {
+        var s = attendedCeremonySink();
+        if (s && s.enrollActive === true) { s.ceremonyInvoked = true; }
+    }
+
+    function attendedMarkCreateFailure(name) {
+        var s = attendedCeremonySink();
+        if (s && s.enrollActive === true) {
+            s.createFailureClass = classifyAttendedCreateFailure(name);
+        }
+    }
+
+
     // already up does NOT remount it -- we just refresh the message.
     // Two events of the same kind coalesce to one render.
     //
@@ -70,10 +118,8 @@
     // every failure has to be explainable on the surface.
     var state = {
         mounted:               false,
-        kind:                  null,      // 'brokerLocked' | 'reAuthRequired'
+        kind:                  null,      // 'brokerLocked' | null
         message:               null,
-        opClass:               null,
-        verificationResult:    null,
         attemptedMethod:       null,
         attemptedPath:         null,
         unlockInFlight:        false,
@@ -93,7 +139,24 @@
         preparedBootstrapStatus: 'idle',   // 'idle' | 'pending' | 'ready' | 'failed'
         preparedBootstrapError:  null,
         statusCache:             null,     // last /webauthn/status body, populated by preflight
-        lastProbeResult:         null      // most recent diagnostic probe result (UX-1H5 Part C)
+        lastProbeResult:         null,     // most recent diagnostic probe result (UX-1H5 Part C)
+        // T1-S2B -- experimental Entra WAM (work-account) session unlock. The
+        // work account and Windows Hello are mutually-exclusive selected
+        // providers: exactly one is offered on the lock screen, never both, and
+        // there is no automatic fallback in either direction. wamInFlight
+        // prevents a duplicate WAM attempt; wamAttemptToken lets an unmount /
+        // replacement cancel an in-flight poll and ignore late updates.
+        wamInFlight:             false,
+        wamAttemptToken:         null,
+        // Mutually-exclusive selected session provider, resolved from
+        // GET /api/v1/broker/session-provider. null = not yet known (render a
+        // neutral "preparing" view so neither provider's copy is shown before
+        // the selection is confirmed). 'windows_hello' | 'work_account' |
+        // 'recovery_required' thereafter. renderLockedView keys ALL copy and the
+        // primary-action visibility off this so every render (not just the first)
+        // shows exactly the selected provider.
+        selectedProvider:        null,
+        selectedProviderUsable:  false
     };
 
     // ----------------------------------------------------------------
@@ -189,68 +252,120 @@
         var status  = document.getElementById(OVERLAY_ID + '-status');
 
         var firstRunView = !!(state.statusCache && state.statusCache.registered === false);
-        title.textContent = firstRunView ? 'Set up quick verification' : 'Verify it\'s you';
 
         // Empty + repopulate body so coalesced events refresh content.
         while (body.firstChild) { body.removeChild(body.firstChild); }
-        var p1 = document.createElement('p');
-        p1.textContent = state.message || (firstRunView
-            ? 'Set up a quick way to confirm it\'s you before your first ' +
-              'bake. You\'ll use your fingerprint, face, or PIN \u2014 the ' +
-              'same way you unlock this computer.'
-            : 'Confirm it\'s you to continue. Use your fingerprint, face, or ' +
-              'PIN, the same way you unlock this computer.');
-        body.appendChild(p1);
 
-        // The Windows Security (Windows Hello) prompt can open on a
-        // different monitor than this window, or behind it. Both
-        // ceremonies -- first-run setup and the returning-user unlock --
-        // render through this view, so the hint is added once here and
-        // shows for both. Kept to one concise line.
-        var pMonitorHint = document.createElement('p');
-        pMonitorHint.className = 'lock-overlay-fine';
-        pMonitorHint.textContent =
-            'If you don\'t see the Windows Security prompt, check your other ' +
-            'monitors or look behind this window \u2014 it may have opened ' +
-            'somewhere else.';
-        body.appendChild(pMonitorHint);
+        // ALL lock-screen copy keys off the mutually-exclusive selected provider.
+        // Windows Hello and the work account are never shown together, so the
+        // body text, hints, and title reflect exactly one provider (or a neutral
+        // "preparing" view before the selection is known, or a repair notice).
+        var prov = state.selectedProvider;
+        if (prov === 'work_account') {
+            title.textContent = 'Verify it\'s you';
+            // Provider-OWNED copy. The work-account lock screen must NEVER
+            // inherit a generic lock event's state.message (which can carry
+            // Windows Hello / PIN / "appliance is locked" text), so there is
+            // deliberately NO state.message fallback here. It also must not
+            // imply per-Bake authentication: it is ONE work-account sign-in per
+            // broker session; Bake and Resume never re-authenticate.
+            var wp1 = document.createElement('p');
+            wp1.textContent =
+                'PAX Cookbook is locked. Sign in with your work account to unlock.';
+            body.appendChild(wp1);
 
-        // UX-1H7 -- first-run passkey explanation. The current
-        // broker /webauthn/status response is cached on
-        // state.statusCache by the preflight path. When registered
-        // is explicitly false (i.e. status was successfully fetched
-        // and the appliance has no credential yet), this is the
-        // bootstrap-register-unlock entry path and the operator
-        // needs to know they are about to CREATE a local passkey,
-        // not unlock one that already exists. The copy is
-        // explicitly local-device-only and avoids Google Password
-        // Manager / passkey-sync language: this passkey stays on
-        // the operator's machine.
-        var sc = state.statusCache;
-        var isFirstRun = !!(sc && sc.registered === false);
-        if (isFirstRun) {
-            var pPasskey = document.createElement('p');
-            pPasskey.className = 'lock-overlay-fine';
-            pPasskey.textContent =
-                'This is a one-time setup and takes about 10 seconds. What ' +
-                'you set up stays on this device and is never sent to the cloud.';
-            body.appendChild(pPasskey);
+            var wHint = document.createElement('p');
+            wHint.className = 'lock-overlay-fine';
+            wHint.textContent =
+                'If you don\'t see the sign-in window, check your other monitors ' +
+                'or look behind this window \u2014 it may have opened somewhere else.';
+            body.appendChild(wHint);
 
-            var pChromeHint = document.createElement('p');
-            pChromeHint.className = 'lock-overlay-fine';
-            pChromeHint.textContent =
-                'If you\'re asked where to save it, choose this Windows ' +
-                'device so it stays on your computer.';
-            body.appendChild(pChromeHint);
+            var wp2 = document.createElement('p');
+            wp2.className = 'lock-overlay-fine';
+            wp2.textContent =
+                'PAX Cookbook checks your work account when it starts, after a ' +
+                'restart, and after it locks \u2014 once per session. Baking and ' +
+                'resuming don\u2019t ask you to sign in again. Your recipes, ' +
+                'settings, and workspace stay on this computer.';
+            body.appendChild(wp2);
+        } else if (prov === 'recovery_required') {
+            title.textContent = 'Sign-in needs repair';
+            var rp1 = document.createElement('p');
+            rp1.textContent = state.message ||
+                'Your saved sign-in method needs repair. Open PAX Cookbook Setup ' +
+                'to reconfigure it.';
+            body.appendChild(rp1);
+        } else if (prov !== 'windows_hello') {
+            // null / unknown: selection not yet resolved. Show a neutral holding
+            // view so neither provider's copy appears before we know which one.
+            title.textContent = 'Verify it\'s you';
+            var pp1 = document.createElement('p');
+            pp1.textContent = 'Preparing sign-in\u2026';
+            body.appendChild(pp1);
+        } else {
+            // Windows Hello is the selected provider: the existing Hello copy.
+            title.textContent = firstRunView ? 'Set up quick verification' : 'Verify it\'s you';
+            var p1 = document.createElement('p');
+            p1.textContent = state.message || (firstRunView
+                ? 'Set up a quick way to confirm it\'s you when you open PAX ' +
+                  'Cookbook. You\'ll use your fingerprint, face, or PIN \u2014 the ' +
+                  'same way you unlock this computer.'
+                : 'Confirm it\'s you to continue. Use your fingerprint, face, or ' +
+                  'PIN, the same way you unlock this computer.');
+            body.appendChild(p1);
+
+            // The Windows Security (Windows Hello) prompt can open on a
+            // different monitor than this window, or behind it. Both
+            // ceremonies -- first-run setup and the returning-user unlock --
+            // render through this view, so the hint is added once here and
+            // shows for both. Kept to one concise line.
+            var pMonitorHint = document.createElement('p');
+            pMonitorHint.className = 'lock-overlay-fine';
+            pMonitorHint.textContent =
+                'If you don\'t see the Windows Security prompt, check your other ' +
+                'monitors or look behind this window \u2014 it may have opened ' +
+                'somewhere else.';
+            body.appendChild(pMonitorHint);
+
+            // UX-1H7 -- first-run passkey explanation. The current
+            // broker /webauthn/status response is cached on
+            // state.statusCache by the preflight path. When registered
+            // is explicitly false (i.e. status was successfully fetched
+            // and the appliance has no credential yet), this is the
+            // bootstrap-register-unlock entry path and the operator
+            // needs to know they are about to CREATE a local passkey,
+            // not unlock one that already exists. The copy is
+            // explicitly local-device-only and avoids Google Password
+            // Manager / passkey-sync language: this passkey stays on
+            // the operator's machine.
+            var sc = state.statusCache;
+            var isFirstRun = !!(sc && sc.registered === false);
+            if (isFirstRun) {
+                var pPasskey = document.createElement('p');
+                pPasskey.className = 'lock-overlay-fine';
+                pPasskey.textContent =
+                    'This is a one-time setup and takes about 10 seconds. What ' +
+                    'you set up stays on this device and is never sent to the cloud.';
+                body.appendChild(pPasskey);
+
+                var pChromeHint = document.createElement('p');
+                pChromeHint.className = 'lock-overlay-fine';
+                pChromeHint.textContent =
+                    'If you\'re asked where to save it, choose this Windows ' +
+                    'device so it stays on your computer.';
+                body.appendChild(pChromeHint);
+            }
+
+            var p2 = document.createElement('p');
+            p2.className = 'lock-overlay-fine';
+            p2.textContent =
+                'PAX Cookbook confirms it\'s you when it starts, after a restart, ' +
+                'and after it locks \u2014 once per session. Baking and resuming ' +
+                'don\u2019t ask you to sign in again. Your recipes, settings, and ' +
+                'workspace stay on this computer.';
+            body.appendChild(p2);
         }
-
-        var p2 = document.createElement('p');
-        p2.className = 'lock-overlay-fine';
-        p2.textContent =
-            'For your privacy, Cookbook confirms it\'s you when it starts up, ' +
-            'when you reopen it, and before each bake. Your recipes, settings, ' +
-            'and workspace stay on this computer.';
-        body.appendChild(p2);
 
         // Support / diagnostic details collapsed behind a "Support
         // details" disclosure so the lock surface is operator-friendly
@@ -518,64 +633,36 @@
             body.appendChild(details);
         }
 
-        // Primary button copy. First-run setup gets an explicit
-        // "Set up verification" call to action; the returning-user
-        // unlock route uses "Continue". The 'Try again' / failure
-        // label is set by onPrimaryClick when a verdict comes back
-        // non-Verified.
-        var primaryFirstRun = !!(state.statusCache && state.statusCache.registered === false);
-        var primaryText;
-        if (state.unlockInFlight) {
-            primaryText = 'Verifying\u2026';
-        } else if (state.lastFailureMessage) {
-            primaryText = 'Try again';
-        } else if (primaryFirstRun) {
-            primaryText = 'Set up verification';
+        // Primary button copy. The primary is the WINDOWS HELLO action and is
+        // shown ONLY when Windows Hello is the selected provider. For the work
+        // account (whose action is the injected work-account button) or a
+        // recovery/pending view it stays hidden, so the two providers are never
+        // offered together. First-run setup gets an explicit "Set up
+        // verification" call to action; the returning-user unlock route uses
+        // "Continue"; the 'Try again' failure label is set on a non-Verified
+        // verdict.
+        if (state.selectedProvider === 'windows_hello') {
+            var primaryFirstRun = !!(state.statusCache && state.statusCache.registered === false);
+            var primaryText;
+            if (state.unlockInFlight) {
+                primaryText = 'Verifying\u2026';
+            } else if (state.lastFailureMessage) {
+                primaryText = 'Try again';
+            } else if (primaryFirstRun) {
+                primaryText = 'Set up verification';
+            } else {
+                primaryText = 'Continue';
+            }
+            primary.textContent = primaryText;
+            primary.disabled = !!state.unlockInFlight;
+            primary.style.display = '';
+            status.textContent = '';
         } else {
-            primaryText = 'Continue';
+            // Work account / recovery / pending: Hello action absent.
+            primary.style.display = 'none';
+            primary.disabled = true;
         }
-        primary.textContent = primaryText;
-        primary.disabled = !!state.unlockInFlight;
         secondary.style.display = 'none'; // locked view has no "Close" -- unlock is the only exit
-
-        status.textContent = '';
-        return primary;
-    }
-
-    function renderReAuthView() {
-        var overlay = getOverlay();
-        var title   = document.getElementById(OVERLAY_ID + '-title');
-        var body    = document.getElementById(OVERLAY_ID + '-body');
-        var primary = document.getElementById(OVERLAY_ID + '-primary');
-        var secondary = document.getElementById(OVERLAY_ID + '-secondary');
-        var status  = document.getElementById(OVERLAY_ID + '-status');
-
-        title.textContent = 'Quick check needed';
-
-        while (body.firstChild) { body.removeChild(body.firstChild); }
-        var p1 = document.createElement('p');
-        p1.textContent = state.message ||
-            'PAX Cookbook needs to confirm it\'s you again before doing that. Try that action once more and you\'ll be asked to confirm.';
-        body.appendChild(p1);
-
-        if (state.opClass) {
-            var p2 = document.createElement('p');
-            p2.className = 'lock-overlay-fine';
-            p2.textContent = 'Operation: ' + state.opClass;
-            body.appendChild(p2);
-        }
-        if (state.verificationResult && state.verificationResult !== 'Verified') {
-            var p3 = document.createElement('p');
-            p3.className = 'lock-overlay-fine';
-            p3.textContent = 'Verification result: ' + state.verificationResult;
-            body.appendChild(p3);
-        }
-
-        primary.textContent = 'OK';
-        primary.disabled = false;
-        secondary.style.display = 'none';
-
-        status.textContent = '';
         return primary;
     }
 
@@ -603,7 +690,13 @@
         // Windows Hello prompt appear. preflightBootstrap() is idempotent
         // and a no-op when the cached status already says registered=true.
         if (state.kind === 'brokerLocked') {
-            try { preflightBootstrap(); } catch (ePf) {}
+            // Render EXACTLY the selected session provider (Windows Hello OR the
+            // work account, never both). applySelectedProvider hides the other
+            // provider, kicks off the Hello bootstrap preflight only when Hello
+            // is selected, and directs the operator to Setup repair on any
+            // indeterminate/recovery outcome. Start from a clean slate each mount
+            // so a stale element never persists across a provider change.
+            try { removeWorkAccountButton(); applySelectedProvider(); } catch (eSel) {}
         }
     }
 
@@ -614,11 +707,22 @@
         state.mounted = false;
         state.kind    = null;
         state.message = null;
-        state.opClass = null;
-        state.verificationResult = null;
         state.attemptedMethod    = null;
         state.attemptedPath      = null;
         state.unlockInFlight     = false;
+        // T1-S2B -- cancel any in-flight WAM session attempt and drop its native
+        // token so a late status poll bails and cannot update the unmounted
+        // overlay. Remove the work-account button so a later mount re-decides the
+        // selected provider from a fresh session-provider status (no residual
+        // work-account element after a provider change).
+        state.wamInFlight        = false;
+        state.wamAttemptToken    = null;
+        // Reset the resolved provider so a later mount re-fetches the selection
+        // and starts from the neutral holding view (never a stale provider's
+        // copy).
+        state.selectedProvider       = null;
+        state.selectedProviderUsable = false;
+        try { removeWorkAccountButton(); } catch (eWam) {}
         // UX-1H3 diagnostics survive unmount because the overlay can
         // get remounted by a follow-up 423 from a different page
         // module and the operator may want to scroll back through
@@ -656,10 +760,13 @@
     function onPrimaryClick(ev) {
         if (ev && typeof ev.preventDefault === 'function') { ev.preventDefault(); }
         if (state.kind !== 'brokerLocked') {
-            if (state.kind === 'reAuthRequired') { unmount(); }
             return;
         }
         if (state.unlockInFlight) { return; }
+        // T1-S2B -- Windows Hello and the experimental work-account (WAM) flow
+        // must never run concurrently. If a WAM attempt is in flight, ignore the
+        // Hello click (the WAM path disables this button while it runs).
+        if (state.wamInFlight) { return; }
         // Hold the operator's gesture context in the browser window.
         // The primary button is BROWSER-OWNED ONLY. Both the
         // steady-state ceremony (navigator.credentials.get) AND the
@@ -953,6 +1060,346 @@
             ? resp.body.message
             : 'Verification did not succeed.';
         setUnlockUi(msg + ' (verdict: ' + verdict + ')', false, 'Try again');
+    }
+
+    // ----------------------------------------------------------------
+    // T1-S2B -- experimental Entra WAM (work-account) session unlock
+    // ----------------------------------------------------------------
+    //
+    // The lock overlay renders in the TOP-LEVEL shell, so window.chrome.webview
+    // is directly available and no iframe courier is needed here. The work
+    // account is offered ONLY when it is the selected session provider (Windows
+    // Hello is hidden in that case); the two providers are never shown together
+    // and there is no automatic fallback. The daemon owns the challenge, identity
+    // continuity, and the final unlock. This module only initiates a request,
+    // hands the opaque requestId to the native host, polls a bounded status, and
+    // (on Approved) confirms the broker is Unlocked before reusing the existing
+    // success path. It never exposes tenant/client/account/scope/descriptor/salt/
+    // fingerprint or any native-result value.
+
+    var WAM_INIT_PATH   = '/api/v1/broker/experimental/wam/initiate';
+    var WAM_STATUS_PATH = '/api/v1/broker/experimental/wam/status';
+    var WAM_LOCK_STATE_PATH = '/api/v1/broker/lock-state';
+    var WAM_REQUEST_TYPE = 'cookbook:experimental-wam-request';
+    var WAM_POLL_INTERVAL_MS = 600;
+
+    // Mutually-exclusive selected-session-provider status. The overlay renders
+    // EXACTLY the selected provider (Windows Hello OR work account, never both)
+    // and never falls back to the other. Fails closed: an indeterminate or
+    // recovery state offers NO sign-in action and directs the operator to Setup
+    // repair.
+    var SESSION_PROVIDER_PATH = '/api/v1/broker/session-provider';
+
+    function removeWorkAccountButton() {
+        var btn = document.getElementById(OVERLAY_ID + '-workaccount');
+        if (btn && btn.parentNode) { btn.parentNode.removeChild(btn); }
+    }
+
+    function setWamUi(statusText, inFlight) {
+        var wa      = document.getElementById(OVERLAY_ID + '-workaccount');
+        var primary = document.getElementById(OVERLAY_ID + '-primary');
+        var status  = document.getElementById(OVERLAY_ID + '-status');
+        if (wa) {
+            wa.disabled    = !!inFlight;
+            // ONE stable label shared with injectWorkAccountButton. The button
+            // stays the same blue PRIMARY action across idle, in-flight, and
+            // post-failure retry -- only its text and disabled state change, its
+            // btn-primary class never degrades to a ghost/link.
+            wa.textContent = inFlight
+                ? 'Signing in\u2026'
+                : 'Sign in with work account';
+        }
+        // Never let Windows Hello run while a WAM attempt is in flight.
+        if (primary) { primary.disabled = !!inFlight; }
+        if (status && statusText !== null && typeof statusText !== 'undefined') {
+            status.textContent = statusText;
+        }
+    }
+
+    function postWamToNative(requestId) {
+        try {
+            var wv = window.chrome && window.chrome.webview;
+            if (wv && typeof wv.postMessage === 'function') {
+                // Requestid-only envelope; the native host runs WAM and delivers
+                // the bounded result to the daemon over native IPC.
+                wv.postMessage({ type: WAM_REQUEST_TYPE, requestId: requestId });
+                return true;
+            }
+        } catch (e) { /* no native host */ }
+        return false;
+    }
+
+    // Bounded reason -> customer message map for a TERMINAL (non-approved)
+    // work-account sign-in result. The reason vocabulary is the snake_case set
+    // the broker emits on the WAM status body: none | cancelled |
+    // identity_failure | scope_failure | configuration_failure | broker_failure
+    // | transport_failure | expired | disabled | denied | connectivity_failure |
+    // authority_registration_mismatch | service_rejected | consent_required |
+    // unknown_failure. Anything outside that set (null / absent / unrecognized)
+    // FAILS CLOSED to the generic "try again" message, so a cancellation is never
+    // mislabelled as a decline.
+    //
+    // cycle-02r5b: connectivity wording ("couldn't reach ... sign-in service") is
+    // RESERVED for connectivity_failure ONLY. The legacy transport_failure reason
+    // (no longer emitted by production code) now shows the generic try-again copy
+    // so it can never imply the network is down for a reached-service rejection.
+    function mapWamReasonMessage(reason) {
+        switch (reason) {
+            case 'cancelled':
+                return 'Work-account sign-in was cancelled. Select \u201cSign in ' +
+                       'with work account\u201d to try again.';
+            case 'identity_failure':
+                return 'We couldn\u2019t verify your work account. Make sure ' +
+                       'you\u2019re using your organization account, then try again.';
+            case 'scope_failure':
+                return 'Your work account doesn\u2019t have the permissions PAX ' +
+                       'Cookbook needs to sign you in. Contact your administrator.';
+            case 'configuration_failure':
+                return 'Work-account sign-in isn\u2019t set up correctly on this ' +
+                       'computer. Open PAX Cookbook Setup to repair it.';
+            case 'broker_failure':
+                return 'Windows couldn\u2019t complete work-account sign-in. Try again.';
+            case 'connectivity_failure':
+                return 'We couldn\u2019t reach your organization\u2019s sign-in ' +
+                       'service. Check your connection and try again.';
+            case 'authority_registration_mismatch':
+                return 'This work-account setup isn\u2019t compatible with the ' +
+                       'account picker. Ask your IT team to repair the sign-in setup.';
+            case 'consent_required':
+                return 'Your organization needs to approve this sign-in permission ' +
+                       'before you can continue.';
+            case 'service_rejected':
+                return 'Your organization couldn\u2019t complete this sign-in. Ask ' +
+                       'your IT team to check the Work-account setup.';
+            case 'unknown_failure':
+                return 'Work-account sign-in couldn\u2019t be completed. Try again ' +
+                       'or ask your IT team for help.';
+            case 'transport_failure':
+                return 'Work-account sign-in couldn\u2019t be completed. Try again ' +
+                       'or ask your IT team for help.';
+            case 'expired':
+                return 'The sign-in request timed out. Select \u201cSign in with ' +
+                       'work account\u201d to try again.';
+            case 'disabled':
+                return 'Work-account sign-in is currently unavailable. Contact ' +
+                       'your administrator.';
+            case 'denied':
+                return 'Work-account sign-in was declined. Try again, or contact ' +
+                       'your administrator if this keeps happening.';
+            case 'none':
+            default:
+                return 'Work-account sign-in couldn\u2019t be completed. Try again.';
+        }
+    }
+
+    function finishWamFailure(token, message) {
+        if (state.wamAttemptToken !== token) { return; }
+        state.wamInFlight = false;
+        // Stay Locked. Concise, business-appropriate, retryable feedback; the
+        // operator may explicitly choose Windows Hello or retry the work account.
+        setWamUi(message, false);
+    }
+
+    function confirmWamUnlock(token) {
+        // The daemon unlocks on an Approved native result; confirm the broker is
+        // actually Unlocked before reusing the existing success completion path.
+        window.cookbookApi.get(WAM_LOCK_STATE_PATH).then(function (resp) {
+            if (state.wamAttemptToken !== token) { return; }
+            var body = resp && resp.body ? resp.body : null;
+            var lockState = body && typeof body.state === 'string' ? body.state : null;
+            if (lockState === 'Unlocked') {
+                state.wamInFlight = false;
+                finishUnlockSuccess();
+            } else {
+                finishWamFailure(token, 'Work-account sign-in didn\'t unlock. Try again.');
+            }
+        }).catch(function () {
+            if (state.wamAttemptToken !== token) { return; }
+            finishWamFailure(token, 'Work-account sign-in didn\'t unlock. Try again.');
+        });
+    }
+
+    function pollWamStatus(requestId, token) {
+        if (state.wamAttemptToken !== token) { return; } // cancelled / replaced
+        window.cookbookApi.post(WAM_STATUS_PATH, { requestId: requestId }).then(function (resp) {
+            if (state.wamAttemptToken !== token) { return; }
+            if (resp && resp.status === 404) {
+                return finishWamFailure(token, 'Work-account sign-in is unavailable.');
+            }
+            var body   = resp && resp.body ? resp.body : null;
+            var st     = body && typeof body.state === 'string' ? body.state : null;
+            var reason = body && typeof body.reason === 'string' ? body.reason : null;
+            if (st === 'Approved') { return confirmWamUnlock(token); }
+            if (st === 'Pending') {
+                setTimeout(function () { pollWamStatus(requestId, token); }, WAM_POLL_INTERVAL_MS);
+                return;
+            }
+            // Any TERMINAL non-approved state (Denied, Unknown, or a malformed
+            // body) fails CLOSED: the broker stays Locked and the primary button
+            // remains the retry action. The bounded reason selects an accurate,
+            // business-appropriate message; an unknown / absent / malformed
+            // reason maps to the generic "try again" message so a cancellation
+            // is never shown as a decline.
+            return finishWamFailure(token, mapWamReasonMessage(reason));
+        }).catch(function () {
+            if (state.wamAttemptToken !== token) { return; }
+            // Transient transport failure is retryable with no arbitrary cap.
+            setTimeout(function () { pollWamStatus(requestId, token); }, WAM_POLL_INTERVAL_MS);
+        });
+    }
+
+    function onWorkAccountClick(ev) {
+        if (ev && typeof ev.preventDefault === 'function') { ev.preventDefault(); }
+        if (state.kind !== 'brokerLocked') { return; }
+        // One active WAM attempt per overlay, and never concurrent with Hello.
+        if (state.wamInFlight || state.unlockInFlight) { return; }
+        if (!window.cookbookApi || typeof window.cookbookApi.post !== 'function') { return; }
+
+        state.wamInFlight = true;
+        var token = 'wam-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        state.wamAttemptToken = token;
+        setWamUi('Starting work-account sign-in\u2026', true);
+
+        window.cookbookApi.post(WAM_INIT_PATH, { purpose: 'session' }).then(function (resp) {
+            if (state.wamAttemptToken !== token) { return; }
+            if (resp && resp.status === 404) {
+                return finishWamFailure(token, 'Work-account sign-in is unavailable.');
+            }
+            var body = resp && resp.body ? resp.body : null;
+            var requestId = body && typeof body.requestId === 'string' ? body.requestId : null;
+            if (!requestId) {
+                return finishWamFailure(token, 'Couldn\'t start work-account sign-in. Try again.');
+            }
+            if (!postWamToNative(requestId)) {
+                return finishWamFailure(token, 'Work-account sign-in isn\'t available here.');
+            }
+            setWamUi('Complete the work-account prompt to continue\u2026', true);
+            pollWamStatus(requestId, token);
+        }).catch(function () {
+            if (state.wamAttemptToken !== token) { return; }
+            finishWamFailure(token, 'Couldn\'t start work-account sign-in. Try again.');
+        });
+    }
+
+    function injectWorkAccountButton() {
+        if (document.getElementById(OVERLAY_ID + '-workaccount')) { return; }
+        var primary = document.getElementById(OVERLAY_ID + '-primary');
+        if (!primary || !primary.parentNode) { return; }
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        // Full-width BLUE PRIMARY action. The work account is the SELECTED
+        // provider here (the Windows Hello primary is hidden), so this is THE
+        // primary call to action: it shares the Close / Close app box metrics
+        // via .lock-overlay-actions > button and carries the accent fill via
+        // btn-primary. It must NEVER degrade to a ghost/link -- including after
+        // a failed attempt -- so the retry action stays the same primary button.
+        btn.className = 'btn-primary lock-overlay-workaccount';
+        btn.id = OVERLAY_ID + '-workaccount';
+        btn.textContent = 'Sign in with work account';
+        btn.addEventListener('click', onWorkAccountClick);
+        // The work account is the SELECTED provider here, so Windows Hello is
+        // hidden; place the work-account action where the primary action sits.
+        primary.parentNode.insertBefore(btn, primary.nextSibling);
+    }
+
+    // ----------------------------------------------------------------
+    // Mutually-exclusive provider rendering
+    // ----------------------------------------------------------------
+    //
+    // The overlay offers EXACTLY the selected session provider. There is no
+    // automatic fallback and the two providers are never shown together.
+    // Recovery from a broken/indeterminate selection is an explicit Setup
+    // repair, never a lock-screen exposure of the other provider.
+
+    function hideHelloPrimary() {
+        var primary = document.getElementById(OVERLAY_ID + '-primary');
+        if (primary) { primary.style.display = 'none'; primary.disabled = true; }
+    }
+
+    function showHelloPrimary() {
+        var primary = document.getElementById(OVERLAY_ID + '-primary');
+        if (primary) { primary.style.display = ''; }
+    }
+
+    function setProviderStatusText(message) {
+        var status = document.getElementById(OVERLAY_ID + '-status');
+        if (status && typeof message === 'string') { status.textContent = message; }
+    }
+
+    function showProviderRecoveryNotice(message) {
+        removeWorkAccountButton();
+        hideHelloPrimary();
+        setProviderStatusText(message);
+    }
+
+    function injectWorkAccountPrimary(usable) {
+        // Windows Hello is the OTHER provider and must never appear here.
+        hideHelloPrimary();
+        if (usable) {
+            injectWorkAccountButton();
+            setProviderStatusText('');
+        } else {
+            // Selected but not ready: bounded recovery guidance, no Hello, no
+            // working sign-in. Repair happens in Setup, not on the lock screen.
+            removeWorkAccountButton();
+            setProviderStatusText(
+                'Work-account sign-in needs setup or repair. Open PAX Cookbook Setup to reconfigure your sign-in method.');
+        }
+    }
+
+    // Determines the selected provider and renders exactly that provider's
+    // experience. Fails closed to a Setup-repair notice on any indeterminate,
+    // recovery, or transport outcome so the two providers are never shown at
+    // once and neither is silently substituted.
+    function applySelectedProvider() {
+        if (!window.cookbookApi || typeof window.cookbookApi.get !== 'function') {
+            state.selectedProvider = 'recovery_required';
+            renderLockedView();
+            showProviderRecoveryNotice('Preparing sign-in\u2026');
+            return;
+        }
+        // Neutral holding view until the selection resolves: renderLockedView
+        // shows a "Preparing sign-in" body for a null provider, so neither
+        // provider's copy or action appears before we know which one is selected.
+        state.selectedProvider = null;
+        state.selectedProviderUsable = false;
+        removeWorkAccountButton();
+        renderLockedView();
+        window.cookbookApi.get(SESSION_PROVIDER_PATH).then(function (resp) {
+            if (!state.mounted || state.kind !== 'brokerLocked') { return; }
+            var body = resp && resp.body ? resp.body : null;
+            var provider = body && typeof body.selectedProvider === 'string' ? body.selectedProvider : null;
+            var usable = !!(body && body.usable === true);
+            if (provider === 'windows_hello') {
+                state.selectedProvider = 'windows_hello';
+                state.selectedProviderUsable = true;
+                removeWorkAccountButton();
+                renderLockedView();   // Hello copy + Hello primary shown
+                var primary = document.getElementById(OVERLAY_ID + '-primary');
+                if (primary) { try { primary.focus(); } catch (e) {} }
+                // Windows Hello is the selected provider: prepare its bootstrap
+                // options now so the click preserves user activation.
+                try { preflightBootstrap(); } catch (ePf) {}
+            } else if (provider === 'work_account') {
+                state.selectedProvider = 'work_account';
+                state.selectedProviderUsable = usable;
+                renderLockedView();   // work-account copy, Hello action hidden
+                injectWorkAccountPrimary(usable);
+            } else {
+                // recovery_required or an unrecognized value: offer neither
+                // provider and direct the operator to Setup repair.
+                state.selectedProvider = 'recovery_required';
+                renderLockedView();
+                showProviderRecoveryNotice(
+                    'Your sign-in method needs repair. Open PAX Cookbook Setup to reconfigure it.');
+            }
+        }).catch(function () {
+            if (!state.mounted || state.kind !== 'brokerLocked') { return; }
+            state.selectedProvider = 'recovery_required';
+            renderLockedView();
+            showProviderRecoveryNotice(
+                'Couldn\u2019t determine your sign-in method. Open PAX Cookbook Setup if this persists.');
+        });
     }
 
     // Browser-owned WebAuthn unlock attempt (steady-state path:
@@ -1663,14 +2110,206 @@
         }
     }
 
+    // ----------------------------------------------------------------
+    // Shared prepared-bootstrap ceremony core (Batch 1b Stage 3)
+    // ----------------------------------------------------------------
+    //
+    // The EXACT activation-safe create + verify + persist pipeline that the
+    // first-run lock unlock uses, factored into one callable so the Settings
+    // register-before-switch enrollment reuses it WITHOUT a second copy. Given a
+    // fresh prepared bootstrap it invokes navigator.credentials.create()
+    // SYNCHRONOUSLY (no await before the call, so the caller's transient user
+    // activation is preserved), enforces ES256/-7, extracts the SPKI public key +
+    // authenticatorData, and POSTs /api/v1/broker/webauthn/bootstrap-register-unlock
+    // echoing the single-use purpose-tagged challenge. The broker performs every
+    // real WebAuthn gate (exact-origin, challenge match + TTL, webauthn.create
+    // type, UP/UV flags, ES256/P-256 SPKI import, DER signature). This core
+    // resolves a bounded { ok, reason, resp, errName } and performs NO overlay UI
+    // mutation and NO unlock/reload; callers map the result to their own surface
+    // (lock unlock -> finishUnlockSuccess / finishBootstrapFailure; Settings
+    // enroll -> a couriered enrollment outcome). It preserves the 30 s progress
+    // watchdog and the CREATE_CEREMONY_TIMEOUT_MS abort timeout. The single-use
+    // prepared challenge is discarded before the persist POST (as before); error
+    // terminals leave prepared for the caller to clear so existing unlock cleanup
+    // timing is unchanged. onProgress(kind) is an OPTIONAL, side-effect-free hook
+    // ('verifying' | 'slow') the caller uses for status hints only.
+    function runPreparedBootstrapCeremony(prepared, onProgress) {
+        function progress(kind) {
+            if (typeof onProgress === 'function') { try { onProgress(kind); } catch (eP) {} }
+        }
+        var startMs = Date.now();
+        var createAbort     = (typeof AbortController === 'function') ? new AbortController() : null;
+        var createTimedOut  = false;
+        var createTimeoutId = createAbort
+            ? setTimeout(function () { createTimedOut = true; try { createAbort.abort(); } catch (eAb) {} }, CREATE_CEREMONY_TIMEOUT_MS)
+            : null;
+        var createPromise;
+        try {
+            // PHASE-2 attended diagnostic: record that the create() ceremony fired
+            // (only when an enroll is active; inert without the attended marker).
+            attendedMarkCeremonyInvoked();
+            createPromise = window.navigator.credentials.create({
+                publicKey: prepared.publicKey,
+                signal:    createAbort ? createAbort.signal : undefined
+            });
+        } catch (eSync) {
+            if (createTimeoutId) { clearTimeout(createTimeoutId); }
+            attendedMarkCreateFailure((eSync && eSync.name) ? eSync.name : 'unknown');
+            recordDiag({
+                phase:                     'bootstrap_create_sync_throw',
+                errorName:                 (eSync && eSync.name)    || 'sync_throw',
+                errorMessage:              (eSync && eSync.message) || 'navigator.credentials.create threw synchronously',
+                errorStackFirstLine:       (eSync && eSync.stack)   ? String(eSync.stack).split('\n')[0] : null,
+                errorOccurredBeforeCreate: false,
+                createElapsedMs:           (Date.now() - startMs)
+            });
+            logUnlock(state.lastDiagnostics);
+            return Promise.resolve({
+                ok:      false,
+                reason:  'navigator_create_sync_throw:' + ((eSync && eSync.name) || 'unknown'),
+                errName: (eSync && eSync.name) || 'sync_throw'
+            });
+        }
+
+        // Watchdog: 30 s. UX-1H10 -- a pending create() promise is NOT a
+        // failure; this is strictly a non-error progress notice. It records
+        // 'bootstrap_create_pending_slow' and asks the caller to refresh the
+        // status text; it does NOT clear prepared, flip in-flight, fail, or
+        // fall back.
+        var watchdogFired = false;
+        var watchdogTimer = setTimeout(function () {
+            if (watchdogFired) { return; }
+            watchdogFired = true;
+            recordDiag({
+                phase:                   'bootstrap_create_pending_slow',
+                createWatchdogElapsedMs: (Date.now() - startMs),
+                resultDetail:            'create_still_pending_after_watchdog'
+            });
+            logUnlock(state.lastDiagnostics);
+            progress('slow');
+        }, 30 * 1000);
+
+        return createPromise.then(function (cred) {
+            if (createTimeoutId) { clearTimeout(createTimeoutId); }
+            if (watchdogFired) {
+                recordDiag({
+                    phase:           'bootstrap_create_resolved_after_watchdog',
+                    createElapsedMs: (Date.now() - startMs)
+                });
+            } else {
+                clearTimeout(watchdogTimer);
+                recordDiag({
+                    phase:           'bootstrap_create_resolved',
+                    createElapsedMs: (Date.now() - startMs)
+                });
+            }
+            logUnlock(state.lastDiagnostics);
+            if (!cred || !cred.response) { return { ok: false, reason: 'no_credential' }; }
+            progress('verifying');
+
+            var spkiB64      = '';
+            var alg          = -7;
+            var authDataB64u = '';
+            try {
+                if (typeof cred.response.getPublicKey !== 'function') {
+                    return { ok: false, reason: 'public_key_unavailable' };
+                }
+                var spki = cred.response.getPublicKey();
+                if (!spki) { return { ok: false, reason: 'public_key_empty' }; }
+                spkiB64 = arrayBufferToB64(spki);
+                if (typeof cred.response.getPublicKeyAlgorithm === 'function') {
+                    alg = cred.response.getPublicKeyAlgorithm();
+                }
+                if (typeof cred.response.getAuthenticatorData !== 'function') {
+                    return { ok: false, reason: 'authdata_unavailable' };
+                }
+                var ad = cred.response.getAuthenticatorData();
+                if (!ad) { return { ok: false, reason: 'authdata_empty' }; }
+                authDataB64u = arrayBufferToB64u(ad);
+            } catch (e) {
+                return { ok: false, reason: 'authdata_or_pubkey_extract_failed' };
+            }
+            if (alg !== -7) { return { ok: false, reason: 'unsupported_alg' }; }
+
+            var body = {
+                credentialId:      arrayBufferToB64u(cred.rawId),
+                publicKeySpki:     spkiB64,
+                alg:               alg,
+                clientDataJSON:    arrayBufferToB64u(cred.response.clientDataJSON),
+                authenticatorData: authDataB64u,
+                challenge:         prepared.optsRaw.challenge
+            };
+            recordDiag({ phase: 'bootstrap_unlock_post_start' });
+            logUnlock(state.lastDiagnostics);
+            // Discard the prepared challenge now -- we used it once.
+            state.preparedBootstrap       = null;
+            state.preparedBootstrapStatus = 'idle';
+
+            return window.cookbookApi.post(withAttempt('/api/v1/broker/webauthn/bootstrap-register-unlock'), body).then(function (resp) {
+                recordDiag({ phase: 'bootstrap_unlock_post_done' });
+                logUnlock(state.lastDiagnostics);
+                if (resp && resp.ok && resp.body && resp.body.state === 'Unlocked') {
+                    return { ok: true, resp: resp };
+                }
+                return { ok: false, reason: 'broker_rejected', resp: resp };
+            }, function () {
+                return { ok: false, reason: 'broker_network_error' };
+            });
+        }, function (err) {
+            if (createTimeoutId) { clearTimeout(createTimeoutId); }
+            if (createTimedOut) {
+                attendedMarkCreateFailure('TimeoutError');
+                recordDiag({
+                    phase:           'bootstrap_create_timeout',
+                    errorName:       'CreateTimeout',
+                    errorMessage:    'create() aborted after ' + CREATE_CEREMONY_TIMEOUT_MS + 'ms; no verdict returned',
+                    createTimeoutMs: CREATE_CEREMONY_TIMEOUT_MS,
+                    createElapsedMs: (Date.now() - startMs)
+                });
+                logUnlock(state.lastDiagnostics);
+                return { ok: false, reason: 'create_timeout', errName: 'CreateTimeout' };
+            }
+            if (watchdogFired) {
+                recordDiag({
+                    phase:                     'bootstrap_create_rejected_after_watchdog',
+                    errorName:                 (err && err.name) ? err.name : 'unknown',
+                    errorMessage:              (err && err.message) ? err.message : null,
+                    errorStackFirstLine:       (err && err.stack) ? String(err.stack).split('\n')[0] : null,
+                    errorOccurredBeforeCreate: false,
+                    createElapsedMs:           (Date.now() - startMs)
+                });
+            } else {
+                clearTimeout(watchdogTimer);
+                recordDiag({
+                    phase:                     'bootstrap_create_rejected',
+                    errorName:                 (err && err.name) ? err.name : 'unknown',
+                    errorMessage:              (err && err.message) ? err.message : null,
+                    errorStackFirstLine:       (err && err.stack) ? String(err.stack).split('\n')[0] : null,
+                    errorOccurredBeforeCreate: false,
+                    createElapsedMs:           (Date.now() - startMs)
+                });
+            }
+            logUnlock(state.lastDiagnostics);
+            var name = (err && err.name) ? err.name : 'unknown';
+            attendedMarkCreateFailure(name);
+            if (name === 'NotAllowedError' || name === 'AbortError') {
+                return { ok: false, reason: 'user_cancelled', errName: name };
+            }
+            return { ok: false, reason: 'navigator_create_failed:' + name, errName: name };
+        });
+    }
+
     function performUnlockFromPrepared(prepared) {
         // Called SYNCHRONOUSLY from onPrimaryClick when a fresh
-        // prepared bootstrap exists. Calls navigator.credentials.create()
-        // BEFORE any await so Chromium sees the call inside the same
-        // user-activation window as the click. Discards the prepared
-        // challenge after first use whether create() resolves, rejects,
-        // or hits the watchdog so a follow-up click forces fresh
-        // preflight rather than reusing a half-consumed challenge.
+        // prepared bootstrap exists. Delegates the create + verify +
+        // persist ceremony to the shared runPreparedBootstrapCeremony
+        // (which invokes navigator.credentials.create() with no
+        // preceding await so Chromium keeps the click's user
+        // activation) and maps its bounded result to the unchanged
+        // lock-overlay terminals (unlock / diagnostic / retry). The
+        // prepared challenge is discarded after first use whether the
+        // ceremony resolves, rejects, or hits the watchdog so a
+        // follow-up click forces fresh preflight.
         if (state.unlockInFlight) { return; }
 
         // UX-1H7 -- snapshot retry-context flags BEFORE
@@ -1735,170 +2374,44 @@
 
         setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
 
-        var startMs = Date.now();
-        var createAbort     = (typeof AbortController === 'function') ? new AbortController() : null;
-        var createTimedOut  = false;
-        var createTimeoutId = createAbort
-            ? setTimeout(function () { createTimedOut = true; try { createAbort.abort(); } catch (eAb) {} }, CREATE_CEREMONY_TIMEOUT_MS)
-            : null;
-        var createPromise;
-        try {
-            createPromise = window.navigator.credentials.create({
-                publicKey: prepared.publicKey,
-                signal:    createAbort ? createAbort.signal : undefined
-            });
-        } catch (eSync) {
-            if (createTimeoutId) { clearTimeout(createTimeoutId); }
-            recordDiag({
-                phase:                     'bootstrap_create_sync_throw',
-                errorName:                 (eSync && eSync.name)    || 'sync_throw',
-                errorMessage:              (eSync && eSync.message) || 'navigator.credentials.create threw synchronously',
-                errorStackFirstLine:       (eSync && eSync.stack)   ? String(eSync.stack).split('\n')[0] : null,
-                errorOccurredBeforeCreate: false,
-                createElapsedMs:           (Date.now() - startMs)
-            });
-            logUnlock(state.lastDiagnostics);
-            state.preparedBootstrap        = null;
-            state.preparedBootstrapStatus  = 'idle';
-            state.unlockInFlight           = false;
-            state.lastFailureMessage       = 'We couldn\'t start the check (' +
-                                             ((eSync && eSync.name) || 'unknown') +
-                                             '). Select "Copy diagnostics" below, then "Retry".';
-            renderLockedView();
-            setUnlockUi(state.lastFailureMessage, false, 'Retry');
-            return;
-        }
-
-        // Watchdog: 30 s. UX-1H10 -- this watchdog is now strictly a
-        // non-error progress notice. A pending create() promise is
-        // NOT a failure: the Windows Hello ceremony may legitimately
-        // take many seconds (operator walked away, biometric prompt
-        // waiting on touch, etc.) and ultimately succeed. Brian's
-        // UX-1H9 manual test produced a successful unlock 5-10s
-        // after a 10s watchdog had already classified the attempt
-        // as failed.
-        //
-        // The watchdog now:
-        //   - records phase 'bootstrap_create_pending_slow' (NOT in
-        //     the failPhases array so Copy Diagnostics main button
-        //     does not arm),
-        //   - records resultDetail 'create_still_pending_after_watchdog',
-        //   - records createWatchdogElapsedMs for support,
-        //   - updates ONLY the status text to a friendly hint,
-        //   - does NOT set state.lastFailureMessage,
-        //   - does NOT re-enable the primary button (create promise
-        //     is still in flight, button remains disabled with the
-        //     'Verifying...' label),
-        //   - does NOT clear preparedBootstrap,
-        //   - does NOT flip unlockInFlight,
-        //   - does NOT auto-fall-back to broker-owned Hello.
-        //
-        // Late resolve: the resolved_after_watchdog branch overrides
-        // the status text via setUnlockUi('Verifying with Windows
-        // Hello...') and proceeds to POST bootstrap-register-unlock.
-        // Late reject: the rejected_after_watchdog branch arms
-        // Copy Diagnostics via state.lastFailureMessage and the
-        // existing failPhases-driven render path.
-        var watchdogFired = false;
-        var watchdogTimer = setTimeout(function () {
-            if (watchdogFired) { return; }
-            watchdogFired = true;
-            recordDiag({
-                phase:                   'bootstrap_create_pending_slow',
-                createWatchdogElapsedMs: (Date.now() - startMs),
-                resultDetail:            'create_still_pending_after_watchdog'
-            });
-            logUnlock(state.lastDiagnostics);
-            setUnlockUi(
-                'Still waiting for your response. ' +
-                'Finish the prompt on screen if it is open.',
-                true,
-                'Verifying\u2026'
-            );
-        }, 30 * 1000);
-
-        return createPromise.then(function (cred) {
-            if (createTimeoutId) { clearTimeout(createTimeoutId); }
-            if (watchdogFired) {
-                recordDiag({
-                    phase:           'bootstrap_create_resolved_after_watchdog',
-                    createElapsedMs: (Date.now() - startMs)
-                });
-            } else {
-                clearTimeout(watchdogTimer);
-                recordDiag({
-                    phase:           'bootstrap_create_resolved',
-                    createElapsedMs: (Date.now() - startMs)
-                });
+        return runPreparedBootstrapCeremony(prepared, function (kind) {
+            if (kind === 'slow') {
+                setUnlockUi(
+                    'Still waiting for your response. ' +
+                    'Finish the prompt on screen if it is open.',
+                    true,
+                    'Verifying\u2026'
+                );
+            } else if (kind === 'verifying') {
+                setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
             }
-            logUnlock(state.lastDiagnostics);
-            if (!cred || !cred.response) { return finishBootstrapFailure('no_credential', null); }
-            setUnlockUi('Confirming it\'s you\u2026', true, 'Verifying\u2026');
-
-            var spkiB64      = '';
-            var alg          = -7;
-            var authDataB64u = '';
-            try {
-                if (typeof cred.response.getPublicKey !== 'function') {
-                    return finishBootstrapFailure('public_key_unavailable', null);
-                }
-                var spki = cred.response.getPublicKey();
-                if (!spki) { return finishBootstrapFailure('public_key_empty', null); }
-                spkiB64 = arrayBufferToB64(spki);
-                if (typeof cred.response.getPublicKeyAlgorithm === 'function') {
-                    alg = cred.response.getPublicKeyAlgorithm();
-                }
-                if (typeof cred.response.getAuthenticatorData !== 'function') {
-                    return finishBootstrapFailure('authdata_unavailable', null);
-                }
-                var ad = cred.response.getAuthenticatorData();
-                if (!ad) { return finishBootstrapFailure('authdata_empty', null); }
-                authDataB64u = arrayBufferToB64u(ad);
-            } catch (e) {
-                return finishBootstrapFailure('authdata_or_pubkey_extract_failed', null);
+        }).then(function (result) {
+            if (result.ok) {
+                recordDiag({ phase: 'browser_ceremony_success', resultOk: true });
+                logUnlock(state.lastDiagnostics);
+                setUnlockUi('Unlocking Cookbook\u2026', true, 'Unlocking\u2026');
+                state.unlockInFlight = false;
+                finishUnlockSuccess();
+                return;
             }
-            if (alg !== -7) { return finishBootstrapFailure('unsupported_alg', null); }
 
-            var body = {
-                credentialId:      arrayBufferToB64u(cred.rawId),
-                publicKeySpki:     spkiB64,
-                alg:               alg,
-                clientDataJSON:    arrayBufferToB64u(cred.response.clientDataJSON),
-                authenticatorData: authDataB64u,
-                challenge:         prepared.optsRaw.challenge
-            };
-            recordDiag({ phase: 'bootstrap_unlock_post_start' });
-            logUnlock(state.lastDiagnostics);
-            // Discard the prepared challenge now -- we used it once.
-            state.preparedBootstrap       = null;
-            state.preparedBootstrapStatus = 'idle';
+            var reason = result.reason || 'unknown';
 
-            return window.cookbookApi.post(withAttempt('/api/v1/broker/webauthn/bootstrap-register-unlock'), body).then(function (resp) {
-                recordDiag({ phase: 'bootstrap_unlock_post_done' });
-                logUnlock(state.lastDiagnostics);
-                if (resp && resp.ok && resp.body && resp.body.state === 'Unlocked') {
-                    recordDiag({ phase: 'browser_ceremony_success', resultOk: true });
-                    logUnlock(state.lastDiagnostics);
-                    setUnlockUi('Unlocking Cookbook\u2026', true, 'Unlocking\u2026');
-                    state.unlockInFlight = false;
-                    finishUnlockSuccess();
-                    return;
-                }
-                return finishBootstrapFailure('broker_rejected', resp);
-            }, function () {
-                return finishBootstrapFailure('broker_network_error', null);
-            });
-        }, function (err) {
-            if (createTimeoutId) { clearTimeout(createTimeoutId); }
-            if (createTimedOut) {
-                recordDiag({
-                    phase:           'bootstrap_create_timeout',
-                    errorName:       'CreateTimeout',
-                    errorMessage:    'create() aborted after ' + CREATE_CEREMONY_TIMEOUT_MS + 'ms; no verdict returned',
-                    createTimeoutMs: CREATE_CEREMONY_TIMEOUT_MS,
-                    createElapsedMs: (Date.now() - startMs)
-                });
-                logUnlock(state.lastDiagnostics);
+            // Synchronous create() throw -- could not even start the ceremony.
+            if (reason.indexOf('navigator_create_sync_throw:') === 0) {
+                state.preparedBootstrap        = null;
+                state.preparedBootstrapStatus  = 'idle';
+                state.unlockInFlight           = false;
+                state.lastFailureMessage       = 'We couldn\'t start the check (' +
+                                                 (result.errName || 'unknown') +
+                                                 '). Select "Copy diagnostics" below, then "Retry".';
+                renderLockedView();
+                setUnlockUi(state.lastFailureMessage, false, 'Retry');
+                return;
+            }
+
+            // create() aborted by the ceremony timeout with no verdict.
+            if (reason === 'create_timeout') {
                 state.preparedBootstrap       = null;
                 state.preparedBootstrapStatus = 'idle';
                 state.unlockInFlight          = false;
@@ -1907,39 +2420,29 @@
                 setUnlockUi(state.lastFailureMessage, false, 'Retry');
                 return;
             }
-            if (watchdogFired) {
-                recordDiag({
-                    phase:                     'bootstrap_create_rejected_after_watchdog',
-                    errorName:                 (err && err.name) ? err.name : 'unknown',
-                    errorMessage:              (err && err.message) ? err.message : null,
-                    errorStackFirstLine:       (err && err.stack) ? String(err.stack).split('\n')[0] : null,
-                    errorOccurredBeforeCreate: false,
-                    createElapsedMs:           (Date.now() - startMs)
-                });
-            } else {
-                clearTimeout(watchdogTimer);
-                recordDiag({
-                    phase:                     'bootstrap_create_rejected',
-                    errorName:                 (err && err.name) ? err.name : 'unknown',
-                    errorMessage:              (err && err.message) ? err.message : null,
-                    errorStackFirstLine:       (err && err.stack) ? String(err.stack).split('\n')[0] : null,
-                    errorOccurredBeforeCreate: false,
-                    createElapsedMs:           (Date.now() - startMs)
-                });
+
+            // create() rejected: operator cancel/dismiss or a platform error.
+            if (reason === 'user_cancelled' || reason.indexOf('navigator_create_failed:') === 0) {
+                var name = result.errName || 'unknown';
+                state.preparedBootstrap       = null;
+                state.preparedBootstrapStatus = 'idle';
+                state.unlockInFlight          = false;
+                if (reason === 'user_cancelled') {
+                    state.lastFailureMessage = 'The check was cancelled. Select "Retry".';
+                } else {
+                    state.lastFailureMessage = 'We couldn\'t confirm it\'s you (' + name + '). ' +
+                                               'Select "Copy diagnostics" below, then "Retry".';
+                }
+                renderLockedView();
+                setUnlockUi(state.lastFailureMessage, false, 'Retry');
+                return;
             }
-            logUnlock(state.lastDiagnostics);
-            var name = (err && err.name) ? err.name : 'unknown';
-            state.preparedBootstrap       = null;
-            state.preparedBootstrapStatus = 'idle';
-            state.unlockInFlight          = false;
-            if (name === 'NotAllowedError' || name === 'AbortError') {
-                state.lastFailureMessage = 'The check was cancelled. Select "Retry".';
-            } else {
-                state.lastFailureMessage = 'We couldn\'t confirm it\'s you (' + name + '). ' +
-                                           'Select "Copy diagnostics" below, then "Retry".';
-            }
-            renderLockedView();
-            setUnlockUi(state.lastFailureMessage, false, 'Retry');
+
+            // Public-key/authenticator-data extraction failure, or a broker
+            // rejection/network error on the persist POST. finishBootstrapFailure
+            // clears prepared + unlockInFlight and renders the structured
+            // diagnostic exactly as before.
+            finishBootstrapFailure(reason, result.resp || null);
         });
     }
 
@@ -2306,34 +2809,11 @@
 
     function onBrokerLocked(ev) {
         var d = (ev && ev.detail) ? ev.detail : {};
-        // If a reAuthRequired overlay is already up, a 423 supersedes
-        // it (the broker is now locked harder than just per-op gate).
         state.kind            = 'brokerLocked';
         state.message         = d.message         || null;
         state.attemptedMethod = d.attemptedMethod || null;
         state.attemptedPath   = d.attemptedPath   || null;
         renderLockedView();
-        mount();
-    }
-
-    function onReAuthRequired(ev) {
-        var d = (ev && ev.detail) ? ev.detail : {};
-        // X16C -- the manual-cook step-up is owned inline by the Bake
-        // button flow (manual-cook-reauth.js drives navigator.credentials
-        // .get and retries the cook once). The generic overlay must NOT
-        // intercept that op class, or it would race the Bake flow and
-        // show a second, conflicting prompt. Every other op class still
-        // surfaces the per-op verdict overlay here.
-        if (d.opClass === 'manualCook') { return; }
-        // If a brokerLocked overlay is already up, don't downgrade --
-        // the chef must clear the lock first; the per-op verdict is
-        // surfaced after the unlock succeeds and the chef retries.
-        if (state.kind === 'brokerLocked') { return; }
-        state.kind               = 'reAuthRequired';
-        state.message            = d.message            || null;
-        state.opClass            = d.opClass            || null;
-        state.verificationResult = d.verificationResult || null;
-        renderReAuthView();
         mount();
     }
 
@@ -2393,7 +2873,7 @@
         var p = state.preparedBootstrap;
         var lines = [
             '=== PAX Cookbook unlock diagnostics ===',
-            'expected script version: lock-overlay.js?v=ux11b',
+            'expected script version: lock-overlay.js?v=ux11c',
             'collected at: ' + new Date().toISOString(),
             '',
             '--- last unlock attempt ---',
@@ -2792,7 +3272,6 @@
 
     function init() {
         try { window.addEventListener('cookbook:brokerLocked',   onBrokerLocked); } catch (e) {}
-        try { window.addEventListener('cookbook:reAuthRequired', onReAuthRequired); } catch (e) {}
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
             probeLockStateOnce();
         } else {
@@ -2800,14 +3279,137 @@
         }
     }
 
+    // ----------------------------------------------------------------
+    // Batch 1b Stage 3 -- register-before-switch Windows Hello enrollment
+    // ----------------------------------------------------------------
+    //
+    // Settings (React, in the content iframe) cannot own the WebAuthn create()
+    // ceremony: the platform-authenticator prompt must be anchored to the
+    // TOP-LEVEL shell window that owns the HWND, and create() must run from a
+    // real top-level user gesture. The React provider switch couriers a typed
+    // enrollment REQUEST to the shell; the shell presents a bounded first-use
+    // affordance; the operator's click on that affordance is the top-level
+    // activation from which this module runs the EXACT SAME prepared-bootstrap
+    // ceremony used by the first-run lock unlock (runPreparedBootstrapCeremony),
+    // in "enroll mode": it does create + verify + persist (registration) WITHOUT
+    // unlocking or reloading, and resolves a bounded enrollment outcome. The
+    // broker persists the registration BEFORE React flips the selected provider
+    // via /session-provider/select-windows-hello. Every non-success path resolves
+    // a truthful bounded outcome and leaves the current session/provider
+    // untouched -- no partial write, no automatic fallback.
+
+    var enrollInFlight = false;
+
+    function runEnrollFromPrepared(prepared) {
+        // Fresh attempt id + diagnostics buffer so the reused ceremony's
+        // recordDiag / withAttempt correlate this enrollment. NO overlay UI is
+        // touched (the affordance owns its own copy); onProgress is omitted so
+        // the shared core stays silent here.
+        state.lastUnlockAttemptId = newUnlockAttemptId();
+        state.lastDiagnostics     = null;
+        state.lastFailureMessage  = null;
+        recordDiag({
+            webauthnSupported:     true,
+            selectedPath:          'browser_webauthn_bootstrap_create',
+            endpoint:              '/api/v1/broker/webauthn/bootstrap-register-unlock',
+            browserApi:            'navigator.credentials.create',
+            phase:                 'enroll_pre_create_activation_safe',
+            bootstrapPreparedFlag: true,
+            usedPreparedChallenge: true
+        });
+        logUnlock(state.lastDiagnostics);
+
+        // PHASE-2 attended diagnostic: mark the enroll ceremony active so the
+        // shared bootstrap core records create()-ceremony facts for THIS enroll
+        // only (never the unlock get() path). Inert without the attended marker.
+        attendedSetEnrollActive(true);
+
+        return runPreparedBootstrapCeremony(prepared).then(function (result) {
+            // Single-use challenge is fully consumed regardless of outcome.
+            state.preparedBootstrap       = null;
+            state.preparedBootstrapStatus = 'idle';
+            attendedSetEnrollActive(false);
+            if (result.ok) {
+                recordDiag({ phase: 'enroll_ceremony_success', resultOk: true });
+                logUnlock(state.lastDiagnostics);
+                return 'enrolled';
+            }
+            var reason = result.reason || 'unknown';
+            recordDiag({ phase: 'enroll_ceremony_failed', resultOk: false, resultDetail: reason });
+            logUnlock(state.lastDiagnostics);
+            if (reason === 'create_timeout') { return 'timeout'; }
+            if (reason === 'user_cancelled') { return 'cancelled'; }
+            // Extraction failure, broker rejection/network error, sync throw, or
+            // any other bounded reason -> a generic failure. The provider is NOT
+            // flipped and the work account remains selected.
+            return 'failed';
+        }, function () {
+            state.preparedBootstrap       = null;
+            state.preparedBootstrapStatus = 'idle';
+            attendedSetEnrollActive(false);
+            return 'failed';
+        });
+    }
+
+    // Top-level enrollment API for the shell affordance (integrated-shell.js).
+    // The shell NEVER submits a credential or a result field; it only prepares
+    // the challenge in the background and runs the ceremony from the operator's
+    // gesture, then couriers the bounded outcome back to React.
+    window.cookbookHelloEnroll = {
+        // Prepare (activation-safe) the bootstrap challenge in the background so
+        // a subsequent affordance click can call create() synchronously.
+        // Idempotent; a no-op when the workspace already has a registered Hello
+        // credential (preflightBootstrap gates on registered=false).
+        prepare: function () {
+            try { preflightBootstrap(); } catch (e) {}
+        },
+        // Whether a fresh prepared challenge exists so an immediate gesture-driven
+        // create() would be activation-safe.
+        isReady: function () {
+            return !!(state.preparedBootstrap && isPreparedBootstrapFresh());
+        },
+        // 'idle' | 'pending' | 'ready' | 'failed'
+        status: function () { return state.preparedBootstrapStatus || 'idle'; },
+        // Run the enrollment ceremony SYNCHRONOUSLY from a top-level user
+        // gesture. Returns Promise<'enrolled'|'cancelled'|'timeout'|'failed'|
+        // 'unavailable'>. Fails closed: never throws, never unlocks, never flips
+        // the provider, never falls back.
+        enrollFromGesture: function () {
+            if (!webauthnSupported()) { return Promise.resolve('unavailable'); }
+            if (enrollInFlight)       { return Promise.resolve('failed'); }
+            if (!state.preparedBootstrap || !isPreparedBootstrapFresh()) {
+                // Not activation-ready. Kick preflight for a subsequent gesture
+                // and fail this one closed so the courier never hangs.
+                try { preflightBootstrap(); } catch (e) {}
+                return Promise.resolve('failed');
+            }
+            enrollInFlight = true;
+            var prepared = state.preparedBootstrap;
+            return runEnrollFromPrepared(prepared).then(function (outcome) {
+                enrollInFlight = false;
+                return outcome;
+            }, function () {
+                enrollInFlight = false;
+                return 'failed';
+            });
+        }
+    };
+
     // Diagnostics-only surface. NOT meant for page modules.
     window.cookbookLockOverlay = {
         state:    function () { return state; },
         force:    function (kind) {
             if (kind === 'brokerLocked')   { onBrokerLocked({ detail: { code: 'brokerLocked' } }); }
-            if (kind === 'reAuthRequired') { onReAuthRequired({ detail: { code: 'reAuthRequired' } }); }
         },
-        dismiss:  function () { unmount(); }
+        dismiss:  function () { unmount(); },
+        // On-demand lock-state re-check. Runs the SAME one-shot boot probe
+        // (GET /broker/lock-state -> mount overlay iff state === 'Locked').
+        // The integrated-shell broker-lock courier calls this after the React
+        // iframe reports it just locked the broker, so the top-level lock
+        // overlay appears promptly instead of waiting for the shell's next
+        // on-demand 423. It adds no new authority: it only reads lock-state
+        // and mounts the existing overlay when the broker says Locked.
+        recheck:  function () { try { probeLockStateOnce(); } catch (e) {} }
     };
 
     init();

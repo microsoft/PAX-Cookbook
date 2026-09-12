@@ -20,8 +20,6 @@ import type { StartCookOutcome } from '../../../host/brokerBridge';
  */
 export function describeStartCookFailure(outcome: StartCookOutcome): string {
   switch (outcome.kind) {
-    case 'reauthRequired':
-      return 'Windows Hello confirmation is required to bake. Try again to confirm. The bake did not start.';
     case 'unauthorized':
       return 'PAX Cookbook needs you to sign in again before it can bake. Reopen the recipe and try again. The bake did not start.';
     case 'forbidden':

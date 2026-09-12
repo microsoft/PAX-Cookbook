@@ -29,6 +29,14 @@ interface BakeConfirmModalProps {
   commandSummary: string | null;
   /** True while the startCook call is in flight. */
   submitting: boolean;
+  /**
+   * True when the recipe is not currently Bake-ready (fresh readiness became
+   * invalid while the modal is open). Confirm Bake is disabled and a bounded
+   * not-ready note is shown; no cook-start can be issued.
+   */
+  confirmDisabled?: boolean;
+  /** Bounded not-ready explanation shown when confirmDisabled is true. */
+  notReadyMessage?: string | null;
   /** A bounded failure message to surface in the modal, or null. */
   error: string | null;
   /** Cancel / Escape / backdrop — nothing starts. Inert while submitting. */
@@ -43,6 +51,8 @@ export function BakeConfirmModal({
   destinationSummary,
   commandSummary,
   submitting,
+  confirmDisabled = false,
+  notReadyMessage = null,
   error,
   onCancel,
   onConfirm,
@@ -68,7 +78,7 @@ export function BakeConfirmModal({
   }
 
   function handleConfirm() {
-    if (submitting) {
+    if (submitting || confirmDisabled) {
       return;
     }
     onConfirm();
@@ -132,6 +142,12 @@ export function BakeConfirmModal({
           </p>
         ) : null}
 
+        {confirmDisabled && notReadyMessage ? (
+          <p className="mk-modal__error" role="alert">
+            {notReadyMessage}
+          </p>
+        ) : null}
+
         <div className="mk-modal__actions">
           <button
             type="button"
@@ -145,7 +161,7 @@ export function BakeConfirmModal({
             type="button"
             className="mk-modal__button mk-modal__button--primary"
             onClick={handleConfirm}
-            disabled={submitting}
+            disabled={submitting || confirmDisabled}
           >
             {submitting ? 'Starting…' : 'Confirm Bake'}
           </button>

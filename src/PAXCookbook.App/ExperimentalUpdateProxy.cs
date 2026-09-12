@@ -223,6 +223,16 @@ internal static class ExperimentalUpdateProxy
 
     internal static async Task<IResult> HandleAsync(HttpContext ctx, VersionInfo version)
     {
+        // Under active test isolation with update checks disabled, return a
+        // bounded disabled state and make NO outbound network request. This is
+        // the only place in the experimental channel that contacts the network
+        // for update discovery, so gating it here guarantees an isolated run
+        // never reaches api.github.com for an update check.
+        if (TestIsolationRuntime.IsActive && !TestIsolationRuntime.Current!.UpdateChecksEnabled)
+        {
+            return Results.Json(new { ok = false, state = "disabled_in_test_isolation" });
+        }
+
         string userAgent = "PAXCookbook/" + version.CookbookVersion + " (update-check)";
 
         // 1) Releases list (fixed URL, api.github.com). Returns JSON directly.
@@ -284,7 +294,7 @@ internal static class ExperimentalUpdateProxy
                 {
                     ok = false,
                     state = "bad_response",
-                    detail = "The experimental manifest was not in the expected format.",
+                    detail = "The pre-release update information was not in the expected format.",
                 });
             }
         }
@@ -294,7 +304,7 @@ internal static class ExperimentalUpdateProxy
             {
                 ok = false,
                 state = "bad_response",
-                detail = "The experimental manifest was unreadable.",
+                detail = "The pre-release update information was unreadable.",
             });
         }
 

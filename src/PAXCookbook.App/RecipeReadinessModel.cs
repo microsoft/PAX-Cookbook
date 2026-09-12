@@ -1,3 +1,5 @@
+using PAXCookbook.Shared.Contracts;
+
 namespace PAXCookbook.App;
 
 // Read-only / non-persisting readiness projection for the Mini-Kitchen builder.
@@ -17,12 +19,17 @@ internal static class RecipeReadinessModel
         string workspacePath, string paxScriptPath, VersionInfo versionInfo,
         string engineLocalAppDataBase, object? body)
     {
-        RecipePreviewModel.ProjectionResult proj =
-            RecipePreviewModel.Project(workspacePath, paxScriptPath, versionInfo, body);
-
         // Engine acquisition is independent of recipe validity, so it is
-        // resolved for both the valid and not-yet-valid branches.
+        // resolved for both the valid and not-yet-valid branches. Cycle 16 also
+        // makes it the capability half of the organization authority snapshot the
+        // projection evaluates for an organization-bound Recipe.
         EngineAcquisitionResult engine = EngineAcquisition.Resolve(versionInfo, engineLocalAppDataBase);
+
+        RecipePreviewModel.ProjectionResult proj =
+            RecipePreviewModel.Project(
+                workspacePath, paxScriptPath, versionInfo, body,
+                () => ProductionOrganizationAuthority.CreateSnapshot(versionInfo, engine));
+
         bool engineReady = engine.IsAcquired;
         string engineDetail = engineReady
             ? "The PAX script is installed."
@@ -248,5 +255,49 @@ internal static class RecipeReadinessModel
             return JsonModel.Str(ck);
         }
         return string.Empty;
+    }
+
+    // ---------------------------------------------------------------------
+    // Organization-key binding readiness (Cycle 14)
+    //
+    // A BOUNDED, FAIL-CLOSED projection over a Recipe's OPTIONAL organization
+    // key binding. It returns null when the recipe carries no organization
+    // binding at all (there is nothing to project), and otherwise a single
+    // bounded state token whose every later-stage capability is constant-false.
+    //
+    // Every input is INJECTED, so this is pure: it opens no certificate store,
+    // reads no certificate or private key, reads no secret, contacts no tenant
+    // or service, injects no Cook credential, and runs no PAX/Bake. The opaque
+    // identifier is read here and handed to the evaluator IN-PROCESS only; it is
+    // never returned, never placed in the readiness body, never rendered in
+    // visible copy, and never reaches the command preview, PAX argv, or a log.
+    // Deleting or changing the inventory therefore never mutates a saved Recipe:
+    // readiness simply fails closed until it is repaired.
+    // ---------------------------------------------------------------------
+    internal static OrganizationKeyBindingReadiness? ProjectOrganizationKeyBinding(
+        Dictionary<string, object?> recipe,
+        OrganizationInventoryEvaluation? inventory,
+        ICertificateCatalog? catalog,
+        ICertificateUsabilityClock? clock)
+    {
+        string authMode = string.Empty;
+        string chefKeyId = string.Empty;
+        string organizationKeyId = string.Empty;
+        if (recipe.TryGetValue("auth", out object? authObj) &&
+            authObj is Dictionary<string, object?> auth)
+        {
+            if (auth.TryGetValue("mode", out object? m)) { authMode = JsonModel.Str(m); }
+            if (auth.TryGetValue("chefKeyId", out object? ck)) { chefKeyId = JsonModel.Str(ck); }
+            if (auth.TryGetValue("organizationKeyId", out object? ok)) { organizationKeyId = JsonModel.Str(ok); }
+        }
+
+        OrganizationKeyRecipeBinding binding =
+            OrganizationKeyRecipeBinding.Create(authMode, chefKeyId, organizationKeyId);
+        if (!binding.HasOrganizationBinding)
+        {
+            return null;
+        }
+
+        return OrganizationKeyBindingEvaluator.Evaluate(binding, inventory, catalog, clock);
     }
 }

@@ -14,12 +14,16 @@ public sealed record ShortcutDefinition(
     int OrderHint                  // lower = earlier in folder
 );
 
-// Result returned by the shortcut writer.
+// Result returned by the shortcut writer. Created is false when the write was
+// SUPPRESSED (no real .lnk was produced) — e.g. under the test-shell gate or
+// active test isolation. A suppressed write must NEVER be recorded as a created
+// shortcut in shortcut-manifest.json.
 public sealed record ShortcutWriteResult(
     string LnkPath,
     string Sha256,
     bool ExcludeAttempted,
-    bool ExcludeSucceeded
+    bool ExcludeSucceeded,
+    bool Created = true
 );
 
 // Read-only view of an existing .lnk, returned by Win32ShortcutWriter.ReadLink

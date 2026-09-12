@@ -8,31 +8,21 @@ namespace PAXCookbook.App;
 // is pure string projection: it never reads the PAX engine file, never spawns a
 // process, and never touches the filesystem. The PaxScriptPath is used only as
 // a literal token inside the rendered spawn expression.
-internal static class PaxAdapter
+internal static partial class PaxAdapter
 {
-    // Thrown by the projection-boundary guards. The preview route translates
-    // this into an AJV-shaped validation error anchored on
-    // /advanced/extraArguments (oracle parity).
-    public sealed class ProjectionException : Exception
-    {
-        public ProjectionException(string message) : base(message) { }
-    }
-
     // Resolved non-secret Chef's Key fields the projection consumes. The secret
     // itself lives only in Windows Credential Manager and is never read.
-    public sealed record ChefKeyAuthRow(string Mode, string? ClientId, string? CertThumbprint);
-
-    // Oracle: $Script:RemovedSwitches (Adapter.psm1).
-    private static readonly string[] RemovedSwitches =
-    {
-        "ExportWorkbook", "ExplodeArrays", "ExplodeDeep", "RawInputCSV",
-        "IncludeAgent365Info", "OnlyAgent365Info", "OutputPathAgent365Info", "AppendAgent365Info",
-    };
+    // CertSha256 (Cycle 15) is the OPTIONAL fail-closed SHA-256-over-DER
+    // certificate selector a SANCTIONED engine accepts. It defaults to null so
+    // every existing three-argument construction compiles and behaves unchanged.
+    public sealed record ChefKeyAuthRow(
+        string Mode, string? ClientId, string? CertThumbprint, string? CertSha256 = null);
 
     // Oracle: $Script:ForbiddenInExtraArguments (Adapter.psm1 secret-shape scan).
     private static readonly string[] ForbiddenInExtraArguments =
     {
         "Auth", "TenantId", "ClientId", "ClientSecret", "ClientCertificateThumbprint",
+        "ClientCertificateSha256",
     };
 
     // Oracle: $Script:LocalAdapterAllowedExecutionModes.
@@ -47,17 +37,6 @@ internal static class PaxAdapter
         "-OutputPath", "-AppendFile", "-Resume",
         "-OutputPathUserInfo", "-AppendUserInfo", "-ClientCertificatePath",
     };
-
-    // Case-insensitive '(^|\s)-<name>($|\s|=)' token match.
-    private static bool HasSwitch(string trailer, string name)
-    {
-        if (string.IsNullOrWhiteSpace(trailer))
-        {
-            return false;
-        }
-        string pattern = @"(^|\s)-" + Regex.Escape(name) + @"($|\s|=)";
-        return Regex.IsMatch(trailer, pattern, RegexOptions.IgnoreCase);
-    }
 
     // Oracle: ConvertTo-QuotedArg. Backtick first, then ", then $.
     public static string ConvertToQuotedArg(string? value)
@@ -97,25 +76,6 @@ internal static class PaxAdapter
         return outputPath;
     }
 
-    // Oracle: Test-ExtraArgumentsForRemovedSwitches (throws).
-    public static void ScanRemovedSwitches(string extraArguments)
-    {
-        if (string.IsNullOrWhiteSpace(extraArguments))
-        {
-            return;
-        }
-        foreach (string name in RemovedSwitches)
-        {
-            if (HasSwitch(extraArguments, name))
-            {
-                throw new ProjectionException(
-                    $"advanced.extraArguments contains removed switch '-{name}'. " +
-                    "This switch was removed in PAX v1.11.2 and is not reintroduced via the verbatim trailer. " +
-                    "Edit the recipe to remove it; the projection layer does not rewrite recipes.");
-            }
-        }
-    }
-
     // Oracle: Test-ExtraArgumentsForSecretShape (Adapter.psm1 — auth-token scan).
     public static void ScanSecretShape(string extraArguments)
     {
@@ -131,6 +91,7 @@ internal static class PaxAdapter
                 {
                     "ClientSecret" => "Client secrets are delivered to PAX via the GRAPH_CLIENT_SECRET environment variable, NEVER as a command-line argument. Store the secret in a Chef's Key and bind it to the recipe.",
                     "ClientCertificateThumbprint" => "Certificate thumbprints are emitted automatically from the bound Chef's Key's certThumbprint. Edit the Chef's Key instead of the recipe trailer.",
+                    "ClientCertificateSha256" => "Certificate selectors are emitted automatically from the bound key's certificate reference. Edit the bound key instead of the recipe trailer.",
                     "ClientId" => "Client IDs are emitted automatically from the bound Chef's Key's clientId. Edit the Chef's Key instead of the recipe trailer.",
                     "TenantId" => "TenantId is emitted automatically from recipe.auth.tenantId. Edit the recipe's auth block instead of the trailer.",
                     "Auth" => "Auth mode is emitted automatically from recipe.auth.mode. Edit the recipe's auth block instead of the trailer.",
@@ -360,14 +321,31 @@ internal static class PaxAdapter
             tokens.Add(keyClientId);
             if (CiEq(authMode, "AppRegistrationCertificate"))
             {
-                string keyThumb = chefKey.CertThumbprint ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(keyThumb))
+                // Cycle 15. A SANCTIONED engine selects by SHA-256 over the
+                // certificate's DER bytes. When that reference is present it is
+                // the ONLY selector emitted; the SHA-1 thumbprint parameter is
+                // never also emitted, and no SHA-256 value is ever mapped down
+                // to a SHA-1 thumbprint.
+                string keySha256 = chefKey.CertSha256 ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(keySha256))
                 {
-                    throw new ProjectionException(
-                        $"Get-PaxArgvArray: Chef's Key '{chefKeyId}' is mode AppRegistrationCertificate but has no certThumbprint.");
+                    string normalized = Sha256Hex.Normalize(keySha256)
+                        ?? throw new ProjectionException(
+                            "Get-PaxArgvArray: the bound certificate reference is not a 64-character hex SHA-256 value.");
+                    tokens.Add("-ClientCertificateSha256");
+                    tokens.Add(normalized);
                 }
-                tokens.Add("-ClientCertificateThumbprint");
-                tokens.Add(keyThumb);
+                else
+                {
+                    string keyThumb = chefKey.CertThumbprint ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(keyThumb))
+                    {
+                        throw new ProjectionException(
+                            $"Get-PaxArgvArray: Chef's Key '{chefKeyId}' is mode AppRegistrationCertificate but has no certThumbprint.");
+                    }
+                    tokens.Add("-ClientCertificateThumbprint");
+                    tokens.Add(keyThumb);
+                }
             }
         }
 

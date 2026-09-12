@@ -22,8 +22,83 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
   </ItemGroup>
 
+  <!-- Experimental Entra WAM packaging boundary (Track 1 / T1-S2A).
+       OFF by default: stable/customer builds define no EXPERIMENTAL_WAM
+       constant and reference no MSAL package, so the stable payload contains
+       no OAuth broker and cannot perform live authentication. A developer opts
+       in only with an explicit /p:ExperimentalWam=true build, which both
+       defines the compile symbol and adds the MSAL broker packages. -->
+  <PropertyGroup Condition="'$(ExperimentalWam)' == 'true'">
+    <DefineConstants>$(DefineConstants);EXPERIMENTAL_WAM</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Test-isolation activation boundary. OFF by default: stable/customer builds
+       define no PAXCOOKBOOK_TEST_ISOLATION constant, so the runtime activation
+       path that honors a test-isolation descriptor is compiled out entirely and
+       no descriptor can ever place a customer build into isolated mode. A test
+       harness opts in with an explicit /p:TestIsolation=true build. The isolation
+       CONTRACT/validator (linked below) always compiles so tests can validate it;
+       only ACTIVATION is gated. -->
+  <PropertyGroup Condition="'$(TestIsolation)' == 'true'">
+    <DefineConstants>$(DefineConstants);PAXCOOKBOOK_TEST_ISOLATION</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(ExperimentalWam)' == 'true'">
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.66.2" />
+    <PackageReference Include="Microsoft.Identity.Client.Broker" Version="4.66.2" />
+    <!-- DPAPI (ProtectedData) is only used by the EXPERIMENTAL_WAM-gated
+         protected preferred-account store (WorkAccountPreferredAccountStore.cs).
+         It is referenced ONLY in the experimental build so the stable/customer
+         payload never pulls it in. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="PAXCookbook.App.Tests" />
+  </ItemGroup>
+
+  <!-- Single source of truth for the mutually-exclusive selected-session-
+       provider contract. The native host does NOT reference PAXCookbook.Shared,
+       so the canonical file is LINKED (compiled in-place) rather than
+       project-referenced. Setup consumes the identical file through its Shared
+       project reference, so both use the exact same path, schema, enum values,
+       and validation with no duplicated constants that can drift. -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.Shared\Contracts\SessionProviderContract.cs"
+             Link="Contracts\SessionProviderContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\TestIsolationContext.cs"
+             Link="Contracts\TestIsolationContext.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\MachinePolicyContract.cs"
+             Link="Contracts\MachinePolicyContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ManagedChefKeysGateContract.cs"
+             Link="Contracts\ManagedChefKeysGateContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\OrganizationKeyInventoryContract.cs"
+             Link="Contracts\OrganizationKeyInventoryContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\OrganizationCertificateResolutionContract.cs"
+             Link="Contracts\OrganizationCertificateResolutionContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\OrganizationCertificateUsabilityContract.cs"
+             Link="Contracts\OrganizationCertificateUsabilityContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\CookPreparationSequence.cs"
+             Link="Contracts\CookPreparationSequence.cs" />
+  </ItemGroup>
+
+  <!-- Canonical Recipe validation source. RecipeValidationModel + its portable
+       JsonModel core, the PaxAdapter members the validator binds, and the one
+       organization-key identifier pattern live under
+       PAXCookbook.Shared\Contracts\AppSharedSource so the App and Setup compile
+       the SAME parser and the SAME semantic gates. They stay namespace
+       PAXCookbook.App and are LINKED (not project-referenced) because the native
+       host does not reference PAXCookbook.Shared. The App additionally compiles
+       JsonModel.Http.cs, the ASP.NET-only half Setup never sees. -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\JsonModel.cs"
+             Link="Contracts\AppSharedSource\JsonModel.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\RecipeValidationModel.cs"
+             Link="Contracts\AppSharedSource\RecipeValidationModel.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\PaxAdapter.Validation.cs"
+             Link="Contracts\AppSharedSource\PaxAdapter.Validation.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\OrganizationKeyIdentifierPattern.cs"
+             Link="Contracts\AppSharedSource\OrganizationKeyIdentifierPattern.cs" />
   </ItemGroup>
 
 </Project>

@@ -77,6 +77,12 @@
     --c-topbar-btn-border:     rgba(255, 255, 255, 0.22);
     --c-topbar-btn-border-hover: rgba(255, 255, 255, 0.34);
 
+    /* --- Color: Work-account initials avatar ---------------- */
+    --c-profile-avatar-fg:           #ffffff;
+    --c-profile-avatar-bg:           #173B63;
+    --c-profile-avatar-border:       #0F2F57;
+    --c-profile-avatar-border-hover: #2F6AD6;
+
     /* --- Color: hover on standard surfaces ------------------ */
     --c-bg-hover:              rgba(0, 0, 0, 0.04);
     --c-bg-hover-strong:       rgba(0, 0, 0, 0.07);
@@ -268,6 +274,11 @@
 
         --c-overlay-soft:          rgba(255, 255, 255, 0.05);
         --c-overlay-hover:         rgba(255, 255, 255, 0.08);
+
+        --c-profile-avatar-fg:           #0B1A2E;
+        --c-profile-avatar-bg:           #8AABD4;
+        --c-profile-avatar-border:       #B7CBE4;
+        --c-profile-avatar-border-hover: #F0F1F3;
 
         --c-bg-hover:              rgba(255, 255, 255, 0.04);
         --c-bg-hover-strong:       rgba(255, 255, 255, 0.07);

@@ -73,48 +73,68 @@ export interface UpdateComponentStatus {
   newBuildOnly: boolean;
 }
 
-function parseVersion(v: string | null | undefined): number[] | null {
+interface ParsedVersion {
+  core: number[];
+  prerelease: { channel: 'exp' | 'internal'; ordinal: number } | null;
+}
+
+function parseVersion(v: string | null | undefined): ParsedVersion | null {
   if (!v || typeof v !== 'string') {
     return null;
   }
   const trimmed = v.trim();
-  if (!/^\d+(\.\d+)*$/.test(trimmed)) {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:-(exp|internal)\.([1-9]\d*))?$/.exec(trimmed);
+  if (!match) {
     return null;
   }
-  return trimmed.split('.').map(n => parseInt(n, 10));
+  return {
+    core: [match[1], match[2], match[3], match[4] ?? '0'].map(value => parseInt(value, 10)),
+    prerelease: match[5]
+      ? {
+          channel: match[5] as 'exp' | 'internal',
+          ordinal: parseInt(match[6], 10),
+        }
+      : null,
+  };
 }
 
-/** True only when `remote` is a strictly-newer dotted version than `installed`. */
-function isNewer(remote: string | null | undefined, installed: string | null | undefined): boolean {
+/** True only when `remote` is a strictly newer supported release-contract version. */
+export function isNewerVersion(remote: string | null | undefined, installed: string | null | undefined): boolean {
   const r = parseVersion(remote);
   const i = parseVersion(installed);
   if (!r || !i) {
     return false; // unknown either side — never prompt on a guess
   }
-  const len = Math.max(r.length, i.length);
+  const len = Math.max(r.core.length, i.core.length);
   for (let k = 0; k < len; k++) {
-    const rv = r[k] ?? 0;
-    const iv = i[k] ?? 0;
+    const rv = r.core[k] ?? 0;
+    const iv = i.core[k] ?? 0;
     if (rv > iv) return true;
     if (rv < iv) return false;
   }
-  return false;
+  if (!r.prerelease && i.prerelease) return true;
+  if (r.prerelease && !i.prerelease) return false;
+  if (!r.prerelease || !i.prerelease) return false;
+  if (r.prerelease.channel !== i.prerelease.channel) return false;
+  return r.prerelease.ordinal > i.prerelease.ordinal;
 }
 
-/** True only when both parse to the same dotted version. */
-function sameVersion(a: string | null | undefined, b: string | null | undefined): boolean {
+/** True only when both parse to the same supported release-contract version. */
+export function sameVersion(a: string | null | undefined, b: string | null | undefined): boolean {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
   if (!pa || !pb) {
     return false;
   }
-  const len = Math.max(pa.length, pb.length);
+  const len = Math.max(pa.core.length, pb.core.length);
   for (let k = 0; k < len; k++) {
-    if ((pa[k] ?? 0) !== (pb[k] ?? 0)) {
+    if ((pa.core[k] ?? 0) !== (pb.core[k] ?? 0)) {
       return false;
     }
   }
-  return true;
+  if (!pa.prerelease || !pb.prerelease) return pa.prerelease === pb.prerelease;
+  return pa.prerelease.channel === pb.prerelease.channel &&
+    pa.prerelease.ordinal === pb.prerelease.ordinal;
 }
 
 export function getLastCheckedUtc(): string | null {
@@ -139,12 +159,9 @@ function setLastCheckedUtc(iso: string): void {
  * Never throws — failures resolve to `status: 'unavailable'`.
  *
  * Channel-aware: the installed channel (from runtime/version) selects the
- * discovery source. 'stable' (and anything that is NOT exactly 'experimental')
- * reads main/versions.json exactly as before. 'experimental' reads the newest
- * GitHub pre-release's attached versions.json instead. The comparison logic is
- * identical for both — an experimental build keeps the plain cookbook version
- * in versions.json (only its payload SHA moves per pre-release), so the SHA
- * compare already handles it and parseVersion/isNewer never see a release tag.
+ * discovery source. Stable reads main/versions.json, experimental reads the
+ * newest GitHub pre-release's attached versions.json, and internal refuses
+ * update discovery entirely.
  */
 function unavailable(detail?: string): UpdateCheckResult {
   return { status: 'unavailable', components: [], allComponents: [], checkedAtUtc: null, detail };
@@ -156,6 +173,10 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   // result (independent reads).
   const [ver, eng] = await Promise.all([getRuntimeVersion(), getPaxEngineState()]);
   const channel = resolveChannel(ver.ok && ver.data ? ver.data.releaseChannel : null);
+
+  if (channel === 'internal') {
+    return unavailable('Local validation builds do not check production updates.');
+  }
 
   let remote: unknown;
   if (channel === 'experimental') {
@@ -169,17 +190,17 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       try {
         remote = JSON.parse(exp.manifestJson);
       } catch {
-        return unavailable('The experimental update information was unreadable.');
+        return unavailable('The pre-release update information was unreadable.');
       }
     } else if (exp.state === 'no_prerelease') {
-      return unavailable('No experimental builds are currently published.');
+      return unavailable('No pre-release builds are currently published.');
     } else {
       return unavailable(
-        exp.detail ?? 'Couldn\u2019t check for experimental updates just now.',
+        exp.detail ?? 'Couldn\u2019t check for pre-release updates just now.',
       );
     }
     if (remote == null || typeof remote !== 'object') {
-      return unavailable('The experimental update information was unreadable.');
+      return unavailable('The pre-release update information was unreadable.');
     }
   } else {
     // Stable channel — UNCHANGED: read the fixed main/versions.json directly.
@@ -200,14 +221,15 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
 }
 
 /**
- * Fail-safe channel resolution: the experimental discovery path runs ONLY when
- * the installed channel is EXACTLY 'experimental'. Missing, malformed,
- * 'unknown', 'stable', or any other value collapses to 'stable' so a production
- * build can never accidentally follow the pre-release path.
+ * Fail-safe channel resolution: exact internal and experimental values retain
+ * their isolated routes. Missing, malformed, or unknown values collapse to
+ * stable so a production build never follows a non-production route by guess.
  */
-function resolveChannel(raw: string | null | undefined): 'stable' | 'experimental' {
+function resolveChannel(raw: string | null | undefined): 'stable' | 'experimental' | 'internal' {
   const c = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-  return c === 'experimental' ? 'experimental' : 'stable';
+  if (c === 'experimental') return 'experimental';
+  if (c === 'internal') return 'internal';
+  return 'stable';
 }
 
 /** Stable manifest: the fixed versions.json on main (production, unchanged). */
@@ -287,13 +309,13 @@ function buildUpdateResult(
   // applying the update makes the installer record the SHA). All SHA compares
   // are case-insensitive.
   const appVersionSame =
-    !isNewer(remoteApp, installedApp) && sameVersion(remoteApp, installedApp);
+    !isNewerVersion(remoteApp, installedApp) && sameVersion(remoteApp, installedApp);
   const appNewBuildOnly =
     appVersionSame &&
     !!remotePayloadSha &&
     (!installedPayloadSha ||
       installedPayloadSha.toLowerCase() !== remotePayloadSha.toLowerCase());
-  const appHasUpdate = isNewer(remoteApp, installedApp) || appNewBuildOnly;
+  const appHasUpdate = isNewerVersion(remoteApp, installedApp) || appNewBuildOnly;
 
   // Engine update? Only once the engine is actually acquired — on a fresh
   // install it is not yet acquired, and the engine is immutable per release
@@ -301,14 +323,14 @@ function buildUpdateResult(
   const engineAcquired = eng.ok && eng.data ? eng.data.isAcquired : false;
   const engineNewBuildOnly =
     engineAcquired &&
-    !isNewer(remoteEngineVer, installedEngineVer) &&
+    !isNewerVersion(remoteEngineVer, installedEngineVer) &&
     sameVersion(remoteEngineVer, installedEngineVer) &&
     !!remoteEngineSha &&
     !!installedEngineSha &&
     remoteEngineSha.toLowerCase() !== installedEngineSha.toLowerCase();
   const engineHasUpdate =
     engineAcquired &&
-    (isNewer(remoteEngineVer, installedEngineVer) || engineNewBuildOnly);
+    (isNewerVersion(remoteEngineVer, installedEngineVer) || engineNewBuildOnly);
 
   const components: UpdateComponent[] = [];
   if (appHasUpdate) {

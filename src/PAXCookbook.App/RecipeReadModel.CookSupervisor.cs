@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using Microsoft.Data.Sqlite;
+using PAXCookbook.Shared.Contracts;
 
 namespace PAXCookbook.App;
 
@@ -11,10 +12,10 @@ namespace PAXCookbook.App;
 // only slice that is allowed to spawn a child process, and the single sanctioned
 // child is `pwsh` executing the externally-acquired, byte-verified MANAGED PAX
 // engine `.ps1`. It preserves the entire X15 gate/preparation pipeline and adds:
-//   * gate 10 — per-operation manualCook re-auth (production fails closed with
-//     401 reAuthRequired unless a real browser-owned WebAuthn step-up granted a
-//     single-use authorization for this recipe; the CLI-only test seam
-//     authorizes automated smoke without consuming a real authorization),
+//   * the authorization step — a manual cook is authorized by the Unlocked
+//     broker session (enforced upstream by the lock middleware: 423 when Locked)
+//     plus the explicit user confirmation that issued the request; there is no
+//     per-operation identity ceremony,
 //   * the supervisor — spawn the approved engine, stream stdout/stderr to
 //     cook.log, write started/finished/interrupted sentinels, and transition the
 //     cook row to its terminal state.
@@ -35,32 +36,43 @@ internal static partial class RecipeReadModel
     // Which kind of cook is being started. Both kinds share the SINGLE cook
     // pipeline (StartCookCore) — there is one execution path, not a second
     // channel (constraint 8). The ONLY behavioral difference is the
-    // authorization step: a Manual cook enforces the per-operation Windows Hello
-    // step-up (gate 10); a Scheduled cook waives gate 10 (the Brian-approved
-    // constraint-10 modification, X7) and is instead authorized by an enabled
-    // schedule plus the recipe's bound Chef's Key. The Scheduled kind is reachable
+    // authorization step: a Manual cook is authorized by the Unlocked broker
+    // session (enforced upstream by the lock middleware: 423 when Locked) plus
+    // the explicit user confirmation that issued the request; a Scheduled cook
+    // is authorized instead by an enabled schedule plus the recipe's bound
+    // Chef's Key. The Scheduled kind is reachable
     // through TWO sanctioned entry points: the standalone `--run-scheduled-recipe`
     // one-shot (StartScheduledCook, joinSupervisor: true) and — in the V2
     // two-process model — the daemon's POST /api/v1/recipes/{id}/cook/scheduled
     // route via StartScheduledCookViaHttp (joinSupervisor: false), which the
     // --bake CLI calls. The HTTP route carries the SAME scheduled-auth gate
-    // (enabled schedule required) plus Bearer + CSRF + the broker-lock gate, so it
-    // is not a gate-10 bypass for manual cooks.
+    // (enabled schedule required) plus Bearer + CSRF + the broker-lock gate.
     private enum CookKind
     {
         Manual,
         Scheduled,
     }
 
+    // Which authorization phase the SEQUENCE selected on one run. A closed set
+    // whose zero value means no authorization phase was invoked at all, so a
+    // default-initialised value can never read as "manual authorization ran".
+    // Bounded observability only: it names a phase and nothing else — no recipe,
+    // path, identifier, body, or secret.
+    private enum CookAuthorizationPhaseSelection
+    {
+        None = 0,
+        Manual = 1,
+        Scheduled = 2,
+        Resume = 3,
+    }
+
     // Public manual-cook entry point (the manual Bake route
     // POST /api/v1/recipes/{id}/cook). A thin wrapper over the shared cook core
-    // with CookKind.Manual: it enforces gate 10 (Windows Hello step-up) exactly
-    // as before and returns the 201 immediately while a background supervisor
-    // finalizes the cook (joinSupervisor: false). Its observable behavior is
-    // byte-for-byte identical to the pre-refactor StartManualCook. Returns
-    // (httpStatus, body):
+    // with CookKind.Manual: it is authorized by the Unlocked broker session plus
+    // explicit user confirmation (both enforced upstream) and returns the 201
+    // immediately while a background supervisor finalizes the cook
+    // (joinSupervisor: false). Returns (httpStatus, body):
     //
-    //   no manualCook re-auth   : 401 reAuthRequired (no folder, no row, no spawn).
     //   App-reg recipe, no key  : bounded 412 recipe_invalid (chefKeyId required /
     //                             chefKeyNotFound / chefKeyModeMismatch /
     //                             chefKeySecretMissing) from gate 14 -- before any
@@ -77,25 +89,23 @@ internal static partial class RecipeReadModel
         string method,
         string requestPath,
         long minFreeDiskBytes,
-        bool reAuthVerified,
         string? pwshPathOverride)
         => StartCookCore(
             workspacePath, versionInfo, engine, recipeId, method, requestPath, minFreeDiskBytes,
-            CookKind.Manual, reAuthVerified, pwshPathOverride, joinSupervisor: false);
+            CookKind.Manual, pwshPathOverride, joinSupervisor: false);
 
     // Public scheduled-cook entry point. Reachable ONLY from the
     // `--run-scheduled-recipe` one-shot (Program.RunScheduledRecipeOneShot); NO
     // HTTP route maps to it. It runs the SAME cook pipeline as a manual cook
-    // (constraint 8) but with CookKind.Scheduled, which (a) WAIVES gate 10 (the
-    // approved constraint-10 modification — a scheduled run does NOT perform the
-    // per-operation Windows Hello step-up) and instead runs a scheduled-auth gate
-    // requiring the recipe to have an enabled schedule, and (b) joins the
+    // (constraint 8) but with CookKind.Scheduled, which (a) authorizes the run by
+    // requiring the recipe to have an enabled schedule (the approved
+    // constraint-10 modification — an unattended run has no interactive operator
+    // to confirm it), and (b) joins the
     // supervisor (joinSupervisor: true) so the call returns only AFTER the cook
     // has fully finalized — the one-shot process must not exit and orphan the
     // child or cut off finalize. All OTHER cook gates (recipe saved, validation,
     // acquisition, busy, disk, path, Chef's Key resolution, SHA re-verify) remain
-    // enforced. reAuthVerified is hard-wired false: there is no manual re-auth on
-    // this path, and gate 10 is never consulted for a scheduled cook.
+    // enforced.
     public static (int Status, object Body) StartScheduledCook(
         string workspacePath,
         VersionInfo versionInfo,
@@ -106,13 +116,13 @@ internal static partial class RecipeReadModel
         => StartCookCore(
             workspacePath, versionInfo, engine, recipeId,
             method: "SCHEDULED", requestPath: "--run-scheduled-recipe", minFreeDiskBytes,
-            CookKind.Scheduled, reAuthVerified: false, pwshPathOverride, joinSupervisor: true);
+            CookKind.Scheduled, pwshPathOverride, joinSupervisor: true);
 
     // Public HTTP scheduled-cook entry point (V2 two-process). Reachable from the
     // daemon's POST /api/v1/recipes/{id}/cook/scheduled route, which the --bake
     // CLI (Windows Task Scheduler → daemon delegation) calls. It runs the SAME
-    // CookKind.Scheduled pipeline as the --run-scheduled-recipe one-shot — gate 10
-    // (Windows Hello step-up) is WAIVED and REPLACED by the scheduled-auth gate
+    // CookKind.Scheduled pipeline as the --run-scheduled-recipe one-shot — the run
+    // is authorized by the scheduled-auth gate
     // (the recipe must have an ENABLED schedule, created while the app was
     // unlocked and Hello-verified); EVERY other gate stays enforced (recipe
     // saved/validation incl. QueryShapeGate/DateRangeGate, acquisition, busy,
@@ -123,11 +133,10 @@ internal static partial class RecipeReadModel
     // immediately while its background supervisor finalizes the cook, and --bake
     // tracks completion by polling GET /api/v1/cooks/{cookId}. Bearer, CSRF, and
     // the broker-lock gate (423 when Locked) are all enforced upstream by the
-    // daemon's middleware, exactly as for the manual route. reAuthVerified is
-    // hard-wired false: gate 10 is never consulted for a scheduled cook. SECURITY:
-    // because the scheduled-auth gate requires an enabled schedule, this route is
-    // NOT a universal gate-10 bypass — only recipes the user already authorized
-    // for scheduling can run unattended; an unscheduled recipe is refused 409
+    // daemon's middleware, exactly as for the manual route. SECURITY:
+    // because the scheduled-auth gate requires an enabled schedule, this route
+    // can only run recipes the user already authorized
+    // for scheduling unattended; an unscheduled recipe is refused 409
     // recipe_not_scheduled before any folder, row, or child exists.
     public static (int Status, object Body) StartScheduledCookViaHttp(
         string workspacePath,
@@ -141,7 +150,7 @@ internal static partial class RecipeReadModel
         => StartCookCore(
             workspacePath, versionInfo, engine, recipeId,
             method, requestPath, minFreeDiskBytes,
-            CookKind.Scheduled, reAuthVerified: false, pwshPathOverride, joinSupervisor: false);
+            CookKind.Scheduled, pwshPathOverride, joinSupervisor: false);
 
     // The single cook pipeline shared by the manual and scheduled entry points
     // (constraint 8 — there is literally one execution path). Runs the X15
@@ -160,123 +169,42 @@ internal static partial class RecipeReadModel
         string requestPath,
         long minFreeDiskBytes,
         CookKind kind,
-        bool reAuthVerified,
         string? pwshPathOverride,
         bool joinSupervisor)
     {
-        // Gates 1..9 — recipe / acquisition / busy (read-only). Identical for both
-        // kinds.
-        CookGateOutcome gate = EvaluateCookGatesThroughBusy(
-            workspacePath, engine, recipeId, method, requestPath);
-        if (!gate.Passed)
+        // The three preparation phases (gates -> authorization -> preparation) are
+        // ordered by the portable CookPreparationSequence, which is the SINGLE
+        // SOURCE of that order across the desktop host and the service host. It owns
+        // the PHASE ORDER only: gates 1..18 keep their own ordering inside the
+        // App-owned helpers the adapter below delegates to, unchanged, and the
+        // spawn/supervisor boundary stays entirely outside the sequence. Statuses,
+        // bodies, side-effect order, argv, and timing are byte-for-byte what they
+        // were before the sequence existed; the adapter simply holds the App state
+        // privately between phases instead of holding it in local variables.
+        DesktopCookPreparationAdapter adapter = new(
+            workspacePath, versionInfo, engine, recipeId, method, requestPath,
+            minFreeDiskBytes, kind);
+
+        CookPreparationOutcome outcome =
+            CookPreparationSequence.Execute(MapCookKindToTrigger(kind), adapter);
+
+        if (!outcome.Prepared)
         {
-            return (gate.Status, gate.Body!);
-        }
-        Dictionary<string, object?> recipe = gate.Recipe!;
-
-        // Authorization step — the ONLY place the pipeline branches on kind.
-        if (kind == CookKind.Manual)
-        {
-            // Gate 10 — per-operation fresh manualCook re-auth (OpClass
-            // 'manualCook'). UNCHANGED from the pre-refactor manual path.
-            // Production consumes a single-use, recipe-bound, lock-generation-bound
-            // in-memory authorization minted by a real browser-owned WebAuthn
-            // step-up (POST /api/v1/broker/reauth/manual-cook/verify). The CLI-only
-            // test seam (--test-seam-manual-cook-reauth-verified) authorizes
-            // automated smoke without consuming a real authorization. A
-            // non-verified state is NEVER coerced into success: the cook fails
-            // closed with 401 reAuthRequired before any folder, row, or child
-            // exists. This gate applies to MANUAL cooks ONLY.
-            bool reAuthOk;
-            if (reAuthVerified)
-            {
-                reAuthOk = true;
-            }
-            else
-            {
-                (bool consumed, _) = ManualCookReAuth.TryConsume(recipeId, BrokerLock.CurrentLockGeneration);
-                reAuthOk = consumed;
-            }
-
-            if (!reAuthOk)
-            {
-                return (401, new
-                {
-                    code = "reAuthRequired",
-                    error = "reAuthRequired",
-                    opClass = "manualCook",
-                    verificationResult = "Required",
-                    message = "A fresh Windows Hello verification is required before starting a manual cook.",
-                });
-            }
-        }
-        else
-        {
-            // Scheduled-auth gate — the approved constraint-10 modification (X7).
-            // A scheduled cook does NOT perform the per-operation Windows Hello
-            // step-up (gate 10 is skipped entirely). It is authorized instead by
-            // the recipe having an ENABLED schedule (created while the app was
-            // unlocked and Hello-verified) plus its bound Chef's Key as the run
-            // identity. This gate FAILS CLOSED: if the recipe has no schedule, or
-            // the schedule is disabled, the scheduled run is refused with a
-            // bounded, secret-free 409 BEFORE any folder, row, or child is
-            // created. It reads ONLY the non-secret schedule.Enabled flag
-            // (projected from the already-loaded, already-validated recipe tree)
-            // — never a secret (constraint 14).
-            ScheduleInfo? schedule = ProjectSchedule(recipe);
-            if (schedule is null || !schedule.Enabled)
-            {
-                return (409, new
-                {
-                    error = "recipe_not_scheduled",
-                    recipeId,
-                    message = "This recipe has no enabled schedule; a scheduled run is not authorized.",
-                });
-            }
-
-            // Skip-next-bake marker (operator chose to skip this one run from the
-            // Bakes "Upcoming bakes" panel). Checked here, BEFORE any folder, row,
-            // or child is created, so a skipped run is a clean no-op that leaves
-            // the OS task and the schedule untouched — only THIS occurrence is
-            // skipped, and the marker is consumed so the next run proceeds. The
-            // marker carries no secret (constraint 14) and never starts PAX.
-            if (ScheduleSkipMarker.ShouldSkipAndConsume(workspacePath, recipeId, DateTimeOffset.Now))
-            {
-                return (200, new
-                {
-                    status = "skipped",
-                    error = "bake_skipped",
-                    recipeId,
-                    message = "This scheduled run was skipped at the operator's request; the schedule continues.",
-                });
-            }
-        }
-
-        // CK-3: the bounded App-registration 501 boundary is gone. App-registration
-        // recipes now flow into the standard preparation pipeline, where gate 14
-        // (ResolveChefKeyForProjection) resolves the recipe's bound Chef's Key from
-        // Windows Credential Manager and returns a bounded, secret-free error
-        // (chefKeyId required / chefKeyNotFound / chefKeyModeMismatch /
-        // chefKeySecretMissing) BEFORE any folder, row, or spawn when the binding
-        // is absent or unusable. A usable binding is carried into PreparedCook and
-        // injected as child-only GRAPH_* credentials by the supervisor at spawn.
-
-        // Gates 11..18 — disk / path / exec-mode / Chef's Key / plan / folder /
-        // files / row (the proven X15 preparation). The kind is threaded so the
-        // execution-mode gate (gate 13) and the recorded cook trigger differ
-        // between manual and scheduled; the projected PAX invocation plan is
-        // identical for both kinds.
-        (int? prepStatus, object? prepBody, PreparedCook prepared) = PrepareCookArtifacts(
-            workspacePath, versionInfo, engine, recipe, recipeId, minFreeDiskBytes, kind);
-        if (prepStatus.HasValue)
-        {
-            return (prepStatus.Value, prepBody!);
+            // Every refusal path above recorded its own bounded, secret-free
+            // (status, body) — the SAME response the pre-sequence code returned at
+            // that exact point. The defensive fallback can only be reached if the
+            // sequence refused without any phase running (an undeclared trigger),
+            // which the exhaustive CookKind mapping makes unreachable; it fails
+            // closed rather than fabricating a cook.
+            return adapter.BoundedRefusal
+                ?? (500, new { error = "cook_preparation_not_authorized", recipeId });
         }
 
         // The cook row now exists with status='running', pid/started_at NULL.
         // Everything below transitions it to a real spawn or a spawn failure. A
         // scheduled one-shot joins the supervisor so this call returns only after
         // the cook has fully finalized.
+        PreparedCook prepared = ContinuationInput(adapter);
         (int spawnStatus, object spawnBody) = SpawnAndSupervise(
             workspacePath, versionInfo, engine, prepared, recipeId, pwshPathOverride, joinSupervisor);
 
@@ -304,6 +232,372 @@ internal static partial class RecipeReadModel
         }
 
         return (spawnStatus, spawnBody);
+    }
+
+    // Maps the private desktop CookKind onto the portable trigger. Exhaustive over
+    // the two declared kinds and FAIL CLOSED for anything else: an undeclared kind
+    // maps to a value the sequence does not accept, so it refuses before a single
+    // phase runs rather than silently behaving like a manual cook.
+    private static CookTriggerKind MapCookKindToTrigger(CookKind kind) => kind switch
+    {
+        CookKind.Manual => CookTriggerKind.Manual,
+        CookKind.Scheduled => CookTriggerKind.Scheduled,
+        _ => default,
+    };
+
+    // The ONE place the prepared state crosses from the preparation sequence into
+    // the UNCHANGED spawn boundary. Extracted so the continuity can be asserted
+    // without a test-only branch anywhere on the production path.
+    private static PreparedCook ContinuationInput(DesktopCookPreparationAdapter adapter) =>
+        adapter.Prepared;
+
+    // Desktop behaviour for the three preparation phases. It holds the App-side
+    // state (the validated recipe tree, the bounded refusal, the prepared cook)
+    // PRIVATELY between phases and delegates each phase to the existing helpers
+    // unchanged — EvaluateCookGatesThroughBusy, ProjectSchedule +
+    // ScheduleSkipMarker, and PrepareCookArtifacts. None of that state crosses the
+    // portable contract, which sees only "did this phase proceed?".
+    //
+    // No visibility was widened for this: CookGateOutcome, PreparedCook and
+    // CookKind all remain private, and this adapter is itself private.
+    private sealed class DesktopCookPreparationAdapter : ICookPreparationAdapter
+    {
+        private readonly string _workspacePath;
+        private readonly VersionInfo _versionInfo;
+        private readonly EngineAcquisitionResult _engine;
+        private readonly string _recipeId;
+        private readonly string _method;
+        private readonly string _requestPath;
+        private readonly long _minFreeDiskBytes;
+        private readonly CookKind _kind;
+
+        private Dictionary<string, object?>? _recipe;
+        private int _refusalStatus;
+        private object? _refusalBody;
+        private CookAuthorizationPhaseSelection _authorizationSelected = CookAuthorizationPhaseSelection.None;
+        private int _gatePhaseCalls;
+        private int _authorizationPhaseCalls;
+        private int _preparationPhaseCalls;
+
+        internal DesktopCookPreparationAdapter(
+            string workspacePath,
+            VersionInfo versionInfo,
+            EngineAcquisitionResult engine,
+            string recipeId,
+            string method,
+            string requestPath,
+            long minFreeDiskBytes,
+            CookKind kind)
+        {
+            _workspacePath = workspacePath;
+            _versionInfo = versionInfo;
+            _engine = engine;
+            _recipeId = recipeId;
+            _method = method;
+            _requestPath = requestPath;
+            _minFreeDiskBytes = minFreeDiskBytes;
+            _kind = kind;
+        }
+
+        // The bounded, secret-free response recorded by whichever phase refused —
+        // byte-for-byte the response that phase already returned before the
+        // sequence existed. Null while nothing has refused.
+        internal (int Status, object Body)? BoundedRefusal =>
+            _refusalBody is null ? null : (_refusalStatus, _refusalBody);
+
+        // Bounded record of WHICH authorization phase the sequence selected and how
+        // many times each phase was requested. Read only by test seams; production
+        // never branches on it.
+        internal CookAuthorizationPhaseSelection AuthorizationSelected => _authorizationSelected;
+
+        internal int GatePhaseCalls => _gatePhaseCalls;
+
+        internal int AuthorizationPhaseCalls => _authorizationPhaseCalls;
+
+        internal int PreparationPhaseCalls => _preparationPhaseCalls;
+
+        // The prepared cook produced by phase 3. Valid only after a Prepared
+        // outcome; default otherwise, so a refused cook can never carry a cook id
+        // into the spawn boundary.
+        internal PreparedCook Prepared { get; private set; }
+
+        // Phase 1 — gates 1..9: recipe / acquisition / busy (read-only). Identical
+        // for both kinds.
+        public bool EvaluateGatesPhase()
+        {
+            _gatePhaseCalls++;
+            CookGateOutcome gate = EvaluateCookGatesThroughBusy(
+                _workspacePath, _engine, _recipeId, _method, _requestPath);
+            if (!gate.Passed)
+            {
+                return Refuse(gate.Status, gate.Body!);
+            }
+            _recipe = gate.Recipe!;
+            return true;
+        }
+
+        // Phase 2 for a MANUAL cook. This is a NO-OP POLICY ACKNOWLEDGEMENT, not an
+        // active authorization check. Brian's session-authentication policy
+        // supersedes the historical fresh-per-operation gate: a manual cook is
+        // authorized UPSTREAM by the Unlocked broker session (the lock middleware
+        // returns 423 when Locked) plus the explicit user confirmation that issued
+        // this request. There is NO per-operation identity ceremony and NO
+        // manual-cook re-auth grant, so there is nothing to evaluate here and this
+        // phase performs no work, no I/O, and no refusal — exactly as before. Its
+        // only significance is that the sequence invokes THIS member, and only this
+        // member, for a manual trigger.
+        public bool AuthorizeManualPhase() => Acknowledge(CookAuthorizationPhaseSelection.Manual);
+
+        // Phase 2 for a SCHEDULED cook — the approved constraint-10 modification
+        // (X7). Invoked EXACTLY ONCE by the sequence, which matters: the skip
+        // marker below is CONSUMED, so a second invocation would silently eat a
+        // second occurrence of the operator's single skipped Bake.
+        public bool AuthorizeScheduledPhase()
+        {
+            _authorizationPhaseCalls++;
+            _authorizationSelected = CookAuthorizationPhaseSelection.Scheduled;
+
+            // Scheduled-auth gate. A scheduled cook is authorized by the recipe
+            // having an ENABLED schedule (created while the app was unlocked and
+            // Hello-verified) plus its bound Chef's Key as the run identity. FAILS
+            // CLOSED: no schedule, or a disabled schedule, is refused with a
+            // bounded, secret-free 409 BEFORE any folder, row, or child is created.
+            // Reads ONLY the non-secret schedule.Enabled flag projected from the
+            // already-loaded, already-validated recipe tree (constraint 14).
+            ScheduleInfo? schedule = ProjectSchedule(_recipe!);
+            if (schedule is null || !schedule.Enabled)
+            {
+                return Refuse(409, new
+                {
+                    error = "recipe_not_scheduled",
+                    recipeId = _recipeId,
+                    message = "This recipe has no enabled schedule; a scheduled run is not authorized.",
+                });
+            }
+
+            // Skip-next-bake marker (operator chose to skip this one run from the
+            // Bakes "Upcoming bakes" panel). Checked here, BEFORE any folder, row,
+            // or child is created, so a skipped run is a clean no-op that leaves
+            // the OS task and the schedule untouched — only THIS occurrence is
+            // skipped, and the marker is consumed so the next run proceeds. The
+            // marker carries no secret (constraint 14) and never starts PAX.
+            if (ScheduleSkipMarker.ShouldSkipAndConsume(_workspacePath, _recipeId, DateTimeOffset.Now))
+            {
+                return Refuse(200, new
+                {
+                    status = "skipped",
+                    error = "bake_skipped",
+                    recipeId = _recipeId,
+                    message = "This scheduled run was skipped at the operator's request; the schedule continues.",
+                });
+            }
+
+            return true;
+        }
+
+        // Phase 2 for a RESUME — a trigger this host adapter can NEVER serve. The
+        // desktop cook adapter is constructed for a recipe cook; a Resume has no
+        // recipe and is served by its own adapter. This member therefore FAILS
+        // CLOSED: it refuses with a bounded, secret-free disposition rather than
+        // returning true. A true here would let a mis-routed Resume authorize
+        // itself through the recipe adapter.
+        public bool AuthorizeResumePhase()
+        {
+            _authorizationPhaseCalls++;
+            _authorizationSelected = CookAuthorizationPhaseSelection.Resume;
+            return Refuse(500, new
+            {
+                error = "cook_authorization_trigger_mismatch",
+                recipeId = _recipeId,
+            });
+        }
+
+        // Phase 3 — gates 11..18: disk / path / exec-mode / Chef's Key / plan /
+        // folder / files / row (the proven X15 preparation, including the cycle-32
+        // atomic reservation). The kind is threaded so the execution-mode gate
+        // (gate 13) and the recorded cook trigger differ between manual and
+        // scheduled; the projected PAX invocation plan is identical for both kinds.
+        //
+        // CK-3: App-registration recipes flow into this standard preparation, where
+        // gate 14 (ResolveChefKeyForProjection) resolves the recipe's bound Chef's
+        // Key from Windows Credential Manager and returns a bounded, secret-free
+        // error (chefKeyId required / chefKeyNotFound / chefKeyModeMismatch /
+        // chefKeySecretMissing) BEFORE any folder, row, or spawn when the binding is
+        // absent or unusable. A usable binding is carried into PreparedCook and
+        // injected as child-only GRAPH_* credentials by the supervisor at spawn.
+        public bool PreparePhase()
+        {
+            _preparationPhaseCalls++;
+            (int? prepStatus, object? prepBody, PreparedCook prepared) = PrepareCookArtifacts(
+                _workspacePath, _versionInfo, _engine, _recipe!, _recipeId, _minFreeDiskBytes, _kind);
+            if (prepStatus.HasValue)
+            {
+                return Refuse(prepStatus.Value, prepBody!);
+            }
+            Prepared = prepared;
+            return true;
+        }
+
+        // Records that a no-op policy acknowledgement phase ran, and proceeds.
+        private bool Acknowledge(CookAuthorizationPhaseSelection phase)
+        {
+            _authorizationPhaseCalls++;
+            _authorizationSelected = phase;
+            return true;
+        }
+
+        private bool Refuse(int status, object body)
+        {
+            _refusalStatus = status;
+            _refusalBody = body;
+            return false;
+        }
+    }
+
+    // ---- narrow test seams (bounded, non-secret projections only) -------------
+    //
+    // These exist because CookGateOutcome, PreparedCook, RecipeCookReservation and
+    // CookKind are PRIVATE and stay private: InternalsVisibleTo cannot reach a
+    // private nested type. Each seam projects only closed enum values, booleans,
+    // an HTTP status code, or fixed enum NAMES. No recipe tree, invocation plan,
+    // credential object, command, filesystem path, cook id, or HTTP body escapes.
+
+    // Every declared CookKind name, so the mapping seam below can be asserted
+    // EXHAUSTIVE rather than merely covering the kinds a test happened to name.
+    internal static string[] TestSeamCookKindNames() => Enum.GetNames<CookKind>();
+
+    // Every declared CookKind projected through the REAL production mapper, in
+    // declaration order. Bounded: the result is closed portable enum values.
+    internal static CookTriggerKind[] TestSeamCookKindTriggerProjection()
+    {
+        CookKind[] kinds = Enum.GetValues<CookKind>();
+        var mapped = new CookTriggerKind[kinds.Length];
+        for (int i = 0; i < kinds.Length; i++)
+        {
+            mapped[i] = MapCookKindToTrigger(kinds[i]);
+        }
+        return mapped;
+    }
+
+    // The REAL mapper's answer for a CookKind value that is not declared. Proves
+    // the mapping fails closed instead of defaulting to a manual cook.
+    internal static CookTriggerKind TestSeamMapUndeclaredCookKind() =>
+        MapCookKindToTrigger((CookKind)int.MaxValue);
+
+    // Runs the REAL sequence with the REAL desktop adapter and projects only the
+    // bounded disposition, the furthest phase reached, whether a bounded refusal
+    // was recorded, that refusal's HTTP status, and whether prepared state exists.
+    // The refusal BODY itself is deliberately not projected.
+    internal static (CookPreparationDisposition Disposition,
+                     CookPreparationPhase FurthestPhase,
+                     bool HasBoundedRefusal,
+                     int RefusalStatus,
+                     bool HasPreparedState) TestSeamCookPreparationDisposition(
+        string workspacePath,
+        VersionInfo versionInfo,
+        EngineAcquisitionResult engine,
+        string recipeId,
+        string method,
+        string requestPath,
+        long minFreeDiskBytes,
+        bool scheduled)
+    {
+        DesktopCookPreparationAdapter adapter = new(
+            workspacePath, versionInfo, engine, recipeId, method, requestPath, minFreeDiskBytes,
+            scheduled ? CookKind.Scheduled : CookKind.Manual);
+
+        CookPreparationOutcome outcome = CookPreparationSequence.Execute(
+            MapCookKindToTrigger(scheduled ? CookKind.Scheduled : CookKind.Manual), adapter);
+
+        (int Status, object Body)? refusal = adapter.BoundedRefusal;
+        return (outcome.Disposition, outcome.FurthestPhaseInvoked,
+                refusal is not null, refusal?.Status ?? 0,
+                adapter.Prepared.CookId is { Length: > 0 });
+    }
+
+    // Runs the REAL sequence with the REAL desktop adapter for an ARBITRARY
+    // trigger — including a Resume, which this host adapter can never serve — and
+    // projects only bounded values: the NAME of the authorization phase that was
+    // invoked, the per-phase invocation counts, the disposition, the furthest
+    // phase, whether a bounded refusal was recorded, and that refusal's HTTP
+    // status. The refusal BODY, the recipe tree, and the cook id are deliberately
+    // NOT projected.
+    //
+    // It never spawns: the prepared state is never handed to SpawnAndSupervise.
+    // Callers that must avoid every side effect pass an impossible disk floor,
+    // which refuses inside phase 3 before the reservation.
+    internal static (string AuthorizationPhase,
+                     int GateCalls,
+                     int AuthorizationCalls,
+                     int PreparationCalls,
+                     CookPreparationDisposition Disposition,
+                     CookPreparationPhase FurthestPhase,
+                     bool HasBoundedRefusal,
+                     int RefusalStatus,
+                     bool HasPreparedState) TestSeamDesktopAuthorizationRouting(
+        string workspacePath,
+        VersionInfo versionInfo,
+        EngineAcquisitionResult engine,
+        string recipeId,
+        long minFreeDiskBytes,
+        bool scheduled,
+        CookTriggerKind trigger)
+    {
+        DesktopCookPreparationAdapter adapter = new(
+            workspacePath, versionInfo, engine, recipeId,
+            method: scheduled ? "SCHEDULED" : "POST",
+            requestPath: "/api/v1/recipes/" + recipeId + "/cook",
+            minFreeDiskBytes, scheduled ? CookKind.Scheduled : CookKind.Manual);
+
+        CookPreparationOutcome outcome =
+            CookPreparationSequence.Execute(trigger, adapter);
+
+        (int Status, object Body)? refusal = adapter.BoundedRefusal;
+        return (adapter.AuthorizationSelected.ToString(),
+                adapter.GatePhaseCalls,
+                adapter.AuthorizationPhaseCalls,
+                adapter.PreparationPhaseCalls,
+                outcome.Disposition,
+                outcome.FurthestPhaseInvoked,
+                refusal is not null,
+                refusal?.Status ?? 0,
+                adapter.Prepared.CookId is { Length: > 0 });
+    }
+
+    // Proves the prepared state that reaches the UNCHANGED spawn boundary is
+    // exactly the state phase 3 produced, and that it names artifacts that really
+    // exist. It runs preparation only: it never resolves pwsh, never re-hashes or
+    // reads engine bytes, never spawns a child, and never starts a Bake — the
+    // returned prepared state is simply never handed to SpawnAndSupervise.
+    // Projects booleans only; no cook id, folder path, or plan escapes.
+    internal static (bool Prepared,
+                     bool ContinuationMatchesPhaseThreeOutput,
+                     bool ContinuationCookRowIsRunning,
+                     bool ContinuationCookFolderExists) TestSeamPreparedStateContinuity(
+        string workspacePath,
+        VersionInfo versionInfo,
+        EngineAcquisitionResult engine,
+        string recipeId,
+        long minFreeDiskBytes)
+    {
+        DesktopCookPreparationAdapter adapter = new(
+            workspacePath, versionInfo, engine, recipeId,
+            method: "POST", requestPath: "/api/v1/recipes/" + recipeId + "/cook",
+            minFreeDiskBytes, CookKind.Manual);
+
+        CookPreparationOutcome outcome =
+            CookPreparationSequence.Execute(CookTriggerKind.Manual, adapter);
+        if (!outcome.Prepared)
+        {
+            return (false, false, false, false);
+        }
+
+        // The SAME accessor StartCookCore uses to obtain the spawn argument.
+        PreparedCook continuation = ContinuationInput(adapter);
+        return (true,
+                continuation.Equals(adapter.Prepared),
+                string.Equals(ReadCookRow(workspacePath, continuation.CookId)?.Status, "running", StringComparison.Ordinal),
+                Directory.Exists(continuation.CookFolderAbs));
     }
 
     // Reads the cook row's terminal status after the supervisor has been joined.

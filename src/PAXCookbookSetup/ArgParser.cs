@@ -17,7 +17,9 @@ public sealed record ParsedArgs(
     bool ConfirmRemoveUserData,
     List<string> Errors,
     bool Quiet = false,
-    bool GuiUninstall = false)
+    bool GuiUninstall = false,
+    string? TestIsolationDescriptor = null,
+    bool MissingVerb = false)
 {
     public bool IsSameVersionRepair => Force || ReinstallSameVersion;
 }
@@ -37,6 +39,7 @@ public static class ArgParser
         bool force = false, reinstall = false, allowDown = false, handoffFromInstalled = false, dryRun = false;
         bool removeUserData = false, confirmRemoveUserData = false;
         bool quiet = false, guiUninstall = false;
+        string? testIsolationDescriptor = null;
 
         for (int i = 0; i < argv.Length; i++)
         {
@@ -64,11 +67,14 @@ public static class ArgParser
                 case "--quiet":                       quiet = true; break;
                 case "--silent":                      quiet = true; break;
                 case "--gui-uninstall":               guiUninstall = true; break;
+                case "--test-isolation":
+                    testIsolationDescriptor = NextValue(argv, ref i, "--test-isolation", errors); break;
                 default:
                     errors.Add($"unknown argument: {a}"); break;
             }
         }
 
+        var missingVerb = argv.Length > 0 && verb is null;
         if (verb is null) verb = "help";
         if (!KnownVerbs.Contains(verb)) errors.Add($"unknown verb: {verb}");
         if (handoffFromInstalled && string.IsNullOrEmpty(handoffFolder))
@@ -78,7 +84,8 @@ public static class ArgParser
 
         return new ParsedArgs(verb, installRoot, payloadRoot, force, reinstall, allowDown,
             handoffFromInstalled, handoffFolder, dryRun,
-            removeUserData, confirmRemoveUserData, errors, quiet, guiUninstall);
+            removeUserData, confirmRemoveUserData, errors, quiet, guiUninstall,
+                testIsolationDescriptor, missingVerb);
     }
 
     private static string? NextValue(string[] argv, ref int i, string name, List<string> errors)

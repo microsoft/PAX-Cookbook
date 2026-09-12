@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using PAXCookbook.Shared.Contracts;
 
 namespace PAXCookbook.App;
 
@@ -23,27 +24,48 @@ internal static class StartupLog
     {
         get
         {
-            if (_resolvedPath is not null) return _resolvedPath;
-            try
+            if (TestIsolationRuntime.Current is { } isolation)
             {
-                var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                if (!string.IsNullOrEmpty(baseDir))
-                {
-                    var dir = Path.Combine(baseDir, "PAXCookbook", "Logs");
-                    Directory.CreateDirectory(dir);
-                    _resolvedPath = Path.Combine(dir, "startup.log");
-                    return _resolvedPath;
-                }
-            }
-            catch
-            {
-                // Fall through to the TEMP fallback below.
+                string isolatedPath = ResolveLogPath(isolation, static () => string.Empty);
+                try { Directory.CreateDirectory(isolation.Logs); } catch { }
+                return isolatedPath;
             }
 
-            try { _resolvedPath = Path.Combine(Path.GetTempPath(), "PAXCookbook-startup.log"); }
-            catch { _resolvedPath = string.Empty; }
+            if (_resolvedPath is not null) return _resolvedPath;
+            _resolvedPath = ResolveLogPath(null, ResolveProductionLogPath);
             return _resolvedPath ?? string.Empty;
         }
+    }
+
+    internal static string ResolveLogPath(
+        TestIsolationContext? isolation,
+        Func<string> productionResolver)
+    {
+        ArgumentNullException.ThrowIfNull(productionResolver);
+        return isolation is not null
+            ? Path.Combine(isolation.Logs, "startup.log")
+            : productionResolver();
+    }
+
+    private static string ResolveProductionLogPath()
+    {
+        try
+        {
+            var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrEmpty(baseDir))
+            {
+                var dir = Path.Combine(baseDir, "PAXCookbook", "Logs");
+                Directory.CreateDirectory(dir);
+                return Path.Combine(dir, "startup.log");
+            }
+        }
+        catch
+        {
+            // Fall through to the TEMP fallback below.
+        }
+
+        try { return Path.Combine(Path.GetTempPath(), "PAXCookbook-startup.log"); }
+        catch { return string.Empty; }
     }
 
     // Opens a new launch block and records the environment a tester would need to

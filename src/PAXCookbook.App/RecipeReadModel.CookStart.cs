@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using PAXCookbook.Shared.Contracts;
 
 namespace PAXCookbook.App;
 
@@ -30,74 +31,6 @@ internal static partial class RecipeReadModel
     // Oracle: Get-UtcNowIso.
     private static string CookUtcNowIso() =>
         DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
-
-    // Native cook-start preparation. Returns (httpStatus, body). The recipe-id
-    // format is re-validated here (gate 1) so the model owns the whole chain.
-    //
-    //   persist == false : public no-child path. Runs the read-only gate chain
-    //                      (recipe -> acquisition -> busy) and then terminates
-    //                      with a bounded 501 cook_child_not_implemented_x15.
-    //                      No cook folder, no files, no row, no spawn.
-    //   persist == true  : test-only preparation seam (CLI --test-seam-cook-prepare).
-    //                      Continues through the pre-spawn prep gates, writes the
-    //                      cook-folder files and the cook row, and returns a
-    //                      bounded test-only 200 cook_prepared_no_child. Still no
-    //                      spawn, no started_at, no fabricated bake.
-    public static (int Status, object Body) PrepareCookStart(
-        string workspacePath,
-        VersionInfo versionInfo,
-        EngineAcquisitionResult engine,
-        string recipeId,
-        bool persist,
-        string method,
-        string requestPath,
-        long minFreeDiskBytes)
-    {
-        CookGateOutcome gate = EvaluateCookGatesThroughBusy(
-            workspacePath, engine, recipeId, method, requestPath);
-        if (!gate.Passed)
-        {
-            return (gate.Status, gate.Body!);
-        }
-        Dictionary<string, object?> recipe = gate.Recipe!;
-
-        // --- No-child terminal boundary -------------------------------------
-        // Gate 10 (per-operation fresh Windows Hello, OpClass 'manualCook') and
-        // the child spawn are NOT performed on this preparation path. The public
-        // route stops here with a bounded 501 rather than faking a Verified
-        // verdict or a successful bake; the real child invocation lives on the
-        // X16 StartManualCook path.
-        if (!persist)
-        {
-            return (501, new
-            {
-                error = "cook_child_not_implemented_x15",
-                message = "Cook-start preparation is validated, but launching the PAX engine child process is not implemented in the X15 no-child slice.",
-                slice = "V1_OFFICE_GRADE_X15_COOK_START_PIPELINE_NO_CHILD",
-            });
-        }
-
-        // --- Test-only preparation seam (persist == true) -------------------
-        // Gate 10 re-auth is intentionally bypassed on this seam: there is no
-        // production WebAuthn ceremony in the smoke harness, and faking a
-        // Verified verdict is forbidden. The seam is unreachable in normal
-        // runtime (the desktop launcher never passes --test-seam-cook-prepare).
-        (int? prepStatus, object? prepBody, PreparedCook prepared) = PrepareCookArtifacts(
-            workspacePath, versionInfo, engine, recipe, recipeId, minFreeDiskBytes, CookKind.Manual);
-        if (prepStatus.HasValue)
-        {
-            return (prepStatus.Value, prepBody!);
-        }
-
-        // Bounded test-only success: the cook is PREPARED, never started.
-        return (200, new
-        {
-            result = "cook_prepared_no_child",
-            cookId = prepared.CookId,
-            recipeId,
-            cookFolder = prepared.CookFolderRel,
-        });
-    }
 
     // Result of the read-only cook-start gate chain (gates 1..9). When Passed is
     // true the validated recipe tree is carried in Recipe; otherwise (Status,
@@ -311,9 +244,23 @@ internal static partial class RecipeReadModel
         // Gate 14 — App-registration Chef's Key resolution (NO secret read). The
         // resolved (secret-free) Chef's Key is carried into PreparedCook so the
         // supervisor can inject child-only GRAPH_* credentials at spawn (CK-3).
+        //
+        // Cycle 15 — the organization branch of gate 14 is CAPABILITY-GATED on
+        // the ACQUIRED engine.
+        //
+        // Cycle 16 — the REAL machine policy, trusted ProgramData inventory,
+        // certificate catalog, clock, and engine capability are now wired in. The
+        // authority is passed as a FACTORY, not a value, so (a) a personal Recipe
+        // performs none of that work and its path is unchanged, and (b) the
+        // organization branch always re-evaluates a FRESH snapshot at the Cook
+        // boundary instead of reusing anything a readiness or preview call
+        // computed earlier. Nothing is cached across requests.
+        Func<OrganizationCookPreparationContext> organizationPreparation =
+            () => ProductionOrganizationAuthority.CreateSnapshot(versionInfo, engine);
+
         (int authStatus, object? authBody, PaxAdapter.ChefKeyAuthRow? chefKeyRow,
             ChefKeyModel.ChefKeyResolved? resolvedChefKey) =
-            ResolveChefKeyForProjection(recipe, recipeId);
+            ResolveChefKeyForProjection(recipe, recipeId, organizationPreparation);
         if (authBody is not null)
         {
             return (authStatus, authBody, default);
@@ -339,38 +286,64 @@ internal static partial class RecipeReadModel
             }, default);
         }
 
-        // Gate 16 — create the per-cook folder.
+        // Project the per-cook identity and folder paths. NOTHING is created
+        // yet: the reservation below must be the FIRST side effect.
         string cookId = NewCookId();
         string cookFolderAbs = Path.Combine(CooksDir(workspacePath), recipeId, cookId);
         string cookFolderRel = Path.Combine("Cooks", recipeId, cookId);
+        string createdAt = CookUtcNowIso();
+
+        // ATOMIC RESERVATION (was gate 18). The cook index row is written FIRST,
+        // by a single conditional INSERT that refuses when a running cook already
+        // exists for this recipe. The refusal comes from the same statement that
+        // would have created the row, so there is no check-then-insert window:
+        // the gate-9 busy check above remains a read-only fast path, but THIS
+        // statement is the concurrency authority. It cannot precede gate 15 —
+        // command_argv_json, command_argv_redacted, pax_script_path and
+        // pax_script_version are all NOT NULL and all derived from the plan.
+        RecipeCookReservation reservation;
+        try
+        {
+            reservation = ReserveRecipeCookRow(
+                workspacePath, versionInfo, engine, plan, cookId, recipeId, cookFolderRel, createdAt, kind);
+        }
+        catch (Exception ex)
+        {
+            // A genuine persistence failure stays the existing 500; only a
+            // zero-row refusal is a concurrency conflict.
+            return (500, new { error = "cook_row_insert_failed", recipeId, detail = ex.Message }, default);
+        }
+
+        if (!reservation.Reserved)
+        {
+            // Same bounded 409 contract gate 9 emits. The loser created no
+            // folder, no file, no supervisor, and no process. The winning cook id
+            // is surfaced when it can be read safely; it is never fabricated.
+            return (409, new { error = "recipe_busy", recipeId, cookId = reservation.RunningCookId }, default);
+        }
+
+        // Gate 16 — create the per-cook folder. From here on any failure must
+        // RELEASE the reservation, otherwise a phantom 'running' row would block
+        // every future cook of this recipe.
         try
         {
             Directory.CreateDirectory(cookFolderAbs);
         }
         catch (Exception ex)
         {
+            ReleaseCookReservation(workspacePath, cookId);
             return (500, new { error = "cook_folder_create_failed", recipeId, detail = ex.Message }, default);
         }
 
         // Gate 17 — write the pre-spawn cook-folder files atomically.
-        string createdAt = CookUtcNowIso();
         try
         {
             WriteCookFolderFiles(cookFolderAbs, recipe, versionInfo, engine, plan, cookId, recipeId, createdAt, kind);
         }
         catch (Exception ex)
         {
+            ReleaseCookReservation(workspacePath, cookId);
             return (500, new { error = "cook_init_files_failed", recipeId, detail = ex.Message }, default);
-        }
-
-        // Gate 18 — insert the cook index row (status='running', started_at NULL).
-        try
-        {
-            AddCookRow(workspacePath, versionInfo, engine, plan, cookId, recipeId, cookFolderRel, createdAt, kind);
-        }
-        catch (Exception ex)
-        {
-            return (500, new { error = "cook_row_insert_failed", recipeId, detail = ex.Message }, default);
         }
 
         // Decide whether this recipe's auth mode needs an interactive console
@@ -477,14 +450,37 @@ internal static partial class RecipeReadModel
     // here (constraint 14). The resolved (secret-free) Chef's Key flows to the
     // supervisor for child-only GRAPH_* injection at spawn (CK-3).
     private static (int Status, object? Body, PaxAdapter.ChefKeyAuthRow? ChefKey, ChefKeyModel.ChefKeyResolved? Resolved) ResolveChefKeyForProjection(
-        Dictionary<string, object?> recipe, string recipeId)
+        Dictionary<string, object?> recipe, string recipeId,
+        Func<OrganizationCookPreparationContext>? organizationAuthority = null)
     {
         string authMode = string.Empty;
         string chefKeyId = string.Empty;
+        string organizationKeyId = string.Empty;
         if (recipe.TryGetValue("auth", out object? authObj) && authObj is Dictionary<string, object?> auth)
         {
             if (auth.TryGetValue("mode", out object? m)) { authMode = JsonModel.Str(m); }
             if (auth.TryGetValue("chefKeyId", out object? a)) { chefKeyId = JsonModel.Str(a); }
+            if (auth.TryGetValue("organizationKeyId", out object? o)) { organizationKeyId = JsonModel.Str(o); }
+        }
+
+        // Cycle 15 — ORGANIZATION-KEY CAPABILITY-GATED BLOCK (replaces the
+        // Cycle-14s unconditional block). It is still the FIRST statement of
+        // gate 14: ahead of the isApp test, the chefKeyId test,
+        // ChefKeyModel.ResolveForRecipe, PaxAdapter.GetInvocationPlan (gate 15),
+        // the cook folder (gate 16), the cook row (gate 18), and any process
+        // creation. It NEVER falls back to chefKeyId, never maps to a personal
+        // Windows Credential Manager target, never derives or maps a SHA-1
+        // thumbprint, and never emits the opaque identifier or any
+        // tenant/client/certificate reference in the bounded body. Personal
+        // Recipes are untouched: they fall straight through.
+        //
+        // Cycle 16 — the authority snapshot is materialized HERE, at the first
+        // organization-specific boundary, so the whole chain is re-evaluated
+        // fresh for this Cook and a personal Recipe never triggers it at all.
+        if (!string.IsNullOrWhiteSpace(organizationKeyId))
+        {
+            return ResolveOrganizationCookPreparation(
+                recipe, recipeId, organizationKeyId, organizationAuthority?.Invoke());
         }
 
         bool isApp =
@@ -579,6 +575,145 @@ internal static partial class RecipeReadModel
         return (200, null, new PaxAdapter.ChefKeyAuthRow(authMode, resolved.ClientId, resolved.CertThumbprint), resolved);
     }
 
+    // Cycle 15 — the injected inputs the organization branch of gate 14 needs.
+    // Everything is INJECTED so this file performs no inventory, catalog, clock,
+    // registry, ProgramData, tenant, Graph, or network I/O of its own. A null
+    // context, a null capability, a null evaluation, and a null catalog all fail
+    // CLOSED. Cycle 16 supplies the REAL instances through
+    // ProductionOrganizationAuthority, and makes `Capability` a deferred read so
+    // an unauthorized policy or an unready binding short-circuits the acquired-
+    // engine record entirely (canonical order: capability is step 9, last).
+    internal sealed record OrganizationCookPreparationContext(
+        Func<EngineCapabilityState>? Capability,
+        OrganizationInventoryEvaluation? Evaluation,
+        ICertificateCatalog? Catalog,
+        ICertificateUsabilityClock? Clock);
+
+    // Cycle 15 — ORGANIZATION COOK PREPARATION.
+    //
+    // Order is fixed and fail-closed:
+    //   1. Re-evaluate the Cycle-14 chain (policy -> inventory -> entry ->
+    //      resolution -> usability) with the EXISTING evaluator. Not ready ->
+    //      the bounded readiness refusal.
+    //   2. Require the ACQUIRED engine to attest the SHA-256 selector capability.
+    //      Not `Available` -> the SAME bounded refusal, verbatim.
+    //   3. Only then produce canonical certificate-auth preparation from the
+    //      ALREADY-EXISTING inventory reference. It computes NO hash, opens NO
+    //      certificate store, touches NO private key, and maps NOTHING to SHA-1.
+    //
+    // Because the current acquired engine declares no capability, step 2 always
+    // refuses in production: organization Recipes stay blocked.
+    private static (int Status, object? Body, PaxAdapter.ChefKeyAuthRow? ChefKey, ChefKeyModel.ChefKeyResolved? Resolved)
+        ResolveOrganizationCookPreparation(
+            Dictionary<string, object?> recipe, string recipeId, string organizationKeyId,
+            OrganizationCookPreparationContext? context)
+    {
+        PaxAdapter.ChefKeyAuthRow? row =
+            TryPrepareOrganizationAuthRow(recipe, organizationKeyId, context);
+        if (row is null)
+        {
+            return (412, OrganizationKeyNotYetRunnableBody(recipeId), null, null);
+        }
+
+        // The opaque identifier and the display name never reach this row, and
+        // no secret is resolved: certificate auth carries no client secret.
+        return (200, null, row, null);
+    }
+
+    // Cycle 16 — the SINGLE bounded organization preparation decision, shared by
+    // the pre-Cook hard gate and the non-authoritative preview/readiness
+    // projection so the two can never disagree. Each caller passes its OWN fresh
+    // authority snapshot, so sharing this pure decision does NOT share state: a
+    // preview result never becomes Cook authority.
+    //
+    // Returns null for EVERY refusal, which the callers map to their own bounded
+    // not-yet-runnable body. It resolves no personal credential, never falls back
+    // to chefKeyId, opens no store, computes no hash, and constructs nothing.
+    internal static PaxAdapter.ChefKeyAuthRow? TryPrepareOrganizationAuthRow(
+        Dictionary<string, object?> recipe, string organizationKeyId,
+        OrganizationCookPreparationContext? context)
+    {
+        // 1. The Cycle-14 binding readiness chain, evaluated against the REAL
+        //    recipe binding (so a Recipe that also carries a personal key, or a
+        //    non-certificate sign-in mode, fails closed here).
+        OrganizationKeyBindingReadiness? readiness = RecipeReadinessModel.ProjectOrganizationKeyBinding(
+            recipe, context?.Evaluation, context?.Catalog, context?.Clock);
+        if (readiness is null || !readiness.Ready)
+        {
+            return null;
+        }
+
+        // 2. Runtime engine capability. Read ONLY now, so an unauthorized
+        //    policy, an unprovisioned inventory, an unknown/disabled entry, an
+        //    unresolvable reference, and an unusable certificate all refuse
+        //    without ever consulting the acquired-engine record.
+        if (context is null
+            || context.Capability is null
+            || context.Capability() != EngineCapabilityState.Available)
+        {
+            return null;
+        }
+
+        // 3. Canonical certificate-auth preparation from the already-existing
+        //    inventory reference.
+        OrganizationKeyInventoryEntry? entry = FindOrganizationEntry(context.Evaluation, organizationKeyId);
+        string? certificateSha256 = Sha256Hex.Normalize(entry?.CertificateSha256);
+        if (entry is null
+            || certificateSha256 is null
+            || string.IsNullOrWhiteSpace(entry.ClientReference))
+        {
+            return null;
+        }
+
+        return new PaxAdapter.ChefKeyAuthRow(
+            OrganizationKeyRecipeBinding.RequiredAuthMode,
+            entry.ClientReference,
+            CertThumbprint: null,
+            CertSha256: certificateSha256);
+    }
+
+    // Exactly ONE match or nothing: an ambiguous identifier never surfaces an
+    // arbitrary entry.
+    private static OrganizationKeyInventoryEntry? FindOrganizationEntry(
+        OrganizationInventoryEvaluation? evaluation, string organizationKeyId)
+    {
+        if (evaluation is null) { return null; }
+        OrganizationKeyInventoryEntry? match = null;
+        foreach (OrganizationKeyInventoryEntry candidate in evaluation.Entries)
+        {
+            if (candidate is null ||
+                !string.Equals(candidate.OrganizationKeyId, organizationKeyId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (match is not null) { return null; }
+            match = candidate;
+        }
+        return match;
+    }
+
+    // The Cycle-14s bounded refusal, verbatim.
+    private static object OrganizationKeyNotYetRunnableBody(string recipeId) => new
+    {
+        error = "recipe_invalid",
+        recipeId,
+        executionStatus = OrganizationKeyRunnability.ExecutionStatus,
+        errors = new object[]
+        {
+            new
+            {
+                path = OrganizationKeyRunnability.InstancePath,
+                keyword = OrganizationKeyRunnability.Keyword,
+                message = OrganizationKeyRunnability.Message,
+                @params = new
+                {
+                    executionStatus = OrganizationKeyRunnability.ExecutionStatus,
+                    detail = OrganizationKeyRunnability.Detail,
+                },
+            },
+        },
+    };
+
     // CK-3 test-only seam hook. Drives the gate-14 Chef's Key resolution against a
     // minimal in-memory recipe so the smoke harness can assert the bounded
     // resolve-or-error behavior (the App-registration 501 is gone; a bound key
@@ -606,6 +741,70 @@ internal static partial class RecipeReadModel
         (int status, _, PaxAdapter.ChefKeyAuthRow? row, ChefKeyModel.ChefKeyResolved? resolved) =
             ResolveChefKeyForProjection(recipe, "ck3-seam");
         return (status, row is not null, resolved?.HasSecret ?? false);
+    }
+
+    // Cycle 14s test-only seam. Drives the SAME gate-14 helper the manual and
+    // scheduled cook start paths call, and returns the BOUNDED body so the
+    // organization-key hard block can be asserted verbatim WITHOUT a running
+    // broker, a saved recipe, an acquired engine, an invocation plan, a cook
+    // folder, a cook row, or any spawn. It resolves no credential and returns no
+    // secret. Reachable only from the test assembly via InternalsVisibleTo.
+    internal static (int Status, object? Body, bool HasRow) TestSeamResolveAuthForProjection(
+        string? authMode, string? chefKeyId, string? organizationKeyId)
+    {
+        var auth = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["mode"] = authMode ?? string.Empty,
+        };
+        if (!string.IsNullOrEmpty(chefKeyId))
+        {
+            auth["chefKeyId"] = chefKeyId;
+        }
+        if (!string.IsNullOrEmpty(organizationKeyId))
+        {
+            auth["organizationKeyId"] = organizationKeyId;
+        }
+        var recipe = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["auth"] = auth,
+        };
+
+        (int status, object? body, PaxAdapter.ChefKeyAuthRow? row, _) =
+            ResolveChefKeyForProjection(recipe, "cycle-14s-seam");
+        return (status, body, row is not null);
+    }
+
+    // Cycle 15 test-only seam. Drives the SAME gate-14 helper with an INJECTED
+    // engine capability state, inventory evaluation, catalog, and clock, so both
+    // the capability-gated refusal and the canonical preparation can be asserted
+    // WITHOUT a real acquisition, a real certificate store, an invocation plan, a
+    // cook folder, a cook row, or any spawn. Reachable only from the test
+    // assembly via InternalsVisibleTo.
+    internal static (int Status, object? Body, PaxAdapter.ChefKeyAuthRow? Row)
+        TestSeamResolveOrganizationCookPreparation(
+            string organizationKeyId,
+            EngineCapabilityState capability,
+            OrganizationInventoryEvaluation? evaluation,
+            ICertificateCatalog? catalog,
+            ICertificateUsabilityClock? clock)
+    {
+        var auth = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["mode"] = OrganizationKeyRecipeBinding.RequiredAuthMode,
+            ["organizationKeyId"] = organizationKeyId,
+        };
+        var recipe = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["auth"] = auth,
+        };
+
+        (int status, object? body, PaxAdapter.ChefKeyAuthRow? row, _) =
+            ResolveChefKeyForProjection(
+                recipe,
+                "cycle-15-seam",
+                () => new OrganizationCookPreparationContext(
+                    () => capability, evaluation, catalog, clock));
+        return (status, body, row);
     }
 
     // Writes the four pre-spawn cook-folder files atomically. The oracle also
@@ -695,10 +894,17 @@ internal static partial class RecipeReadModel
         };
     }
 
-    // Oracle: Add-CookRow. INSERTs exactly one cook row. started_at is left NULL
-    // (no child has started); the redacted argv equals the argv because the
-    // spawn argv carries no secret material.
-    private static void AddCookRow(
+    // Outcome of the atomic recipe-cook reservation. Reserved is false ONLY when
+    // the conditional INSERT matched no row because a running cook already holds
+    // this recipe; RunningCookId names that winner when it can be read safely and
+    // is null otherwise (it is never guessed). Any other persistence failure
+    // throws, preserving the existing 500 cook_row_insert_failed contract.
+    private readonly record struct RecipeCookReservation(bool Reserved, string? RunningCookId);
+
+    // Oracle: Add-CookRow, hardened into an ATOMIC RESERVATION. INSERTs at most
+    // one cook row. started_at is left NULL (no child has started); the redacted
+    // argv equals the argv because the spawn argv carries no secret material.
+    private static RecipeCookReservation ReserveRecipeCookRow(
         string workspacePath,
         VersionInfo versionInfo,
         EngineAcquisitionResult engine,
@@ -715,25 +921,42 @@ internal static partial class RecipeReadModel
             JsonModel.SerializeToUtf8Bytes(new List<object?>(plan.SpawnArgv)));
         string paxScriptVersion = engine.Version ?? versionInfo.PaxVersion;
 
-        string dbFile = DatabaseFile(workspacePath);
-        var csb = new SqliteConnectionStringBuilder
-        {
-            DataSource = dbFile,
-            Mode = SqliteOpenMode.ReadWrite,
-            Pooling = false,
-        };
-        using var conn = new SqliteConnection(csb.ConnectionString);
-        conn.Open();
+        return ReserveRecipeCookRowCore(
+            workspacePath, cookId, recipeId, recipeSnapshotJson, commandArgvJson,
+            engine.ManagedEnginePath, paxScriptVersion,
+            kind == CookKind.Scheduled ? "scheduled" : "manual", cookFolderRel, createdAt);
+    }
+
+    // The atomic reservation itself: ONE conditional INSERT. There is
+    // deliberately no SELECT before it — a check-then-insert leaves a window in
+    // which two simultaneous cooks of the same recipe both see "nothing running"
+    // and both proceed. The SELECT below runs only AFTER the database has already
+    // declined the write, and exists solely to name the winner in the 409 body.
+    private static RecipeCookReservation ReserveRecipeCookRowCore(
+        string workspacePath,
+        string cookId,
+        string recipeId,
+        string recipeSnapshotJson,
+        string commandArgvJson,
+        string paxScriptPath,
+        string paxScriptVersion,
+        string trigger,
+        string cookFolderRel,
+        string createdAt)
+    {
+        using SqliteConnection conn = OpenCookIndex(workspacePath);
 
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText =
             "INSERT INTO cooks (" +
             "cook_id, recipe_id, recipe_snapshot_json, command_argv_json, command_argv_redacted, " +
             "pax_script_path, pax_script_version, trigger, cook_folder, status, started_at, " +
-            "created_at, updated_at) VALUES (" +
-            "$cook_id, $recipe_id, $recipe_snapshot_json, $command_argv_json, $command_argv_redacted, " +
+            "created_at, updated_at) " +
+            "SELECT $cook_id, $recipe_id, $recipe_snapshot_json, $command_argv_json, $command_argv_redacted, " +
             "$pax_script_path, $pax_script_version, $trigger, $cook_folder, $status, NULL, " +
-            "$created_at, $updated_at);";
+            "$created_at, $updated_at " +
+            "WHERE NOT EXISTS (" +
+            "SELECT 1 FROM cooks WHERE recipe_id = $recipe_id AND status = 'running');";
 
         void Add(string name, object? value)
         {
@@ -748,16 +971,62 @@ internal static partial class RecipeReadModel
         Add("$recipe_snapshot_json", recipeSnapshotJson);
         Add("$command_argv_json", commandArgvJson);
         Add("$command_argv_redacted", commandArgvJson);
-        Add("$pax_script_path", engine.ManagedEnginePath);
+        Add("$pax_script_path", paxScriptPath);
         Add("$pax_script_version", paxScriptVersion);
-        Add("$trigger", kind == CookKind.Scheduled ? "scheduled" : "manual");
+        Add("$trigger", trigger);
         Add("$cook_folder", cookFolderRel);
         Add("$status", "running");
         Add("$created_at", createdAt);
         Add("$updated_at", createdAt);
 
-        cmd.ExecuteNonQuery();
+        int rows = cmd.ExecuteNonQuery();
+        return rows == 1
+            ? new RecipeCookReservation(true, null)
+            : new RecipeCookReservation(false, SelectRunningRecipeCookId(conn, recipeId));
     }
+
+    private static string? SelectRunningRecipeCookId(SqliteConnection conn, string recipeId)
+    {
+        using SqliteCommand cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT cook_id FROM cooks WHERE recipe_id = $recipe_id AND status = 'running' LIMIT 1;";
+        SqliteParameter p = cmd.CreateParameter();
+        p.ParameterName = "$recipe_id";
+        p.Value = recipeId;
+        cmd.Parameters.Add(p);
+
+        object? value = cmd.ExecuteScalar();
+        return value is string id && id.Length > 0 ? id : null;
+    }
+
+    // Test-only reservation seam. Exercises the REAL atomic reservation
+    // (ReserveRecipeCookRowCore) against a caller-supplied workspace so the
+    // concurrency behaviour can be proven WITHOUT an acquired engine, a Chef's
+    // Key, a cook folder, a supervisor, or any spawn. It never runs PAX, never
+    // starts a Bake, and never reads or returns a secret. Reachable only from the
+    // test assembly via InternalsVisibleTo.
+    internal static (bool Reserved, string? RunningCookId) TestSeamReserveRecipeCookRow(
+        string workspacePath, string cookId, string recipeId)
+    {
+        RecipeCookReservation r = ReserveRecipeCookRowCore(
+            workspacePath,
+            cookId,
+            recipeId,
+            recipeSnapshotJson: "{\"kind\":\"recipe\"}",
+            commandArgvJson: "[]",
+            paxScriptPath: "test-seam",
+            paxScriptVersion: "test-seam",
+            trigger: "manual",
+            cookFolderRel: Path.Combine("Cooks", recipeId, cookId),
+            createdAt: CookUtcNowIso());
+        return (r.Reserved, r.RunningCookId);
+    }
+
+    // Test-only compensation seam for the recipe path. Exercises the REAL shared
+    // release helper so a reservation whose cook never started can be proven not
+    // to leave a phantom 'running' row behind. Spawns nothing, reads no secret.
+    internal static void TestSeamReleaseRecipeCookReservation(string workspacePath, string cookId) =>
+        ReleaseCookReservation(workspacePath, cookId);
 
     // Write-temp + atomic rename. UTF-8 no BOM. A concurrent reader never sees a
     // half-written file, and a failure leaves no partial final file.

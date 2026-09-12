@@ -5,10 +5,8 @@ using Xunit;
 namespace PAXCookbookSetup.Tests;
 
 // Unit tests for the experimental (test-build) distribution channel: the
-// fail-safe channel normalizer and the newest-pre-release asset locator. Pure,
-// offline; no network. The channel gate is fail-safe — anything that is not
-// EXACTLY "experimental" must resolve to "stable" so a production installer can
-// never be mislabeled or follow the pre-release path.
+// fail-safe channel normalizer, pure download-route decision, and the
+// newest-pre-release asset locator. Pure, offline; no network.
 public class ExperimentalChannelTests
 {
     // ---------------- SetupChannel.Normalize / IsExperimental ----------------
@@ -22,6 +20,17 @@ public class ExperimentalChannelTests
     {
         Assert.Equal(SetupChannel.Experimental, SetupChannel.Normalize(raw));
         Assert.True(SetupChannel.IsExperimental(raw));
+    }
+
+    [Theory]
+    [InlineData("internal")]
+    [InlineData("Internal")]
+    [InlineData("  INTERNAL  ")]
+    public void Normalize_Internal_Variants_ResolveToInternal(string raw)
+    {
+        Assert.Equal(SetupChannel.Internal, SetupChannel.Normalize(raw));
+        Assert.True(SetupChannel.IsInternal(raw));
+        Assert.False(SetupChannel.IsExperimental(raw));
     }
 
     [Theory]
@@ -46,6 +55,19 @@ public class ExperimentalChannelTests
         // The test assembly is built with the default PaxChannel ('stable'),
         // so a plain (non-experimental) build must resolve to stable.
         Assert.Equal(SetupChannel.Stable, SetupChannel.Resolve());
+    }
+
+    [Theory]
+    [InlineData("stable", PayloadDownloader.DownloadRoute.Stable)]
+    [InlineData("experimental", PayloadDownloader.DownloadRoute.Experimental)]
+    [InlineData("internal", PayloadDownloader.DownloadRoute.Unavailable)]
+    [InlineData("unknown", PayloadDownloader.DownloadRoute.Stable)]
+    [InlineData(null, PayloadDownloader.DownloadRoute.Stable)]
+    public void ResolveDownloadRoute_IsClosedAndInternalIsUnavailable(
+        string? channel,
+        PayloadDownloader.DownloadRoute expected)
+    {
+        Assert.Equal(expected, PayloadDownloader.ResolveDownloadRoute(channel));
     }
 
     // ---------------- ExperimentalReleaseLocator.Parse ----------------

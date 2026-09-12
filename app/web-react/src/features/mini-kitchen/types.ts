@@ -226,6 +226,15 @@ export interface LiteRecipeAuth {
    * for unattended scheduling. Binding is never a save requirement.
    */
   chefKeyId?: string;
+  /**
+   * Optional OPAQUE reference to ONE organization-provided key (Cycle 14/14s).
+   * Certificate-only, so it is valid only with `AppRegistrationCertificate`, and
+   * it is MUTUALLY EXCLUSIVE with `chefKeyId`. The recipe stores this identifier
+   * and NOTHING else -- no tenant/client reference, no certificate reference, no
+   * thumbprint, no secret. An organization-bound recipe is always
+   * `organization_key_not_yet_runnable`.
+   */
+  organizationKeyId?: string;
 }
 
 export interface LiteRecipeAdvanced {

@@ -2008,19 +2008,12 @@
 
         // X16C -- Bake state machine.
         //   idle -> starting: the cook POST is issued.
-        //   starting -> reauth_required: the broker answered 401
-        //       reAuthRequired (opClass manualCook); the Bake stays
-        //       in-flight (button disabled) while we step up.
-        //   reauth_required -> reauth_in_progress: the browser runs
-        //       Windows Hello via cookbookManualCookReauth.reauth().
-        //   reauth_in_progress -> retrying_after_reauth: on a verified
-        //       grant we re-issue the cook EXACTLY ONCE (allowReauth
-        //       is false on the retry so a second 401 cannot loop).
-        //   * -> started: a 201 navigates to the cook detail view.
-        //   * -> failed: any bounded failure (including a cancelled or
-        //       failed Hello) clears cookInFlight and surfaces a
-        //       banner. A failed step-up never reads as a started cook.
-        function sendCook(allowReauth) {
+        //   starting -> started: a 201 navigates to the cook detail view.
+        //   starting -> failed: any bounded failure clears cookInFlight
+        //       and surfaces a banner. A bake proceeds on the Unlocked
+        //       session plus explicit confirmation only -- there is no
+        //       per-operation re-auth and no second identity prompt.
+        function sendCook() {
             window.cookbookApi.post('/api/v1/recipes/' + recipeId + '/cook', {}, { signal: mySession.abortCtrl ? mySession.abortCtrl.signal : null }).then(function (resp) {
                 if (state !== mySession) { return; }
 
@@ -2049,29 +2042,12 @@
                     window.cookbookRouter.dispatch();
                     return;
                 }
-                if (resp.status === 401 && resp.body &&
-                    (resp.body.code === 'reAuthRequired' || resp.body.error === 'reAuthRequired') &&
-                    resp.body.opClass === 'manualCook') {
-                    if (!allowReauth) {
-                        // Re-auth already attempted once this Bake.
-                        // Do not loop: surface a bounded failure.
-                        state.cookInFlight = false;
-                        showBanner('error', 'Windows Hello is still required. The bake did not start.', null);
-                        applyButtonStates();
-                        return;
-                    }
-                    showBanner('info', 'Confirm with Windows Hello to start this bake\u2026', null);
-                    window.cookbookManualCookReauth.reauth(recipeId).then(function (rr) {
-                        if (state !== mySession) { return; }
-                        if (rr && rr.ok) {
-                            hideBanner();
-                            sendCook(false);
-                            return;
-                        }
-                        state.cookInFlight = false;
-                        showBanner('error', window.cookbookManualCookReauth.describe(rr), null);
-                        applyButtonStates();
-                    });
+                if (resp.status === 401) {
+                    // Bounded unauthorized: no re-auth retry, no second
+                    // identity prompt. Surface a generic failure.
+                    state.cookInFlight = false;
+                    showBanner('error', 'Not authorized to bake. Sign in again, then try again.', null);
+                    applyButtonStates();
                     return;
                 }
                 if (resp.status === 409 && resp.body && resp.body.error === 'recipe_busy') {
@@ -2122,7 +2098,7 @@
             });
         }
 
-        sendCook(true);
+        sendCook();
     }
 
     function onCookClick(ev) {

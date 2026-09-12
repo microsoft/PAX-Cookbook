@@ -89,14 +89,16 @@ public sealed class ShellRegistrar
         foreach (var d in startDefs)
         {
             var r = _writer.Write(start, d);
-            entries.Add(ToEntry(d, r));
+            // A suppressed write (no real .lnk) is NOT recorded as a created
+            // shortcut, so the manifest accurately reflects disk reality.
+            if (r.Created) entries.Add(ToEntry(d, r));
         }
 
         if (opt.CreateDesktopShortcut)
         {
             var d = ShortcutCatalog.DesktopShortcut(opt.InstallRoot);
             var r = _writer.Write(_desktopFolderProvider(), d);
-            entries.Add(ToEntry(d, r));
+            if (r.Created) entries.Add(ToEntry(d, r));
         }
 
         var manifest = new ShortcutManifest

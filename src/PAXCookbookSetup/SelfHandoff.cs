@@ -84,6 +84,14 @@ public static class SelfHandoff
         {
             args.Add("--payload-root"); args.Add(original.PayloadRoot!);
         }
+        // Relaunch MUST preserve the entire isolation context: forward the
+        // validated descriptor so the temp handoff copy re-activates isolated
+        // mode and re-enforces the same fail-closed invariant. Without this the
+        // handoff child would resolve the real install root.
+        if (!string.IsNullOrEmpty(original.TestIsolationDescriptor))
+        {
+            args.Add("--test-isolation"); args.Add(original.TestIsolationDescriptor!);
+        }
         if (original.Force) args.Add("--force");
         if (original.ReinstallSameVersion) args.Add("--reinstall-same-version");
         if (original.AllowDowngrade) args.Add("--allow-downgrade");

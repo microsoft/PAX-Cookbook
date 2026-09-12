@@ -73,6 +73,9 @@ const SECRET_SCAN_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   'recipe.destinations.fact.path',
   'recipe.destinations.userInfo.path',
   'recipe.auth.chefKeyId',
+  // Opaque organization-provided key reference (Cycle 14/14s): an administrator-
+  // chosen identifier, never a secret and never a certificate reference.
+  'recipe.auth.organizationKeyId',
   'recipe.auth.tenantId',
   'recipe.auth.clientId',
 ]);

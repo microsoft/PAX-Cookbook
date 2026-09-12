@@ -31,6 +31,7 @@ import {
   listUpcomingScheduled,
 } from '../host/brokerBridge';
 import { postCloseDecision } from '../host/closeHandoff';
+import { channelDisplayLabel } from '../host/channelDisplay';
 import { setUpdatesBadge, requestWhatsNew } from './shellNav';
 import {
   getRuntimeVersion,
@@ -249,7 +250,10 @@ export function UpdatesWorkspace() {
 
   const appVersion =
     version?.cookbookVersion ?? health?.appVersion ?? NOT_REPORTED;
-  const channel = version?.releaseChannel ?? NOT_REPORTED;
+  // Customer-visible channel label — the raw internal token ('experimental')
+  // is never shown in the support card or the copied support text; it maps to
+  // 'Test' ('stable' -> 'Stable') via channelDisplayLabel.
+  const channel = channelDisplayLabel(version?.releaseChannel ?? null) ?? NOT_REPORTED;
   const buildDate = formatBuildTimestamp(version?.buildTimestamp ?? null) ?? NOT_REPORTED;
 
   const approvedSha = engine?.approvedSha256 ?? version?.bundledPax.sha256 ?? null;

@@ -19,8 +19,6 @@ import type { ResumeCookOutcome } from '../../../host/brokerBridge';
  */
 export function describeResumeCookFailure(outcome: ResumeCookOutcome): string {
   switch (outcome.kind) {
-    case 'reauthRequired':
-      return 'Windows Hello confirmation is required to resume. Try again to confirm. The run did not start.';
     case 'unauthorized':
       return 'PAX Cookbook needs you to sign in again before it can resume. Reopen PAX Cookbook and try again. The run did not start.';
     case 'forbidden':
@@ -29,6 +27,8 @@ export function describeResumeCookFailure(outcome: ResumeCookOutcome): string {
       return 'PAX Cookbook is locked right now. Unlock it, then resume. The run did not start.';
     case 'engineSetupRequired':
       return 'The PAX engine still needs to be set up on this PC before a run can resume. Set it up, then try again. The run did not start.';
+    case 'alreadyRunning':
+      return 'That checkpoint is already being resumed by a run that is still going. Open the Bakes page to watch it, or wait for it to finish before resuming again. The run did not start.';
     case 'invalidCheckpointPath':
       return 'PAX Cookbook could not use that checkpoint location. Point it at the output folder — or the checkpoint .json — left by an interrupted run, then try again. The run did not start.';
     case 'pathTooLong':

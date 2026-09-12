@@ -416,6 +416,7 @@ function checkForSecrets(value: unknown, path: string, hits: string[]): void {
       path === 'recipe.destinations.fact.path' ||
       path === 'recipe.destinations.userInfo.path' ||
       path === 'recipe.auth.chefKeyId' ||
+      path === 'recipe.auth.organizationKeyId' ||
       path === 'recipe.auth.tenantId' ||
       path === 'recipe.auth.clientId'
     ) {

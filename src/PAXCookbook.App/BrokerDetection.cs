@@ -36,10 +36,47 @@ internal static class BrokerDetection
     private const string RuntimeIdentity = "dotnet-kestrel";
     private const int HealthTimeoutMs = 2000;
 
-    // Per-user coordination anchor: %LOCALAPPDATA%\PAXCookbook\broker.port.
+    // Explicit local-state-root override for the coordination anchor. Null in
+    // production (the desktop launcher never sets it), so broker.port resolves to
+    // the real per-user %LOCALAPPDATA%\PAXCookbook exactly as before. When the
+    // test-only --engine-localappdata isolation base is supplied, this is set to
+    // that base BEFORE any broker detection runs, so an isolated run's broker.port
+    // (read, owner-write, and stale-cleanup) lands under the isolated root and can
+    // never read, attach to, or overwrite the real installation's broker.port.
+    // Engine/provider/config/verification state already honor the same base; this
+    // closes the one coordination path that used the platform folder directly.
+    private static string? _localAppDataBaseOverride;
+
+    // Sets (or clears with null) the local-state-root override. Accepts only an
+    // absolute, existing directory; anything else leaves the real anchor in
+    // place (fail-safe). Not reachable in production because the arg that drives
+    // it is never passed by the shipping launcher.
+    internal static void SetLocalAppDataBaseOverride(string? baseDir)
+    {
+        if (string.IsNullOrWhiteSpace(baseDir))
+        {
+            _localAppDataBaseOverride = null;
+            return;
+        }
+        try
+        {
+            if (Path.IsPathFullyQualified(baseDir) && Directory.Exists(baseDir))
+            {
+                _localAppDataBaseOverride = Path.GetFullPath(baseDir);
+            }
+        }
+        catch
+        {
+            // Leave the real anchor in place on any path fault.
+        }
+    }
+
+    // Per-user coordination anchor: <base>\PAXCookbook\broker.port, where <base>
+    // is the isolated override when set, otherwise the real %LOCALAPPDATA%.
     internal static string PortFilePath()
     {
-        string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string baseDir = _localAppDataBaseOverride
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(baseDir, "PAXCookbook", "broker.port");
     }
 

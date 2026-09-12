@@ -3,12 +3,25 @@ import type { AuthMode, LiteRecipeAuth } from '../types';
 import { MiniKitchenSectionCard } from './MiniKitchenSectionCard';
 import { MiniKitchenField } from './MiniKitchenField';
 import { DashboardReqBadge, USER_INFO_RUN_SCOPES } from './DashboardRequirement';
-import { listChefKeys, type ChefKeyItem } from '../../../host/chefKeys';
+import { listChefKeys, type ChefKeyItem, type OrganizationKeySelectorItem } from '../../../host/chefKeys';
 import {
   CK_AUTH_TYPE_FOR_MODE,
   applyAuthModeChange,
   applyAuthChefKeyChange,
+  applyAuthOrganizationKeyChange,
 } from '../lib/builderAuthTransforms';
+
+// Cycle 14s. The organization group is a SEPARATE, READ-ONLY group inside the
+// existing Chef's Key selector. Organization option values are prefixed so they
+// can never collide with a personal Chef's Key id: the organization identifier
+// charset deliberately excludes ':'.
+export const ORG_OPTION_PREFIX = 'org:';
+
+// The one and only label for the organization group.
+export const ORG_GROUP_LABEL = 'Provided by your organization';
+
+// The one and only label for an entry that is not locally ready.
+export const ORG_NOT_READY_LABEL = 'Not ready on this PC';
 
 // Scheduling-eligibility indicator (Decision 3, informational only). Whether a
 // recipe can run on a schedule depends on its auth mode and whether a Chef's Key
@@ -88,6 +101,12 @@ export function AuthContextCard({ value, onChange, onCreateChefKey }: AuthContex
   // empty; the user can still save (binding is not a save requirement) and open
   // Chef's Keys to add one.
   const [chefKeys, setChefKeys] = useState<ChefKeyItem[] | null>(null);
+  // Cycle 14s. The bounded, read-only organization selector list. It is offered
+  // ONLY for AppRegistrationCertificate, and ONLY when the broker actually
+  // projected at least one enabled entry -- otherwise no group is rendered at
+  // all. There is NO add / edit / delete / test / repair control here, no
+  // inventory table, and no certificate detail.
+  const [organizationKeys, setOrganizationKeys] = useState<OrganizationKeySelectorItem[]>([]);
   const [keysFailed, setKeysFailed] = useState(false);
   // True after a mode switch removed a previously bound Chef's Key, so the
   // change is surfaced rather than silent. Cleared once the user binds a key
@@ -100,15 +119,18 @@ export function AuthContextCard({ value, onChange, onCreateChefKey }: AuthContex
         if (!alive) return;
         if (res.ok && res.data) {
           setChefKeys(res.data.chefKeys);
+          setOrganizationKeys(res.data.organizationKeys?.selectableKeys ?? []);
         } else {
           setKeysFailed(true);
           setChefKeys([]);
+          setOrganizationKeys([]);
         }
       })
       .catch(() => {
         if (!alive) return;
         setKeysFailed(true);
         setChefKeys([]);
+        setOrganizationKeys([]);
       });
     return () => {
       alive = false;
@@ -117,7 +139,13 @@ export function AuthContextCard({ value, onChange, onCreateChefKey }: AuthContex
 
   const ckType = CK_AUTH_TYPE_FOR_MODE[mode];
   const matchingKeys = (chefKeys ?? []).filter(k => k.authType === ckType);
-  const boundId = value.chefKeyId ?? '';
+  const boundOrganizationId = value.organizationKeyId ?? '';
+  const boundId = boundOrganizationId
+    ? ORG_OPTION_PREFIX + boundOrganizationId
+    : value.chefKeyId ?? '';
+  // Organization keys are certificate-only, and an empty list renders NO group.
+  const showOrganizationGroup =
+    mode === 'AppRegistrationCertificate' && organizationKeys.length > 0;
 
   return (
     <MiniKitchenSectionCard
@@ -154,7 +182,10 @@ export function AuthContextCard({ value, onChange, onCreateChefKey }: AuthContex
                     // Switching mode clears any bound Chef's Key (it can no
                     // longer match the new mode). Surface a note when a key was
                     // actually removed so the change is never silent.
-                    setKeyClearedNote(Boolean(value.chefKeyId));
+                    setKeyClearedNote(
+                      Boolean(value.chefKeyId) ||
+                        (Boolean(value.organizationKeyId) && m.id !== 'AppRegistrationCertificate'),
+                    );
                     onChange(applyAuthModeChange(value, m.id));
                   }}
                 />
@@ -202,9 +233,19 @@ export function AuthContextCard({ value, onChange, onCreateChefKey }: AuthContex
               value={boundId}
               onChange={e => {
                 setKeyClearedNote(false);
+                const raw = e.target.value;
+                // An organization option binds the OPAQUE id only and clears any
+                // personal key; a personal option clears the organization
+                // binding. The two can never both be set.
+                if (raw.startsWith(ORG_OPTION_PREFIX)) {
+                  onChange(
+                    applyAuthOrganizationKeyChange(value, raw.slice(ORG_OPTION_PREFIX.length)),
+                  );
+                  return;
+                }
                 const selectedKey =
-                  matchingKeys.find(k => k.id === e.target.value) ?? null;
-                onChange(applyAuthChefKeyChange(value, e.target.value, selectedKey));
+                  matchingKeys.find(k => k.id === raw) ?? null;
+                onChange(applyAuthChefKeyChange(value, raw, selectedKey));
               }}
             >
               <option value="">
@@ -217,8 +258,21 @@ export function AuthContextCard({ value, onChange, onCreateChefKey }: AuthContex
                   {k.displayName}
                 </option>
               ))}
+              {showOrganizationGroup ? (
+                <optgroup label={ORG_GROUP_LABEL}>
+                  {organizationKeys.map(k => (
+                    <option
+                      key={k.organizationKeyId}
+                      value={ORG_OPTION_PREFIX + k.organizationKeyId}
+                      disabled={!k.eligible}
+                    >
+                      {k.eligible ? k.displayName : `${k.displayName} \u2014 ${ORG_NOT_READY_LABEL}`}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
             </select>
-            {matchingKeys.length === 0 ? (
+            {matchingKeys.length === 0 && !showOrganizationGroup ? (
               <p className="settings-note">
                 {keysFailed
                   ? 'Could not load your Chef\u2019s Keys.'
@@ -248,6 +302,13 @@ export function AuthContextCard({ value, onChange, onCreateChefKey }: AuthContex
           The tenant, application (client) id, and certificate or secret all live
           in the Chef&rsquo;s Key &mdash; not in the recipe. Create one from the
           Chef&rsquo;s Keys page, then bind it above.
+        </p>
+      ) : null}
+      {boundOrganizationId.length > 0 ? (
+        <p className="mk-callout mk-callout--warning" data-testid="mk-auth-org-not-runnable">
+          This organization-provided certificate is not yet available for Bakes.
+          {' '}
+          PAX Cookbook is waiting for a fail-closed engine certificate selector.
         </p>
       ) : null}
       {mode === 'AppRegistrationSecret' ? (

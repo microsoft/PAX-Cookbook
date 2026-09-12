@@ -109,14 +109,12 @@
         }
     }
 
-    // Phase AF: broker lock-state + per-op re-auth events. These are
-    // dispatched ONLY for response bodies whose code field carries the
-    // documented sentinel. Pages never have to inspect 401/423
-    // response bodies themselves; the lock-overlay module owns the
-    // entire UI response.
+    // Phase AF: broker lock-state event. Dispatched ONLY for a 423
+    // response body whose code field carries the documented sentinel.
+    // Pages never have to inspect 423 response bodies themselves; the
+    // lock-overlay module owns the entire UI response.
     //
     //   'cookbook:brokerLocked'   detail = { code, message, attemptedMethod, attemptedPath, timestampUtc }
-    //   'cookbook:reAuthRequired' detail = { code, opClass, verificationResult, message, timestampUtc }
     //
     // The detail shape mirrors the broker's response body 1:1 plus a
     // timestampUtc for the overlay to display.
@@ -131,20 +129,6 @@
                         attemptedMethod: body.attemptedMethod || null,
                         attemptedPath:   body.attemptedPath   || null,
                         timestampUtc:    timestampUtc
-                    }
-                }));
-            } catch (e) {}
-            return;
-        }
-        if (status === 401 && body.code === 'reAuthRequired') {
-            try {
-                window.dispatchEvent(new CustomEvent('cookbook:reAuthRequired', {
-                    detail: {
-                        code:               body.code,
-                        opClass:            body.opClass            || null,
-                        verificationResult: body.verificationResult || null,
-                        message:            body.message            || null,
-                        timestampUtc:       timestampUtc
                     }
                 }));
             } catch (e) {}

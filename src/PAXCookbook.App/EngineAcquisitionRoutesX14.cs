@@ -162,6 +162,7 @@ internal static class EngineAcquisitionRoutesX14
             ManifestId = stage.ManifestId,
             ManifestHash = stage.ManifestHash,
             ManifestVersion = stage.ManifestVersion,
+            Capabilities = stage.Entry.Capabilities,
             StatePath = stage.StatePath,
         });
         if (!act.Ok)
@@ -300,6 +301,7 @@ internal static class EngineAcquisitionRoutesX14
             ManifestId = stage.ManifestId,
             ManifestHash = stage.ManifestHash,
             ManifestVersion = stage.ManifestVersion,
+            Capabilities = stage.Entry.Capabilities,
             StatePath = stage.StatePath,
         });
         if (!act.Ok)
@@ -437,6 +439,7 @@ internal static class EngineAcquisitionRoutesX14
             ManifestId = stage.ManifestId,
             ManifestHash = stage.ManifestHash,
             ManifestVersion = stage.ManifestVersion,
+            Capabilities = stage.Entry.Capabilities,
             StatePath = stage.StatePath,
         });
         if (!act.Ok)

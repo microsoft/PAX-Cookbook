@@ -11,6 +11,7 @@
  */
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { SHELL_SECTIONS } from './shell/sections';
+import { requestSignInMethodReveal } from './shell/signInMethodReveal';
 import { consultNavigationGuard } from './shell/navigationGuard';
 import { shellSectionHash, type ShellSectionId } from './shell/shellNav';
 import { setUpdatesBadge, requestShellSection, setUpdateAvailableStatus, setWhatsNewListener } from './shell/shellNav';
@@ -97,6 +98,24 @@ function App() {
   // "stay" restores the legacy hash (which re-posts `mk-nav` for that section);
   // consuming it keeps the builder mounted instead of remounting it.
   const suppressNavSectionRef = useRef<string | null>(null);
+
+  // PHASE-1 Hello capability diagnostic (cycle-01r-hello-capability-probe-repair).
+  // MEASUREMENT ONLY. When the native host injected the read-only
+  // window.__paxHelloDiag marker (which it does ONLY in the build-gated isolated
+  // app with PAXCB_HELLO_DIAG=1), force the Settings view once on mount so the
+  // WorkAccountCard mounts and its own gated one-shot auto-drive can run WITHOUT
+  // any manual navigation or gesture. In every normal/stable build the marker is
+  // absent and this effect is inert, so ordinary navigation is untouched.
+  const helloDiagNavRef = useRef(false);
+  useEffect(() => {
+    if (helloDiagNavRef.current) return;
+    const w = window as unknown as { __paxHelloDiag?: { enabled?: boolean } };
+    if (!w.__paxHelloDiag || w.__paxHelloDiag.enabled !== true) return;
+    helloDiagNavRef.current = true;
+    setActiveId('settings');
+    setNavKey((k) => k + 1);
+  }, []);
+
 
   // Self-update. The shell owns the "Updates available" modal; the startup
   // auto-check runs once, and Settings/Updates can trigger a manual check via
@@ -475,6 +494,46 @@ function App() {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // Experimental Work-account "Sign-in method" reveal. The TOP-LEVEL shell's
+  // Work-account profile menu offers a "Sign-in method" item; choosing it
+  // navigates this embedded surface to Settings and asks it to reveal the
+  // existing Sign-in method section. The shell delivers a bounded, closed-shape
+  // intent (message type only — NO photo, NO identity). This handler validates
+  // provenance strictly (exact same origin AND the real parent window) and the
+  // exact one-field shape, then navigates to Settings and requests the reveal.
+  // It renders no profile identity and accepts no image bytes.
+  useEffect(() => {
+    if (!EMBED_CONFIG.embed) {
+      return;
+    }
+    const onReveal = (ev: MessageEvent) => {
+      // Exact same-origin only: no wildcard, no suffix/prefix matching.
+      if (ev.origin !== window.location.origin) {
+        return;
+      }
+      // Only the real top-level shell window may drive the reveal.
+      if (window.parent === window || ev.source !== window.parent) {
+        return;
+      }
+      const data = ev.data as unknown;
+      if (!data || typeof data !== 'object') {
+        return;
+      }
+      const keys = Object.keys(data as Record<string, unknown>);
+      if (keys.length !== 1) {
+        return;
+      }
+      if ((data as { type?: unknown }).type !== 'cookbook:reveal-sign-in-method') {
+        return;
+      }
+      setActiveId('settings');
+      setNavKey((k) => k + 1);
+      requestSignInMethodReveal();
+    };
+    window.addEventListener('message', onReveal);
+    return () => window.removeEventListener('message', onReveal);
   }, []);
 
   useEffect(() => {

@@ -25,11 +25,11 @@
  *     cook core (engine SHA re-verify, child spawn, log, status, stop/cancel).
  *     Each carries no command text, secret, or script path (resumeCook carries
  *     only a checkpoint path + force + optional Chef's Key id), spawns nothing
- *     in the browser, lets the broker own every gate (token, CSRF, lock, Windows
- *     Hello reauth, validation, engine, busy, integrity), returns a typed
- *     outcome, and never fabricates a cook record. The browser-owned Windows
- *     Hello step-up both may require lives in its own module (manualCookReauth),
- *     not here.
+ *     in the browser, lets the broker own every gate (token, CSRF, Unlocked
+ *     session, validation, engine, busy, integrity), returns a typed outcome,
+ *     and never fabricates a cook record. A manual bake or resume performs no
+ *     per-operation identity ceremony — the Unlocked session plus the operator's
+ *     explicit confirmation authorize it.
  *   - Cook stop / cancel (X6) — stopCook posts to the broker's authenticated
  *     POST /api/v1/cooks/{id}/stop|kill. It is lifecycle control, not a second
  *     execution channel: it spawns nothing, and only the broker terminates a
@@ -1183,18 +1183,17 @@ export async function fetchPantryDownload(
 //
 // startCook is the one and only execution call this module exposes. It posts to
 // the broker's authenticated POST /api/v1/recipes/{id}/cook route with no body
-// and lets the broker own every gate (token, CSRF, lock, manual-cook reauth,
-// validation, engine acquisition, same-recipe busy, PAX integrity). It carries
-// no command text or script path, spawns nothing in the browser, and never
-// fabricates a cook record: the returned outcome reflects only what the broker
-// actually answered. The Windows Hello step-up a manual bake may require lives
-// in the separate manualCookReauth module, not here.
+// and lets the broker own every gate (token, CSRF, Unlocked session, validation,
+// engine acquisition, same-recipe busy, PAX integrity). It carries no command
+// text or script path, spawns nothing in the browser, and never fabricates a
+// cook record: the returned outcome reflects only what the broker actually
+// answered. A manual bake performs no per-operation identity ceremony — the
+// Unlocked session plus the operator's explicit confirmation authorize it.
 // -----------------------------------------------------------------------------
 
 /** Discriminated outcome of a bake (cook-start) attempt. */
 export type StartCookOutcome =
   | { kind: 'started'; cookId: string; status: string | null; cookFolder: string | null }
-  | { kind: 'reauthRequired'; recipeId: string }
   | { kind: 'unauthorized' }
   | { kind: 'forbidden' }
   | { kind: 'locked' }
@@ -1224,7 +1223,6 @@ function readString(bag: Record<string, unknown> | null, key: string): string | 
 }
 
 function mapStartCookOutcome(
-  recipeId: string,
   status: number,
   bag: Record<string, unknown> | null,
   errorCode: string | null,
@@ -1244,10 +1242,6 @@ function mapStartCookOutcome(
     return { kind: 'error', code: errorCode, status };
   }
   if (status === 401) {
-    const code = readString(bag, 'code');
-    if (code === 'reAuthRequired' || errorCode === 'reAuthRequired') {
-      return { kind: 'reauthRequired', recipeId };
-    }
     return { kind: 'unauthorized' };
   }
   if (status === 403) {
@@ -1350,7 +1344,7 @@ export async function startCook(
   }
 
   return {
-    outcome: mapStartCookOutcome(recipeId, response.status, bag, errorCode),
+    outcome: mapStartCookOutcome(response.status, bag, errorCode),
     status: response.status,
   };
 }
@@ -1361,15 +1355,14 @@ export async function startCook(
 // resumeCook posts to the broker's authenticated POST /api/v1/resume-cook route
 // with a small, non-secret body (the checkpoint folder / .json path, a force
 // flag, and an optional Chef's Key id) and lets the broker own every gate
-// (token, CSRF, lock, manual-cook reauth, engine acquisition, disk, path,
-// integrity). It is NOT a second execution channel: like the scheduled-run
-// entry point it flows through the broker's single sanctioned cook core, never
-// spawning PAX in the browser and never fabricating a cook record. The body
-// carries no secret and no script path — the engine is the managed engine and
-// the Chef's Key id resolves the bound sign-in server-side. The Windows Hello
-// step-up a resume requires lives in the separate manualCookReauth module
-// (keyed to the resume sentinel), not here. The returned outcome mirrors
-// startCook so the UI can run the same reauth-retry-once ceremony.
+// (token, CSRF, Unlocked session, engine acquisition, disk, path, integrity). It
+// is NOT a second execution channel: like the scheduled-run entry point it flows
+// through the broker's single sanctioned cook core, never spawning PAX in the
+// browser and never fabricating a cook record. The body carries no secret and no
+// script path — the engine is the managed engine and the Chef's Key id resolves
+// the bound sign-in server-side. A resume performs no per-operation identity
+// ceremony — the Unlocked session plus the operator's explicit confirmation
+// authorize it. The returned outcome mirrors startCook.
 // -----------------------------------------------------------------------------
 
 /** Body of a successful POST /api/v1/resume-cook (201). */
@@ -1398,11 +1391,11 @@ export interface ResumeCookRequest {
 /** Discriminated outcome of a resume (cook-start) attempt. Mirrors StartCookOutcome. */
 export type ResumeCookOutcome =
   | { kind: 'started'; cookId: string; status: string | null; cookFolder: string | null }
-  | { kind: 'reauthRequired' }
   | { kind: 'unauthorized' }
   | { kind: 'forbidden' }
   | { kind: 'locked' }
   | { kind: 'engineSetupRequired' }
+  | { kind: 'alreadyRunning'; cookId: string | null }
   | { kind: 'invalidCheckpointPath' }
   | { kind: 'pathTooLong' }
   | { kind: 'chefKeyProblem'; code: string | null }
@@ -1437,10 +1430,6 @@ function mapResumeCookOutcome(
     return { kind: 'error', code: errorCode, status };
   }
   if (status === 401) {
-    const code = readString(bag, 'code');
-    if (code === 'reAuthRequired' || errorCode === 'reAuthRequired') {
-      return { kind: 'reauthRequired' };
-    }
     return { kind: 'unauthorized' };
   }
   if (status === 403) {
@@ -1450,6 +1439,12 @@ function mapResumeCookOutcome(
     return { kind: 'locked' };
   }
   if (status === 409) {
+    // The broker refuses a second resume of a checkpoint that is already being
+    // resumed. That is a busy signal, not an engine problem, so it must be read
+    // BEFORE the acquisition fallthrough below.
+    if (errorCode === 'resume_already_running') {
+      return { kind: 'alreadyRunning', cookId: readString(bag, 'cookId') };
+    }
     // acquisitionRequired (or any other 409) means the PAX engine still needs
     // setup before a resume can run.
     return { kind: 'engineSetupRequired' };

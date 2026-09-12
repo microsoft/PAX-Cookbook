@@ -1,0 +1,88 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>PAXCookbook.Service</RootNamespace>
+    <AssemblyName>PAXCookbook.Service</AssemblyName>
+    <UseAppHost>false</UseAppHost>
+    <SelfContained>false</SelfContained>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="PAXCookbook.Service.Tests" />
+  </ItemGroup>
+  <!-- Single source of truth for the cook PREPARATION PHASE ORDER. The service
+       does NOT reference PAXCookbook.Shared (and must not reference
+       PAXCookbook.App), so the canonical file is LINKED (compiled in-place)
+       exactly as the desktop host links it. One source file, three compiled
+       copies, one phase order that cannot drift. Linking a portable contract
+       adds no capability: the service's own adapter fails closed on the first
+       requested phase. -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.Shared\Contracts\CookPreparationSequence.cs"
+             Link="Contracts\CookPreparationSequence.cs" />
+  </ItemGroup>
+  <!-- Same reasoning for the SERVICE OWNERSHIP LEDGER SCHEMA. The contract is a
+       pure, self-contained validator over strings: it opens no certificate store,
+       touches no key, reads or writes no permission list, reads no registry, and
+       performs no file access, so linking it adds no capability to this host. The
+       service has no reader and no writer for that ledger. NOTE: its LedgerFileName
+       is a COINCIDENTAL HOMONYM of ProvisioningContract.LedgerFileName - a different
+       file, in a different directory, with a different schema. -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceOwnershipLedgerContract.cs"
+             Link="Contracts\ServiceOwnershipLedgerContract.cs" />
+  </ItemGroup>
+  <!-- Same reasoning again for the SERVICE OWNERSHIP LIFECYCLE PLANNER. It is a
+       pure decision function over the already-validated ledger schema: it opens no
+       certificate store, touches no key, reads or writes no permission list, reads
+       no registry, composes no path, starts no process, and performs no file access,
+       so linking it adds no capability to this host. It also holds no delegate and
+       no callback, so it cannot become a channel for arbitrary behaviour. There is
+       NO EXECUTOR anywhere in the product: nothing consumes a plan, and no service
+       source file references the planner at all. It is linked for exactly one
+       reason - so Setup and the service can never drift into two different sets of
+       ownership-lifecycle decisions. -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceOwnershipLifecyclePlanner.cs"
+             Link="Contracts\ServiceOwnershipLifecyclePlanner.cs" />
+  </ItemGroup>
+  <!-- Same reasoning again for the FIXED SERVICE IDENTITY CONTRACT. It is a pure,
+       portable validator over supplied text: it performs NO name lookup, NO SID
+       derivation, NO service control, NO permission read or write, NO certificate
+       or key access, NO registry access, NO credential-vault access, NO path
+       composition, NO process start, NO network access, and NO file access, so
+       linking it adds no capability to this host. It is linked so ServiceContract
+       and Setup can never drift into two spellings of the service's fixed name.
+       BINDING PAIRING: this file DELEGATES service-SID shape to
+       ServiceOwnershipLedgerContract.IsServiceVirtualAccountSid (ruling E1), so
+       the two contracts must ALWAYS be linked together - linking this one without
+       ServiceOwnershipLedgerContract.cs above will not compile, and linking a
+       different copy of either would let the two hosts silently disagree about
+       what a service SID is. The Setup-side resolver is NOT linked and is not
+       reachable from this assembly. -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceIdentityContract.cs"
+             Link="Contracts\ServiceIdentityContract.cs" />
+  </ItemGroup>
+  <!-- Same reasoning again for the FIXED SERVICE MACHINE-STORAGE NAME AUTHORITY
+       (cycle 51). It is four portable compile-time constants - the machine root
+       folder, the service data folder, the ownership-ledger leaf and the
+       installation-anchor leaf: no path composition, no environment-variable
+       read, no filesystem access and no configurable value, so linking it adds
+       no capability to this host. It is linked so ServiceContract and Setup's
+       fixed ownership-ledger reader can never drift into two spellings of the
+       machine root, service data folder, ownership-ledger leaf or
+       installation-anchor leaf name. This file itself references
+       ServiceOwnershipLedgerContract (already linked above), so the two must
+       stay linked together. -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceMachineStorageContract.cs"
+             Link="Contracts\ServiceMachineStorageContract.cs" />
+  </ItemGroup>
+</Project>

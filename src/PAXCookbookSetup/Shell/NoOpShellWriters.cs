@@ -21,12 +21,12 @@ public sealed class NoOpShortcutWriter : IShortcutWriter
 {
     public ShortcutWriteResult Write(string folderPath, ShortcutDefinition def)
     {
-        // Synthesize a deterministic per-name lnk path under the supplied
-        // folder so manifest entries still look well-formed, but never
-        // actually create a .lnk on disk.
-        var lnk = Path.Combine(folderPath, def.Name + ".lnk");
-        return new ShortcutWriteResult(lnk, Sha256Hash.OfBytes(System.Text.Encoding.UTF8.GetBytes(lnk)),
-            ExcludeAttempted: false, ExcludeSucceeded: false);
+        // No .lnk is created. Report the write as SUPPRESSED (Created: false) and
+        // carry no synthesized path/hash, so the caller records an accurate,
+        // empty manifest instead of a shortcut that does not exist on disk.
+        return new ShortcutWriteResult(
+            LnkPath: string.Empty, Sha256: string.Empty,
+            ExcludeAttempted: false, ExcludeSucceeded: false, Created: false);
     }
 
     public void Delete(string lnkPath) { /* no-op */ }

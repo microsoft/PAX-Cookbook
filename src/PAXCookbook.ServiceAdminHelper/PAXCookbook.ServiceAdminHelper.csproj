@@ -1,0 +1,250 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+      THE PRERELEASE SERVICE ADMINISTRATIVE HELPER.
+
+      SECURITY CLASSIFICATION. What this project builds is UNSIGNED PRERELEASE
+      CODE. It is accepted only for internal prerelease development and attended
+      validation. It is NOT tamper resistant, NOT integrity trusted, NOT
+      production ready and NOT customer safe. An unsigned helper does not resist
+      replacement by a local user, UAC may show an unknown publisher, and
+      prerelease validation proves functionality only - never production tamper
+      resistance. This is unacceptable for GA. GA activation stays BLOCKED until
+      this exact helper is Authenticode signed and the expected publisher policy
+      is configured and verified (cycle-60 ruling).
+
+      SHAPE. Console Exe, published SELF-CONTAINED and directly launched, so the
+      trust boundary can later be the outer Authenticode signature on this PE
+      rather than dotnet.exe loading a user-writable DLL. NativeAOT is NOT used.
+
+      net8.0-windows is required because the compile-linked cycle-58/59 sources
+      use PipeSecurity, WindowsIdentity and System.Security.AccessControl. This
+      project deliberately does NOT set UseWindowsForms/UseWPF, so it resolves
+      only the Microsoft.NETCore.App framework - no WinForms, no desktop runtime
+      pack, and no App/UI/MSAL/WebView2/PAX/Cook dependency of any kind.
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>PAXCookbook.ServiceAdminHelper</RootNamespace>
+    <AssemblyName>PAXCookbookServiceAdminHelper</AssemblyName>
+    <UseWindowsForms>false</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    PRERELEASE UNSIGNED ALLOWANCE - EXPLICIT BUILD-TIME OPT-IN ONLY.
+
+    Follows the existing TestIsolation / ManagedInventoryProvisioning
+    conditional-DefineConstants precedent in PAXCookbookSetup.csproj. A normal
+    or default build defines NOTHING here, so the signing policy never returns
+    an unsigned allowance and elevation can never be silently permitted. There
+    is deliberately NO environment variable, NO command-line argument, NO
+    registry value and NO configuration file that can turn this on at runtime:
+    the ONLY switch is /p:PrereleaseUnsignedHelper=true at compile time.
+  -->
+  <PropertyGroup Condition="'$(PrereleaseUnsignedHelper)' == 'true'">
+    <DefineConstants>$(DefineConstants);PAXCOOKBOOK_PRERELEASE_UNSIGNED_HELPER</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PAXCookbook.ServiceAdminHelper.Tests" />
+  </ItemGroup>
+
+  <!--
+    THE EMBEDDED DETERMINISTIC SERVICE PAYLOAD.
+
+    Supplied by tools\release\Build-Setup.ps1 as /p:ServicePayloadArchive=<path>.
+    The logical name is FIXED and is the single name the verifier will accept;
+    it is declared once in ServicePayloadArchiveFormat.ResourceName and must be
+    kept byte-identical with the LogicalName below. A build without the property
+    produces a helper with NO payload, which the verifier reports as a bounded
+    ResourceMissing refusal rather than any kind of success.
+
+    This inner archive + manifest is ONLY a corruption/consistency check. It is
+    NOT a tamper check and can never be one: the checker travels inside the
+    container it validates (cycle-60 finding). The outer Authenticode signature
+    is the trust anchor, and it does not exist yet.
+  -->
+  <ItemGroup Condition="'$(ServicePayloadArchive)' != ''">
+    <EmbeddedResource Include="$(ServicePayloadArchive)" LogicalName="PAXCookbook.ServicePayload.zip" />
+  </ItemGroup>
+
+  <!--
+    COMPILE-LINKED CYCLE-58 / CYCLE-59 SOURCES.
+
+    ONE source implementation, not copied code, exactly as PAXCookbook.Service
+    already links its Shared contracts. A ProjectReference to PAXCookbookSetup
+    is PROHIBITED here: that project is WinExe + UseWindowsForms and would drag
+    WinForms and the whole installer surface into this helper.
+
+    The set below is the audited TRANSITIVE closure required by
+    ServiceInstallationAnchorStore, ServiceInitiatingUserIdentityChannel and
+    ServiceInitiatorProcessBinding, plus the cycle-61 sibling launch resolver:
+      * those three Setup service sources themselves;
+      * ServiceAdminHelperLocationResolver, whose natural home is Setup (Setup
+        is what launches the helper) and which is linked here ONLY so the
+        focused tests can exercise it - one source, two assemblies;
+      * ServiceInstallationAnchorContract (the anchor schema they validate against);
+      * ServiceMachineStorageContract (the fixed machine path/leaf names);
+      * ServiceOwnershipLedgerContract, which is required ONLY because
+        ServiceMachineStorageContract.OwnershipLedgerFileName is a const derived
+        from ServiceOwnershipLedgerContract.LedgerFileName. It is a pure string
+        validator: no I/O, no certificate store, no registry, no key access.
+    Nothing here reads or writes the ownership ledger, and no ledger reader,
+    lifecycle planner, credential observer, elevation coordinator or
+    elevated-helper dispatch is linked.
+
+    CYCLE 62 ADDITIONS, each with a named reason:
+      * ServiceEnableProtocol - the ONE source authority for the service-enable
+        grammar. Linking it is what stops Setup and this helper drifting into
+        two spellings of the same verb, option and token count.
+      * ServiceSidResolver - the EXISTING fixed name-to-SID lookup for
+        NT SERVICE\PAXCookbookService. It is linked so the transaction can
+        resolve the service SID after creation WITHOUT shelling out to
+        `sc showsid` and WITHOUT reimplementing the derivation algorithm. It is
+        a read-only two-call lookup: no certificate store, no key, no registry,
+        no ACL, no credential vault and no service control.
+      * ServiceIdentityContract - the fixed service name, display name and
+        account name that ServiceSidResolver and the SCM adapter both require.
+
+    CYCLE 63R ADDITION:
+      * ServiceDisableProtocol - the ONE source authority for the service-disable
+        grammar, linked for exactly the same reason as ServiceEnableProtocol so
+        the initiator and the elevated helper can never drift into two spellings
+        of the same verb, option or token count. It is pure: no I/O, no process
+        start, no elevation, no service control and no override option.
+
+    CYCLE 67 ADDITION:
+      * ServiceEnableFailureContract - the ONE source authority for the bounded
+        failure CAUSE vocabulary, the separate DISPOSITION vocabulary, the
+        helper exit-code band and the fixed lowercase diagnostic tokens. It is
+        linked for exactly the same reason as ServiceEnableProtocol: the
+        elevated helper computes the exit code and the non-elevated coordinator
+        interprets it, so a second, drifting copy of that arithmetic would be a
+        silent cross-process contract break. It is pure: no I/O, no process
+        start, no elevation, no service control and no identity.
+
+    CYCLE 94 (PASS C) ADDITIONS - THE AUDITED OWNERSHIP CLOSURE.
+
+    THIS IS THE EXPANSION CYCLE 89 SAID WOULD HAVE TO BE AUDITED, NOT A SIDE
+    EFFECT. Cycle 89 declined to link the promotion request parser into this
+    process and pinned a transport literal instead, stating plainly that linking
+    it "is a real expansion of that process's attack surface and is an audited
+    decision". Pass C makes that decision deliberately: the elevated helper is
+    the ONLY process that can run an ownership transaction, so the ONE
+    composition root and everything it directly names must compile here. Each
+    source below is linked EXACTLY ONCE, and each has a named reason.
+
+      * ServiceOwnershipElevatedProtocol - the ONE source authority for the two
+        ownership verbs and their closed grammar, linked for exactly the same
+        reason as ServiceEnableProtocol and ServiceDisableProtocol.
+      * ServiceOwnershipElevatedTransaction - THE ONE AUTHORIZED COMPOSITION
+        ROOT. It is the only production implementation of the payload-bearing
+        transaction seam, so the helper must compile the one implementation
+        rather than a copy.
+      * ServicePromotionRequestContract - the closed two-verb request parser the
+        composition root calls. Linking it is what lets the transport ceiling in
+        ServiceInitiatingUserIdentityChannel stop being a retyped literal and
+        become a direct derivation from MaxRequestChars.
+      * ServiceOwnershipLedgerReader / ServiceOwnershipLedgerWriter - the fixed
+        read and durable-write surfaces, plus the fixed persistence adapter that
+        a certified containment guard requires to live inside the writer file.
+      * ServiceOwnershipPromotionExecutor - the ordered transaction itself.
+      * ServiceOwnershipPromotedRecipeStore - the fixed promoted-Recipe store and
+        the fixed port that a containment guard requires to live beside it.
+      * ServiceOwnershipCredentialObserver - the fixed credential observation
+        shim and the certified entry observation adapter, which the same kind of
+        containment guard requires to live inside that file.
+      * ServiceOwnershipFixedOwnerIdentityAdapter,
+        ServiceOwnershipFixedCertificateFactsAdapter and
+        ServiceOwnershipFixedKeyDescriptorAdapters - the fixed native adapters
+        the composition root constructs.
+      * ServiceOwnershipLedgerSerializer, ServiceOwnershipTransitionAuthority and
+        ServiceOwnershipLifecyclePlanner - the certified serialization,
+        transition and planning authorities. All three are PURE: no I/O, no
+        certificate store, no registry, no key access and no service control.
+      * RecipeValidationModel and JsonModel - the SHARED SOURCE the request
+        parser's Recipe gate already uses, compiled in place exactly as
+        PAXCookbookSetup already compiles them, so a Recipe accepted here is
+        accepted identically on the desktop side with no second implementation.
+      * OrganizationKeyIdentifierPattern and PaxAdapter.Validation - the two
+        remaining pieces of that same shared source the Recipe gate binds. The
+        first is ONE regular-expression constant. The second is a PARTIAL that
+        deliberately carries ONLY the validator's removed-switch refusal: it has
+        no argv projection, no secret-shape scan and no engine acquisition, which
+        is precisely why PAXCookbookSetup already compiles it in isolation. NO
+        PAX ENGINE, PAX INVOCATION OR COOK PATH ENTERS THIS PROCESS THROUGH IT.
+
+    WHAT IS STILL NOT LINKED, AND STAYS THAT WAY. No WinForms, WPF, MSAL,
+    WebView2, PAX, Cook, App, UI, installer, coordinator or elevation-launch
+    source is here, and there is still NO ProjectReference to PAXCookbookSetup,
+    PAXCookbook.App or PAXCookbook.Shared.
+  -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceInstallationAnchorStore.cs"
+             Link="Linked\Service\ServiceInstallationAnchorStore.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceEnableFailureContract.cs"
+             Link="Linked\Service\ServiceEnableFailureContract.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceInitiatingUserIdentityChannel.cs"
+             Link="Linked\Service\ServiceInitiatingUserIdentityChannel.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceInitiatorProcessBinding.cs"
+             Link="Linked\Service\ServiceInitiatorProcessBinding.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceAdminHelperLocationResolver.cs"
+             Link="Linked\Service\ServiceAdminHelperLocationResolver.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceEnableProtocol.cs"
+             Link="Linked\Service\ServiceEnableProtocol.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceDisableProtocol.cs"
+             Link="Linked\Service\ServiceDisableProtocol.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipElevatedProtocol.cs"
+             Link="Linked\Service\ServiceOwnershipElevatedProtocol.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipElevatedTransaction.cs"
+             Link="Linked\Service\ServiceOwnershipElevatedTransaction.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServicePromotionRequestContract.cs"
+             Link="Linked\Service\ServicePromotionRequestContract.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipLedgerReader.cs"
+             Link="Linked\Service\ServiceOwnershipLedgerReader.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipLedgerWriter.cs"
+             Link="Linked\Service\ServiceOwnershipLedgerWriter.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipPromotionExecutor.cs"
+             Link="Linked\Service\ServiceOwnershipPromotionExecutor.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipPromotedRecipeStore.cs"
+             Link="Linked\Service\ServiceOwnershipPromotedRecipeStore.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipCredentialObserver.cs"
+             Link="Linked\Service\ServiceOwnershipCredentialObserver.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipFixedOwnerIdentityAdapter.cs"
+             Link="Linked\Service\ServiceOwnershipFixedOwnerIdentityAdapter.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipFixedCertificateFactsAdapter.cs"
+             Link="Linked\Service\ServiceOwnershipFixedCertificateFactsAdapter.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceOwnershipFixedKeyDescriptorAdapters.cs"
+             Link="Linked\Service\ServiceOwnershipFixedKeyDescriptorAdapters.cs" />
+    <Compile Include="..\PAXCookbookSetup\Service\ServiceSidResolver.cs"
+             Link="Linked\Service\ServiceSidResolver.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceInstallationAnchorContract.cs"
+             Link="Linked\Contracts\ServiceInstallationAnchorContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceIdentityContract.cs"
+             Link="Linked\Contracts\ServiceIdentityContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceMachineStorageContract.cs"
+             Link="Linked\Contracts\ServiceMachineStorageContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceOwnershipLedgerContract.cs"
+             Link="Linked\Contracts\ServiceOwnershipLedgerContract.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceOwnershipLedgerSerializer.cs"
+             Link="Linked\Contracts\ServiceOwnershipLedgerSerializer.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceOwnershipTransitionAuthority.cs"
+             Link="Linked\Contracts\ServiceOwnershipTransitionAuthority.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\ServiceOwnershipLifecyclePlanner.cs"
+             Link="Linked\Contracts\ServiceOwnershipLifecyclePlanner.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\RecipeValidationModel.cs"
+             Link="Linked\Contracts\AppSharedSource\RecipeValidationModel.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\JsonModel.cs"
+             Link="Linked\Contracts\AppSharedSource\JsonModel.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\OrganizationKeyIdentifierPattern.cs"
+             Link="Linked\Contracts\AppSharedSource\OrganizationKeyIdentifierPattern.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\PaxAdapter.Validation.cs"
+             Link="Linked\Contracts\AppSharedSource\PaxAdapter.Validation.cs" />
+    <Compile Include="..\PAXCookbook.Shared\ExitCodes\SetupExitCodes.cs"
+             Link="Linked\ExitCodes\SetupExitCodes.cs" />
+  </ItemGroup>
+</Project>

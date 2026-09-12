@@ -5,11 +5,11 @@
 //
 // UXR2 (Issues 5 + 6): Check readiness is an OPTIONAL pre-bake preflight, not a
 // required step. A saved, clean, valid recipe can bake without first running
-// readiness. The confirmation modal, the Windows Hello / WebAuthn manual-cook
-// step-up, and the broker's own pre-spawn checks (engine SHA, sign-in, lock,
-// same-recipe-busy, integrity) remain the enforcing safety gates and reject an
-// unready bake at start time. If readiness HAS been run and reports a problem,
-// baking stays blocked here so a user who saw "not ready" cannot bake past it.
+// readiness. The confirmation modal and the broker's own pre-spawn checks
+// (engine SHA, Unlocked session, same-recipe-busy, integrity) remain the
+// enforcing safety gates and reject an unready bake at start time. If readiness
+// HAS been run and reports a problem, baking stays blocked here so a user who
+// saw "not ready" cannot bake past it.
 
 export interface BakeGateReadiness {
   status: string;
@@ -55,8 +55,8 @@ export function computeBakeBlockReason(inputs: BakeGateInputs): string | null {
 
   // Readiness is optional: not having run it does not block a bake. Only a
   // readiness result that is present AND reports a problem blocks here. When
-  // readiness was never run, the broker enforces engine/sign-in/lock/integrity
-  // at bake start, after the confirmation modal and the Windows Hello step-up.
+  // readiness was never run, the broker enforces engine/sign-in/Unlocked-session/
+  // integrity at bake start, after the confirmation modal.
   const readiness = inputs.readiness;
   if (inputs.readinessPhase === 'loaded' && readiness !== null) {
     if (readiness.status !== 'ready') {
@@ -71,4 +71,29 @@ export function computeBakeBlockReason(inputs: BakeGateInputs): string | null {
   }
 
   return null;
+}
+
+// Pure decision: is a readiness result a CONFIRMABLE bake? A manual bake now
+// proceeds on the Unlocked session plus explicit confirmation (no per-operation
+// identity ceremony), so the confirmation modal must open — and Confirm Bake must
+// be enabled — ONLY for a recipe whose FRESH readiness reports ready with an
+// acquired engine and a ready sign-in. Any other result, including a null /
+// not-yet-fetched readiness, is NOT confirmable. Callers fetch fresh readiness
+// immediately before opening the modal and re-check this on confirm, so a stale
+// "ready" badge or a keyless App-registration recipe can never reach a
+// confirmable Bake state.
+export function isReadinessBakeConfirmable(readiness: BakeGateReadiness | null): boolean {
+  if (readiness === null) {
+    return false;
+  }
+  if (readiness.status !== 'ready') {
+    return false;
+  }
+  if (readiness.engine !== null && !readiness.engine.isAcquired) {
+    return false;
+  }
+  if (readiness.auth !== null && !readiness.auth.ready) {
+    return false;
+  }
+  return true;
 }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Threading;
+using PAXCookbook.Shared.Contracts;
 
 namespace PAXCookbook.App;
 
@@ -28,17 +29,49 @@ internal static class UpdateApplyModel
     // appRoot is "<installRoot>\App"; the installed Setup DLL lives at
     // "<installRoot>\Setup\PAXCookbookSetup.dll".
     public static (int Status, object Body) Apply(string appRoot)
+        => Apply(appRoot, TestIsolationRuntime.Current, TestIsolationRuntime.DescriptorPath);
+
+    // Testable core: the isolation context is passed explicitly (defaulting, from
+    // the public entry point, to the process-wide TestIsolationRuntime.Current)
+    // so the fail-closed behavior can be exercised without global state or
+    // launching any process.
+    internal static (int Status, object Body) Apply(
+        string appRoot, TestIsolationContext? isolation, string? isolationDescriptorPath)
     {
-        string trimmed = appRoot.TrimEnd(
-            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string? installRoot = Path.GetDirectoryName(trimmed);
-        if (string.IsNullOrEmpty(installRoot))
+        // Under active test isolation the isolation context is the single
+        // authoritative source for the install root, and update apply is FAIL
+        // CLOSED unless the descriptor explicitly enabled it with a local test
+        // payload. This process can never target the real install, download a
+        // network payload, or launch the real installed Setup while isolated.
+        string installRoot;
+        if (isolation is not null)
         {
-            return (500, new
+            if (!isolation.UpdateApplyEnabled)
             {
-                error = "install_root_unresolved",
-                message = "Could not resolve the PAX Cookbook install location.",
-            });
+                LogApply(isolation.InstallRoot,
+                    "apply refused: disabled_in_test_isolation (no local test payload supplied)");
+                return (409, new
+                {
+                    error = "disabled_in_test_isolation",
+                    message = "Update apply is disabled while running under test isolation.",
+                });
+            }
+            installRoot = isolation.InstallRoot;
+        }
+        else
+        {
+            string trimmed = appRoot.TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string? resolved = Path.GetDirectoryName(trimmed);
+            if (string.IsNullOrEmpty(resolved))
+            {
+                return (500, new
+                {
+                    error = "install_root_unresolved",
+                    message = "Could not resolve the PAX Cookbook install location.",
+                });
+            }
+            installRoot = resolved;
         }
 
         string setupDll = Path.Combine(installRoot, "Setup", "PAXCookbookSetup.dll");
@@ -81,6 +114,21 @@ internal static class UpdateApplyModel
             };
             psi.ArgumentList.Add(setupDll);
             psi.ArgumentList.Add("apply-update");
+            // Forward the EXACT install root so Setup never falls back to the
+            // real per-user install via AppPaths.InstallRoot(). This is the
+            // permanent fix for the isolation gap: the running app already knows
+            // which install root it belongs to, so it tells Setup explicitly
+            // instead of letting Setup rediscover a default.
+            psi.ArgumentList.Add("--install-root");
+            psi.ArgumentList.Add(installRoot);
+            // Preserve the entire isolation context into the updater process so
+            // it is bound by the same fail-closed rules (no network, isolated
+            // root only, relaunch stays isolated).
+            if (isolation is not null && isolationDescriptorPath is string descriptor)
+            {
+                psi.ArgumentList.Add(TestIsolationParser.DescriptorArg);
+                psi.ArgumentList.Add(descriptor);
+            }
 
             Process? proc = Process.Start(psi);
             if (proc is null)

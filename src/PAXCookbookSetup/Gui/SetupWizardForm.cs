@@ -3,7 +3,10 @@ using System.Drawing;
 using System.Reflection;
 using System.Windows.Forms;
 using PAXCookbook.Shared;
+using PAXCookbook.Shared.Contracts;
 using PAXCookbook.Shared.ExitCodes;
+using PAXCookbook.Shared.Paths;
+using PAXCookbookSetup.Provider;
 using PAXCookbookSetup.Shell;
 
 namespace PAXCookbookSetup.Gui;
@@ -17,7 +20,7 @@ namespace PAXCookbookSetup.Gui;
 // installs.
 internal sealed class SetupWizardForm : Form
 {
-    private enum Step { Welcome = 0, Prerequisites = 1, Location = 2, Progress = 3, Complete = 4 }
+    private enum Step { Welcome = 0, Prerequisites = 1, Location = 2, SignInMethod = 3, Progress = 4, Complete = 5 }
 
     private readonly SetupLogger _log;
     private readonly IShellOperations _shellOps;
@@ -48,6 +51,19 @@ internal sealed class SetupWizardForm : Form
     // Screen panels
     private Panel _panelWelcome = null!, _panelPrereq = null!, _panelLocation = null!,
                   _panelProgress = null!, _panelComplete = null!;
+    private Panel _panelSignIn = null!;
+
+    // Sign-in method screen (mutually-exclusive provider selection). Work-account
+    // controls appear only on the experimental/pilot channel.
+    private RadioButton _radioHello = null!;
+    private RadioButton? _radioWork;
+    private Panel _signInHelloPanel = null!;
+    private Panel? _signInWorkPanel;
+    private Label _helloAvailabilityLabel = null!;
+    private Label? _workStatusLabel;
+    private Button? _btnWorkConfigure, _btnWorkImport, _btnWorkVerify, _btnWorkTest;
+    private SignInMethodController? _signIn;
+    private string? _signInStagingDir;
 
     // Prerequisites screen
     private Label _prereqHeading = null!, _dotnet8Line = null!, _aspnetLine = null!, _ps7Line = null!, _pyLine = null!, _prereqIntro = null!, _prereqNote = null!;
@@ -86,13 +102,11 @@ internal sealed class SetupWizardForm : Form
     // -----------------------------------------------------------------
     private void BuildForm()
     {
-        // Experimental (pre-release) installers carry an "(Experimental)" title
-        // marker plus a one-line banner (added below) so a tester can never
-        // mistake a test build's wizard for the production installer. Stable
-        // installers keep the bare title and show no banner.
-        Text = _isExperimental
-            ? "PAX Cookbook Setup (Experimental)"
-            : "PAX Cookbook Setup";
+        // The Setup window title is the BARE product title on every build. The
+        // pre-release marker was removed from the window chrome; the pre-release
+        // (test) build still shows the thin safety strip below. The internal
+        // SetupChannel value "experimental" is unchanged and only gates the strip.
+        Text = SetupUiText.SetupWindowTitle;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = true;
@@ -108,10 +122,11 @@ internal sealed class SetupWizardForm : Form
         _panelWelcome = BuildWelcomePanel();
         _panelPrereq = BuildPrereqPanel();
         _panelLocation = BuildLocationPanel();
+        _panelSignIn = BuildSignInPanel();
         _panelProgress = BuildProgressPanel();
         _panelComplete = BuildCompletePanel();
 
-        foreach (var p in new[] { _panelWelcome, _panelPrereq, _panelLocation, _panelProgress, _panelComplete })
+        foreach (var p in new[] { _panelWelcome, _panelPrereq, _panelLocation, _panelSignIn, _panelProgress, _panelComplete })
         {
             p.Dock = DockStyle.Fill;
             p.Visible = false;
@@ -174,7 +189,7 @@ internal sealed class SetupWizardForm : Form
         var label = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "Experimental test build \u2014 not for production",
+            Text = SetupUiText.PreReleaseSafetyStrip,
             TextAlign = ContentAlignment.MiddleCenter,
             Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold),
             ForeColor = Color.FromArgb(0x5A, 0x3D, 0x00),
@@ -328,8 +343,295 @@ internal sealed class SetupWizardForm : Form
         p.Controls.Add(_txtPath);
         p.Controls.Add(browse);
         p.Controls.Add(_freeSpaceLabel);
-        p.Controls.Add(Body("Click Install to begin.", 28, 176, 612, 24, 10F));
+        p.Controls.Add(Body("Click Next to choose your sign-in method.", 28, 176, 612, 24, 10F));
         return p;
+    }
+
+    // -----------------------------------------------------------------
+    // Sign-in method step (mutually-exclusive provider selection)
+    // -----------------------------------------------------------------
+    private Panel BuildSignInPanel()
+    {
+        var p = new Panel { Padding = new Padding(28, 24, 28, 16) };
+        p.Controls.Add(Body("Choose your sign-in method", 28, 20, 612, 28, 13F, FontStyle.Bold));
+        p.Controls.Add(Body("How you unlock PAX Cookbook. Exactly one method is active; you can change it later in Settings.",
+            28, 54, 612, 36, 9.5F));
+
+        _radioHello = new RadioButton
+        {
+            Text = "Windows Hello",
+            Location = new Point(30, 96),
+            Size = new Size(300, 24),
+            Checked = true,
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+        };
+        _radioHello.CheckedChanged += (_, _) => OnProviderRadioChanged();
+        p.Controls.Add(_radioHello);
+
+        _signInHelloPanel = new Panel { Location = new Point(50, 122), Size = new Size(600, 48) };
+        _signInHelloPanel.Controls.Add(Body("Unlock with Windows Hello (face, fingerprint, or PIN). No work-account setup is required.",
+            0, 0, 590, 24, 9.5F));
+        _helloAvailabilityLabel = Body("", 0, 24, 590, 22, 9.5F);
+        _signInHelloPanel.Controls.Add(_helloAvailabilityLabel);
+        p.Controls.Add(_signInHelloPanel);
+
+        // Work-account controls appear only on the experimental/pilot channel.
+        if (_isExperimental)
+        {
+            _radioWork = new RadioButton
+            {
+                Text = "Work account",
+                Location = new Point(30, 182),
+                Size = new Size(300, 24),
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+            };
+            _radioWork.CheckedChanged += (_, _) => OnProviderRadioChanged();
+            p.Controls.Add(_radioWork);
+
+            _signInWorkPanel = new Panel { Location = new Point(50, 208), Size = new Size(605, 224) };
+            _signInWorkPanel.Controls.Add(Body(
+                "Native Microsoft work-account sign-in using a customer-owned registration that shows the native " +
+                "Windows account picker. It requests delegated Microsoft Graph User.Read only; a tenant administrator " +
+                "approves it and no secret or certificate is created. PAX Cookbook " +
+                "uses your work-account permission only to sign you in and show your profile picture; it " +
+                "does not use this sign-in to read audit or directory data. Because the registration shows the " +
+                "standard picker, other accounts (including personal or external accounts) may appear, but only " +
+                "your configured organization can unlock PAX Cookbook.",
+                0, 0, 600, 96, 9.5F));
+
+            _btnWorkConfigure = new Button { Text = "Configure", Location = new Point(0, 102), Size = new Size(120, 30) };
+            _btnWorkImport = new Button { Text = "Import setup result", Location = new Point(128, 102), Size = new Size(150, 30) };
+            _btnWorkVerify = new Button { Text = "Verify", Location = new Point(286, 102), Size = new Size(100, 30) };
+            _btnWorkTest = new Button { Text = "Test sign-in", Location = new Point(394, 102), Size = new Size(130, 30) };
+            _btnWorkConfigure.Click += (_, _) => OnWorkConfigure();
+            _btnWorkImport.Click += (_, _) => OnWorkImport();
+            _btnWorkVerify.Click += (_, _) => OnWorkVerify();
+            _btnWorkTest.Click += (_, _) => OnWorkTest();
+            _signInWorkPanel.Controls.Add(_btnWorkConfigure);
+            _signInWorkPanel.Controls.Add(_btnWorkImport);
+            _signInWorkPanel.Controls.Add(_btnWorkVerify);
+            _signInWorkPanel.Controls.Add(_btnWorkTest);
+
+            _workStatusLabel = Body("", 0, 144, 600, 72, 9.5F);
+            _workStatusLabel.ForeColor = Color.FromArgb(0x60, 0x60, 0x60);
+            _signInWorkPanel.Controls.Add(_workStatusLabel);
+            p.Controls.Add(_signInWorkPanel);
+        }
+
+        return p;
+    }
+
+    // Builds the controller and initializes the panel each time the step is
+    // entered (the install root may have changed on the Location step).
+    private void EnterSignInStep()
+    {
+        // Reflect the folder chosen on the Location step so the provider record
+        // resolves under the same install root the files will use.
+        try { _installRoot = Path.GetFullPath(_txtPath.Text); } catch { /* keep prior */ }
+
+        string localAppDataBase = Path.GetDirectoryName(_installRoot.TrimEnd(Path.DirectorySeparatorChar)) ?? _installRoot;
+        _signInStagingDir ??= Path.Combine(Path.GetTempPath(), "pax_setup_signin_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_signInStagingDir);
+
+        _signIn ??= new SignInMethodController(
+            _isExperimental,
+            localAppDataBase,
+            _signInStagingDir,
+            ResolveTestAppExe(),
+            new RealProcessLauncher(),
+            new WindowsHelloSupportProbe());
+
+        if (_radioHello is { Checked: false } && (_radioWork is null || !_radioWork.Checked))
+        {
+            _radioHello.Checked = true;
+        }
+        OnProviderRadioChanged();
+    }
+
+    // Writes the selected provider record last (after install). Cleans staging.
+    private void CommitProviderSelection()
+    {
+        if (_signIn is null) { return; }
+        try
+        {
+            ProviderSetupResult r = _signIn.Commit();
+            _log.Write("wizard-provider-commit", r.Succeeded ? "info" : "warn",
+                new Dictionary<string, object?>
+                {
+                    ["provider"] = r.Selected?.ToString() ?? "none",
+                    ["status"] = r.Status.ToString(),
+                });
+        }
+        catch (Exception ex)
+        {
+            _log.Write("wizard-provider-commit", "error",
+                new Dictionary<string, object?> { ["detail"] = ex.Message });
+        }
+        finally
+        {
+            if (_signInStagingDir is not null) { TryDeleteDir(_signInStagingDir); }
+        }
+    }
+
+    // Resolves the app EXE used for the native provider test. Prefers an explicit
+    // Setup test seam (isolated pilot), then the payload sibling, then the final
+    // install path. Never a product override.
+    private string ResolveTestAppExe()
+    {
+        string? seam = Environment.GetEnvironmentVariable("PAXCOOKBOOK_SETUP_PROVIDER_TEST_EXE");
+        if (!string.IsNullOrWhiteSpace(seam))
+        {
+            return seam;
+        }
+        try
+        {
+            string? setupDir = Path.GetDirectoryName(Environment.ProcessPath ?? string.Empty);
+            if (!string.IsNullOrEmpty(setupDir))
+            {
+                string sibling = Path.Combine(setupDir, "App", "bin", ProductConstants.AppExeName);
+                if (File.Exists(sibling))
+                {
+                    return sibling;
+                }
+            }
+        }
+        catch { /* fall through */ }
+        return Path.Combine(AppPaths.BinRoot(Path.GetDirectoryName(_installRoot.TrimEnd(Path.DirectorySeparatorChar))), ProductConstants.AppExeName);
+    }
+
+    private void OnProviderRadioChanged()
+    {
+        if (_signIn is null) { return; }
+        bool work = _radioWork is { Checked: true };
+        if (work) { _signIn.ChooseWorkAccount(); } else { _signIn.ChooseWindowsHello(); }
+
+        bool helloAvail = _signIn.HelloAvailable;
+        _helloAvailabilityLabel.Text = helloAvail
+            ? "Windows Hello is available on this device."
+            : "Windows Hello does not appear to be available on this device.";
+        _helloAvailabilityLabel.ForeColor = helloAvail
+            ? Color.FromArgb(0x1E, 0x7E, 0x34)
+            : Color.FromArgb(0xB0, 0x2A, 0x37);
+
+        if (_signInWorkPanel is not null)
+        {
+            _signInWorkPanel.Enabled = work;
+        }
+        UpdateSignInContinue();
+    }
+
+    private void UpdateSignInContinue()
+    {
+        if (_signIn is null) { return; }
+        _btnNext.Enabled = _signIn.CanContinue();
+
+        if (_btnWorkImport is not null) { _btnWorkImport.Enabled = _radioWork is { Checked: true }; }
+        if (_btnWorkConfigure is not null) { _btnWorkConfigure.Enabled = _radioWork is { Checked: true }; }
+        if (_btnWorkVerify is not null) { _btnWorkVerify.Enabled = _radioWork is { Checked: true } && _signIn.WorkConfigStaged; }
+        if (_btnWorkTest is not null) { _btnWorkTest.Enabled = _radioWork is { Checked: true } && _signIn.WorkConfigStaged && _signIn.WorkVerified; }
+    }
+
+    private void SetWorkStatus(string text) { if (_workStatusLabel is not null) { _workStatusLabel.Text = text; } }
+
+    // Launches the fixed helper (Provision) so a tenant admin signs in with
+    // Azure CLI; imports its result. The user never types identifiers.
+    private void OnWorkConfigure()
+    {
+        if (_signIn is null) { return; }
+        string resultPath = Path.Combine(_signInStagingDir!, "provision_result.json");
+        SetWorkStatus("Running the guided setup helper. Complete the administrator sign-in in the console window…");
+        int exit = RunHelper("Provision", resultPath, confirmed: true);
+        if (exit == 0 && _signIn.ImportSetupResult(resultPath))
+        {
+            SetWorkStatus("Configuration created and imported. Next: Verify, then Test sign-in.");
+        }
+        else
+        {
+            SetWorkStatus("Setup was not completed. You can retry, Import an existing result, or choose Windows Hello.");
+        }
+        UpdateSignInContinue();
+    }
+
+    private void OnWorkImport()
+    {
+        if (_signIn is null) { return; }
+        using var dlg = new OpenFileDialog { Filter = "Setup result (*.json)|*.json|All files (*.*)|*.*" };
+        if (dlg.ShowDialog(this) != DialogResult.OK) { return; }
+        if (_signIn.ImportSetupResult(dlg.FileName))
+        {
+            SetWorkStatus("Setup result imported. Next: Verify, then Test sign-in.");
+        }
+        else
+        {
+            SetWorkStatus("That file is not a valid setup result.");
+        }
+        UpdateSignInContinue();
+    }
+
+    private void OnWorkVerify()
+    {
+        if (_signIn is null) { return; }
+        string resultPath = Path.Combine(_signInStagingDir!, "verify_result.json");
+        SetWorkStatus("Verifying the tenant setup with the administrator's Azure CLI session…");
+        int exit = RunHelper("Verify", resultPath, confirmed: false);
+        bool ok = exit == 0 && _signIn.MarkVerified(true);
+        SetWorkStatus(ok
+            ? "Tenant setup verified. Next: Test sign-in."
+            : "Verification did not succeed. Re-run Configure or Verify with a tenant administrator.");
+        UpdateSignInContinue();
+    }
+
+    private void OnWorkTest()
+    {
+        if (_signIn is null) { return; }
+        string resultPath = Path.Combine(_signInStagingDir!, "provider_test_result.json");
+        SetWorkStatus("Complete the Windows work-account sign-in in the window that appears…");
+        bool ok = _signIn.RunNativeTest(resultPath);
+        SetWorkStatus(ok
+            ? "Work-account sign-in test succeeded. Click Install to finish."
+            : "The sign-in test did not succeed. You can retry or choose Windows Hello.");
+        UpdateSignInContinue();
+    }
+
+    // Launches the fixed guarded helper for Provision/Verify. Returns its exit
+    // code; a missing helper/pwsh yields a non-zero code and a bounded message.
+    private int RunHelper(string action, string resultPath, bool confirmed)
+    {
+        try
+        {
+            string helper = ResolveHelperPath();
+            if (!File.Exists(helper)) { return 1; }
+            var psi = new ProcessStartInfo
+            {
+                FileName = "pwsh",
+                UseShellExecute = false,
+            };
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-File");
+            psi.ArgumentList.Add(helper);
+            psi.ArgumentList.Add("-Action");
+            psi.ArgumentList.Add(action);
+            psi.ArgumentList.Add("-SetupResultPath");
+            psi.ArgumentList.Add(resultPath);
+            if (confirmed) { psi.ArgumentList.Add("-Confirmed"); }
+            using var helperLease = string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PAXCOOKBOOK_SETUP_PROVIDER_HELPER"))
+                ? SetupProviderHelper.AcquireLease(helper) : null;
+            using var proc = Process.Start(psi);
+            if (proc is null) { return 1; }
+            proc.WaitForExit();
+            return proc.ExitCode;
+        }
+        catch
+        {
+            return 1;
+        }
+    }
+
+    private static string ResolveHelperPath()
+    {
+        string? seam = Environment.GetEnvironmentVariable("PAXCOOKBOOK_SETUP_PROVIDER_HELPER");
+        if (!string.IsNullOrWhiteSpace(seam)) { return seam; }
+        return SetupProviderHelper.ResolveHelperPath();
     }
 
     private Panel BuildProgressPanel()
@@ -375,6 +677,7 @@ internal sealed class SetupWizardForm : Form
         _panelWelcome.Visible = step == Step.Welcome;
         _panelPrereq.Visible = step == Step.Prerequisites;
         _panelLocation.Visible = step == Step.Location;
+        _panelSignIn.Visible = step == Step.SignInMethod;
         _panelProgress.Visible = step == Step.Progress;
         _panelComplete.Visible = step == Step.Complete;
 
@@ -387,6 +690,7 @@ internal sealed class SetupWizardForm : Form
         {
             Step.Prerequisites => "Prerequisites",
             Step.Location => "Install location",
+            Step.SignInMethod => "Sign-in method",
             Step.Progress => "Installing",
             _ => ""
         };
@@ -401,8 +705,12 @@ internal sealed class SetupWizardForm : Form
                 StartDetection();
                 break;
             case Step.Location:
-                SetButtons(back: true, nextText: "Install", cancel: true);
+                SetButtons(back: true, nextText: "Next", cancel: true);
                 UpdateFreeSpace();
+                break;
+            case Step.SignInMethod:
+                SetButtons(back: true, nextText: "Install", cancel: true);
+                EnterSignInStep();
                 break;
             case Step.Progress:
                 SetButtons(back: false, nextText: "Next", cancel: false);
@@ -417,6 +725,7 @@ internal sealed class SetupWizardForm : Form
             Step.Welcome => _panelWelcome,
             Step.Prerequisites => _panelPrereq,
             Step.Location => _panelLocation,
+            Step.SignInMethod => _panelSignIn,
             Step.Progress => _panelProgress,
             _ => _panelComplete
         };
@@ -438,7 +747,14 @@ internal sealed class SetupWizardForm : Form
         {
             case Step.Welcome: ShowStep(Step.Prerequisites); break;
             case Step.Prerequisites: ShowStep(Step.Location); break;
-            case Step.Location: BeginInstall(); break;
+            case Step.Location: ShowStep(Step.SignInMethod); break;
+            case Step.SignInMethod:
+                if (_signIn is null || !_signIn.CanContinue())
+                {
+                    return; // the Install button is only enabled once the choice is valid
+                }
+                BeginInstall();
+                break;
             case Step.Complete: FinishAndClose(); break;
         }
     }
@@ -449,6 +765,7 @@ internal sealed class SetupWizardForm : Form
         {
             case Step.Prerequisites: ShowStep(Step.Welcome); break;
             case Step.Location: ShowStep(Step.Prerequisites); break;
+            case Step.SignInMethod: ShowStep(Step.Location); break;
         }
     }
 
@@ -709,6 +1026,11 @@ internal sealed class SetupWizardForm : Form
 
         if (result.Success)
         {
+            // Write the selected session provider LAST, after all installation
+            // files are in place (work-account config/verification are copied
+            // into the final Config folder inside Commit). A commit failure is
+            // surfaced but does not undo the file install.
+            CommitProviderSelection();
             _prereqWarning.Text = BuildPrereqWarning();
             ShowStep(Step.Complete);
             return;
@@ -842,8 +1164,27 @@ internal sealed class SetupWizardForm : Form
 
     private static string DisplayVersion()
     {
-        var v = Assembly.GetExecutingAssembly().GetName().Version;
-        if (v is null || (v.Major == 0 && v.Minor == 0 && v.Build == 0)) return "1.0.0";
-        return $"{v.Major}.{v.Minor}.{v.Build}";
+        var informational = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        return FormatDisplayVersion(informational, Assembly.GetExecutingAssembly().GetName().Version);
+    }
+
+    internal static string FormatDisplayVersion(string? informational, Version? assemblyVersion)
+    {
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            var display = informational.Split('+', 2)[0];
+            if (System.Text.RegularExpressions.Regex.IsMatch(
+                    display,
+                    @"^\d+\.\d+\.\d+(?:\.\d+)?(?:-(?:exp|internal)\.\d+)?$",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+                return display;
+        }
+
+        if (assemblyVersion is null ||
+            (assemblyVersion.Major == 0 && assemblyVersion.Minor == 0 && assemblyVersion.Build == 0))
+            return "1.0.0";
+        return $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{assemblyVersion.Build}";
     }
 }

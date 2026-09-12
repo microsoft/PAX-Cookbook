@@ -40,6 +40,13 @@ internal sealed class WebAuthnService
         PropertyNameCaseInsensitive = true,
     };
 
+    // Provider-neutral session-unlock coordinator (T1-S1). The Hello unlock
+    // route below verifies its own WebAuthn evidence and routes the resulting
+    // broker side effect through this seam so a future alternate provider can
+    // plug in without changing the lock authority. Windows Hello remains the
+    // only provider.
+    private readonly SessionUnlockCoordinator _sessionUnlock;
+
     internal WebAuthnService(string workspacePath, int port)
     {
         string authDir = Path.Combine(workspacePath, "Auth");
@@ -50,6 +57,9 @@ internal sealed class WebAuthnService
             $"http://127.0.0.1:{port}",
             $"http://localhost:{port}",
         };
+        // A Windows Hello unlock records "windows_hello" provenance, which is
+        // required to alter or remove the identity-provider configuration.
+        _sessionUnlock = new SessionUnlockCoordinator(() => BrokerLock.SetUnlocked("windows_hello"));
     }
 
     // GET /api/v1/broker/webauthn/status (lock-bypass).
@@ -66,6 +76,114 @@ internal sealed class WebAuthnService
             supportedAlgs = new[] { Es256 },
             userVerification = "required",
         });
+    }
+
+    // Whether at least one Windows Hello credential is enrolled. Used by the
+    // selected-provider status/switch logic to decide whether Windows Hello is
+    // usable as the selected provider (a provider switch to Hello requires an
+    // enrolled credential; there is no fallback that silently enrolls).
+    internal bool HasRegisteredCredential()
+    {
+        CredentialStore store = LoadCredentials();
+        return store.credentials.Any();
+    }
+
+    // Independent THREE-WAY integrity classification of the LOCAL PAX Windows
+    // Hello registration, used ONLY by the Work-account -> Windows Hello switch
+    // decision. This is deliberately DISTINCT from the unlock path's
+    // LoadCredentials (which fails closed to an empty store, i.e. silently
+    // coerces corruption into "no credentials"): here a present-but-unparseable
+    // file or a present credential missing required material is reported as
+    // Malformed so the switch fails closed toward Setup Repair instead of
+    // silently re-enrolling over a broken registration. It is NOT a device/
+    // platform availability signal — availability is a separate predicate.
+    internal HelloLocalRegistration EvaluateLocalRegistration()
+    {
+        lock (_storeGate)
+        {
+            if (!File.Exists(_credentialsFile))
+            {
+                return HelloLocalRegistration.NotRegistered;
+            }
+
+            string json;
+            try
+            {
+                json = File.ReadAllText(_credentialsFile);
+            }
+            catch
+            {
+                // A registration record exists but cannot be read — corruption,
+                // not absence. Fail closed toward repair.
+                return HelloLocalRegistration.Malformed;
+            }
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                // An empty/whitespace file is an absent registration, not corruption.
+                return HelloLocalRegistration.NotRegistered;
+            }
+
+            CredentialStore? store;
+            try
+            {
+                store = JsonSerializer.Deserialize<CredentialStore>(json, StoreJsonOptions);
+            }
+            catch
+            {
+                return HelloLocalRegistration.Malformed;
+            }
+
+            if (store is null || store.schemaVersion != 1)
+            {
+                return HelloLocalRegistration.Malformed;
+            }
+
+            List<StoredCredential> creds = store.credentials ?? new List<StoredCredential>();
+            if (creds.Count == 0)
+            {
+                return HelloLocalRegistration.NotRegistered;
+            }
+
+            foreach (StoredCredential c in creds)
+            {
+                if (!IsStructurallyValidCredential(c))
+                {
+                    return HelloLocalRegistration.Malformed;
+                }
+            }
+
+            return HelloLocalRegistration.Valid;
+        }
+    }
+
+    // A stored credential is usable only if it carries the exact material the
+    // unlock verification path requires: a credential id, an importable ES256
+    // SPKI public key, and the supported algorithm. Anything short of that is
+    // malformed (fail closed) — the same properties VerifyAssertion depends on.
+    private static bool IsStructurallyValidCredential(StoredCredential? c)
+    {
+        if (c is null)
+        {
+            return false;
+        }
+        if (IsBlank(c.credentialId) || IsBlank(c.publicKeySpkiBase64))
+        {
+            return false;
+        }
+        if (c.alg != Es256)
+        {
+            return false;
+        }
+        try
+        {
+            _ = Convert.FromBase64String(c.publicKeySpkiBase64);
+        }
+        catch
+        {
+            return false;
+        }
+        return true;
     }
 
     // POST /api/v1/broker/webauthn/unlock-challenge (lock-bypass).
@@ -120,91 +238,36 @@ internal sealed class WebAuthnService
             return new WebAuthnResponse(400, new { error = "invalid_json" });
         }
 
-        WebAuthnResponse? failure = VerifyAssertion(body.Value, "unlock", out _);
-        if (failure is not null)
+        // Verify the Hello assertion behind the provider-neutral session-unlock
+        // seam. The coordinator performs BrokerLock.SetUnlocked only on an
+        // approved verdict; the exact success and failure responses are
+        // unchanged (the Hello-specific failure is carried off the contract).
+        var provider = new HelloSessionUnlockProvider(this, body.Value);
+        SessionUnlockOutcome outcome = _sessionUnlock.Unlock(provider);
+        if (!outcome.Approved)
         {
-            return failure;
+            return provider.LastFailure!;
         }
 
-        BrokerLock.SetUnlocked();
         return new WebAuthnResponse(200, BuildUnlockSuccessBody());
     }
 
-    // POST /api/v1/broker/reauth/manual-cook/challenge (X16B; NOT lock-bypass).
-    // Mints a purpose-tagged single-use challenge for a manual-cook step-up.
-    // The challenge is opaque random bytes; the operation it authorizes is
-    // bound by the purpose tag here and by the recipeId supplied at verify time.
-    internal WebAuthnResponse NewManualCookChallenge()
-    {
-        string challenge = MintChallenge("manual_cook");
-        return new WebAuthnResponse(200, new
-        {
-            challenge,
-            timeoutMs = 60000,
-            userVerification = "required",
-            opClass = "manualCook",
-            challengeTtlSeconds = ChallengeTtlSeconds,
-        });
-    }
+    // Thin Hello-specific verification entry point used by the Hello provider
+    // adapter (HelloAuthProviders.cs). It delegates to the shared VerifyAssertion
+    // core and returns null on success or the exact WebAuthn failure response
+    // otherwise. This exists so the neutral provider contract never exposes
+    // JsonElement or WebAuthnResponse; the adapter calls this, not
+    // VerifyAssertion directly.
+    internal WebAuthnResponse? VerifyUnlockAssertion(JsonElement body)
+        => VerifyAssertion(body, "unlock", out _);
 
-    // POST /api/v1/broker/reauth/manual-cook/verify (X16B; NOT lock-bypass).
-    // Verifies an ES256 assertion against a registered credential exactly as the
-    // unlock ceremony does, but instead of transitioning the broker lock it
-    // grants a single-use, recipe-bound, lock-generation-bound in-memory
-    // authorization for ONE manual cook of the named recipe. It never unlocks
-    // the broker and never fabricates a verified verdict.
-    internal WebAuthnResponse VerifyManualCook(JsonElement? body)
-    {
-        if (body is null)
-        {
-            return new WebAuthnResponse(400, new { error = "invalid_json" });
-        }
-
-        JsonElement b = body.Value;
-        string? recipeId = GetStr(b, "recipeId");
-        if (IsBlank(recipeId))
-        {
-            return new WebAuthnResponse(400, new
-            {
-                error = "missing_fields",
-                reason = "recipeId_required",
-            });
-        }
-
-        WebAuthnResponse? failure = VerifyAssertion(b, "manual_cook", out _);
-        if (failure is not null)
-        {
-            return failure;
-        }
-
-        // The bake's Windows Hello step-up doubles as the session unlock: a
-        // verified assertion proves presence, so it lifts the inactivity lock
-        // (when it engaged) and refreshes the activity anchor before the grant is
-        // recorded. SetUnlocked does not bump the lock generation, so the grant
-        // below is captured against the same generation the cook route reads when
-        // it consumes it. This keeps a manual bake to ONE Windows Hello prompt
-        // that both authorizes the cook and refreshes the session, instead of a
-        // locked session blocking the bake before it can reach its own step-up.
-        BrokerLock.SetUnlocked();
-        ManualCookReAuth.Grant(recipeId!, BrokerLock.CurrentLockGeneration);
-        return new WebAuthnResponse(200, new
-        {
-            ok = true,
-            opClass = "manualCook",
-            recipeId,
-            verificationResult = "Verified",
-            verificationPath = "webauthn",
-            authorizationTtlSeconds = ManualCookReAuth.AuthorizationTtlSeconds,
-        });
-    }
-
-    // Shared ES256 assertion-verification core for the unlock ceremony and the
-    // manual-cook step-up. Validates the supplied assertion against a single-use
-    // purpose-tagged challenge and a registered credential. Returns null and
-    // the verified credential on success (after bumping signCount/lastUsedUtc);
-    // otherwise returns the failure response and leaves verifiedCred null. This
-    // method performs NO lock transition and NO authorization grant — those are
-    // the caller's responsibility so each entry point owns its own side effect.
+    // Shared ES256 assertion-verification core for the unlock ceremony.
+    // Validates the supplied assertion against a single-use purpose-tagged
+    // challenge and a registered credential. Returns null and the verified
+    // credential on success (after bumping signCount/lastUsedUtc); otherwise
+    // returns the failure response and leaves verifiedCred null. This method
+    // performs NO lock transition — that is the caller's responsibility so the
+    // entry point owns its own side effect.
     private WebAuthnResponse? VerifyAssertion(JsonElement b, string expectedPurpose, out StoredCredential? verifiedCred)
     {
         verifiedCred = null;
@@ -481,7 +544,7 @@ internal sealed class WebAuthnService
                 "The credential could not be persisted to the credential store.", attemptId);
         }
 
-        BrokerLock.SetUnlocked();
+        BrokerLock.SetUnlocked("windows_hello");
 
         LockSnapshot snap = BrokerLock.GetSnapshot();
         return new WebAuthnResponse(200, new

@@ -27,6 +27,12 @@ public static class SetupExitCodes
     // Early startup guard: the host OS is older than Windows 10.
     public const int UnsupportedWindowsVersion = 82;
 
+    // Test-isolation invariant violation: a test-isolation Setup build was asked
+    // to perform a mutating verb without a validated isolated --install-root, or
+    // to reach the network/real install while isolated. Distinct, nonzero, and
+    // returned BEFORE any download, copy, shell write, process stop, or relaunch.
+    public const int TestIsolationViolation = 83;
+
     public const int HandoffRequired = 90;
     public const int HandoffFailed = 91;
 

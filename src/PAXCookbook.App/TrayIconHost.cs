@@ -28,19 +28,24 @@ namespace PAXCookbook.App;
 // fresh UI instance of its own signed executable.
 internal static class TrayIconHost
 {
-    // The running daemon's hidden pump form and shutdown callback, captured while
-    // Run() is active so RequestExit() (called from a broker request thread) can
-    // marshal the SAME teardown the "Exit PAX Cookbook" menu item performs.
-    // Both are UI-thread state set at the start of Run() and cleared when its
-    // message loop ends; a null pump form means no daemon tray loop is running.
-    private static Form? _pumpForm;
-    private static Action? _onExit;
+    // The running daemon's shutdown coordinator, captured while Run() is active so
+    // RequestExit() (called from a broker request thread) can trigger the SAME
+    // idempotent teardown the "Exit PAX Cookbook" menu item performs. Set at the
+    // start of Run() and cleared when its message loop ends; null means no daemon
+    // tray loop is running.
+    private static DaemonShutdownCoordinator? _coordinator;
 
-    // Run the tray message loop until the user chooses Exit. onExit is invoked
-    // once, on the UI thread, when Exit is chosen (before the loop ends), so the
-    // caller can stop the broker host and release the port file. statusText is a
-    // short informational line shown (disabled) in the menu.
-    internal static void Run(string iconPath, string statusText, Action onExit)
+    // Run the tray message loop until shutdown is requested (the "Exit" menu item,
+    // or the /shutdown route via RequestExit). stopHost stops the in-process
+    // Kestrel host; the shared coordinator runs it OFF the UI thread and force-
+    // exits within a bounded interval, so shutdown can never deadlock the message
+    // pump. statusText is a short informational line shown (disabled) in the menu.
+    // trayExitAfterMs > 0 is a test-only seam: it drives the REAL tray "Exit"
+    // action (coordinator.Shutdown on the UI thread, through the live message
+    // loop) after that delay, so the automated lifecycle smoke can prove the
+    // daemon exits and disposes its tray/menu without a human clicking. The
+    // desktop launcher never passes it.
+    internal static void Run(string iconPath, string statusText, Func<CancellationToken, Task> stopHost, int trayExitAfterMs = 0)
     {
         ApplicationConfiguration.Initialize();
 
@@ -103,18 +108,14 @@ internal static class TrayIconHost
             }
         }
 
+        DaemonShutdownCoordinator? coordinator = null;
+
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open PAX Cookbook", null, (_, _) => OpenUi());
         ToolStripItem status = menu.Items.Add(statusText);
         status.Enabled = false;
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit PAX Cookbook", null, (_, _) =>
-        {
-            try { onExit(); }
-            catch { /* Non-fatal: shutdown is best-effort; the loop still ends. */ }
-            try { pumpForm.Close(); }
-            catch { /* Non-fatal: the form may already be closing. */ }
-        });
+        menu.Items.Add("Exit PAX Cookbook", null, (_, _) => coordinator?.Shutdown());
 
         var tray = new NotifyIcon
         {
@@ -125,11 +126,59 @@ internal static class TrayIconHost
         };
         tray.DoubleClick += (_, _) => OpenUi();
 
-        // Publish this loop's pump form + shutdown callback so the broker's
-        // /api/v1/shutdown endpoint (running on a request thread) can end the
-        // daemon the same way the tray Exit item does. Cleared when the loop ends.
-        _pumpForm = pumpForm;
-        _onExit = onExit;
+        // Fast, idempotent tray-UI teardown: hide + dispose the NotifyIcon and
+        // ContextMenuStrip (so the menu disappears immediately) and end the message
+        // loop. No host-stop work runs here, so the UI thread never blocks.
+        void TeardownTrayUi()
+        {
+            try { tray.Visible = false; tray.Dispose(); } catch { /* idempotent */ }
+            try { menu.Dispose(); } catch { /* idempotent */ }
+            try { pumpForm.Close(); } catch { /* the form may already be closing */ }
+        }
+
+        // Marshal an action onto the tray UI thread (or run inline when already on
+        // it), so the teardown always runs on the message-pump thread.
+        void PostToUi(Action action)
+        {
+            try
+            {
+                if (pumpForm.IsHandleCreated && !pumpForm.IsDisposed && pumpForm.InvokeRequired)
+                {
+                    pumpForm.BeginInvoke(action);
+                }
+                else
+                {
+                    action();
+                }
+            }
+            catch
+            {
+                try { action(); } catch { /* best-effort; force-exit still terminates */ }
+            }
+        }
+
+        // Publish the shared coordinator so the broker's /api/v1/shutdown endpoint
+        // (running on a request thread) ends the daemon the same idempotent way the
+        // tray Exit item does. Cleared when the loop ends.
+        coordinator = new DaemonShutdownCoordinator(
+            teardownTrayUi: TeardownTrayUi,
+            postToUi: PostToUi,
+            stopHost: stopHost,
+            forceExit: () => Environment.Exit(0));
+        _coordinator = coordinator;
+
+        // Test-only: drive the REAL tray Exit path on the UI thread after a delay.
+        System.Windows.Forms.Timer? exitSeamTimer = null;
+        if (trayExitAfterMs > 0)
+        {
+            exitSeamTimer = new System.Windows.Forms.Timer { Interval = trayExitAfterMs };
+            exitSeamTimer.Tick += (_, _) =>
+            {
+                exitSeamTimer.Stop();
+                coordinator?.Shutdown();
+            };
+            exitSeamTimer.Start();
+        }
 
         try
         {
@@ -137,8 +186,8 @@ internal static class TrayIconHost
         }
         finally
         {
-            _pumpForm = null;
-            _onExit = null;
+            _coordinator = null;
+            try { exitSeamTimer?.Stop(); exitSeamTimer?.Dispose(); } catch { /* idempotent */ }
             try
             {
                 tray.Visible = false;
@@ -154,38 +203,15 @@ internal static class TrayIconHost
     }
 
     // Request a graceful daemon shutdown from outside the tray UI thread (the
-    // broker's /api/v1/shutdown handler). Returns true when a tray loop is
-    // running and the exit was marshaled to it; false when no daemon tray loop
-    // exists (a combined window or the --no-window smoke host), so the caller
-    // can fall back to stopping the host directly. Best-effort: any failure
-    // simply returns false.
+    // broker's /api/v1/shutdown handler, used by the attached-window close-both
+    // flow). Delegates to the shared idempotent coordinator, which disposes the
+    // tray UI on the message-pump thread and stops Kestrel off it. Returns true
+    // when a daemon tray loop is running and this call initiated shutdown; false
+    // when no tray loop exists (a combined window or the --no-window smoke host),
+    // so the caller can fall back to stopping the host directly. A duplicate
+    // request after shutdown already began also returns false and is a safe no-op.
     internal static bool RequestExit()
     {
-        Form? form = _pumpForm;
-        Action? onExit = _onExit;
-        if (form is null || form.IsDisposed || !form.IsHandleCreated)
-        {
-            return false;
-        }
-        try
-        {
-            // Marshal to the tray's UI thread and run the SAME teardown as the
-            // "Exit PAX Cookbook" menu item: invoke the shutdown callback (stop
-            // the broker + release the port file) then close the pump form so
-            // Application.Run ends and the daemon process exits.
-            form.BeginInvoke(new Action(() =>
-            {
-                try { onExit?.Invoke(); }
-                catch { /* Non-fatal: shutdown is best-effort; the loop still ends. */ }
-                try { form.Close(); }
-                catch { /* Non-fatal: the form may already be closing. */ }
-            }));
-            return true;
-        }
-        catch
-        {
-            // Non-fatal: if marshaling fails the caller stops the host directly.
-            return false;
-        }
+        return _coordinator?.Shutdown() ?? false;
     }
 }

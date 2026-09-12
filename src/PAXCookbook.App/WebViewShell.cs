@@ -204,7 +204,30 @@ internal static class WebViewShell
     // presence, so the window suppresses its own tray to avoid a confusing
     // second icon, and "minimize to tray" degrades to a normal taskbar minimize
     // (the window is never hidden with no affordance to restore it).
-    public static void Run(string url, string title, string iconPath, string userDataFolder, int selfCloseAfterMs = 0, EventWaitHandle? restoreSignal = null, string? aumidOverride = null, string? importHandoffDir = null, bool showTray = true)
+    //
+    // helloDiagEnabled / helloDiagOutDir drive the PHASE-1 Hello capability
+    // diagnostic seam (cycle-01r-hello-capability-probe-repair). MEASUREMENT
+    // ONLY. When helloDiagEnabled is true (resolved by Program from the
+    // PAXCB_HELLO_DIAG=1 env flag AND the build-gated test-isolation runtime),
+    // a tiny document-created script sets window.__paxHelloDiag on EVERY frame
+    // (top-level legacy shell AND the React iframe) so the gated web-layer
+    // recorder runs; and the WebMessage handler accepts a single bounded,
+    // PII-free "cookbook:hello-diag-capture" envelope and writes it to
+    // helloDiagOutDir. When false (every stable/customer build and every
+    // attended launch without the flag) NO script is injected and the capture
+    // handler is never wired — the shell is pristine.
+    //
+    // helloAttendedDiagEnabled / helloAttendedDiagOutDir drive the PHASE-2
+    // ATTENDED Hello capability diagnostic seam (cycle-01r). MEASUREMENT ONLY.
+    // When helloAttendedDiagEnabled is true (resolved by Program from the build-
+    // gated test-isolation runtime alone — no env flag), a tiny document-created
+    // script sets window.__paxHelloAttendedDiag on EVERY frame so the gated web-
+    // layer attended recorder runs during a REAL human-driven switch; and the
+    // WebMessage handler accepts a single bounded, PII-free
+    // "cookbook:hello-attended-diag-capture" envelope and writes it to
+    // helloAttendedDiagOutDir. When false (every stable/customer build) NO script
+    // is injected and the attended capture handler is never wired.
+    public static void Run(string url, string title, string iconPath, string userDataFolder, int selfCloseAfterMs = 0, EventWaitHandle? restoreSignal = null, string? aumidOverride = null, string? importHandoffDir = null, bool showTray = true, Func<CancellationToken, Task<bool>>? attachedDaemonShutdown = null, bool helloDiagEnabled = false, string? helloDiagOutDir = null, bool helloAttendedDiagEnabled = false, string? helloAttendedDiagOutDir = null)
     {
         // Establish a stable taskbar identity before any window exists. Without
         // this, a direct (non-shortcut) launch leaves Windows to derive the
@@ -290,6 +313,32 @@ internal static class WebViewShell
             WindowState = FormWindowState.Normal,
             MinimumSize = new Size(880, 600),
         };
+
+        // Experimental Entra WAM window-side bridge (T1-S2A, DISABLED by default).
+        // It owns the real attached-window HWND acquisition (() => form.Handle)
+        // and the window-side WAM protocol. When the experimental gate is off
+        // (default), it uses the disabled authenticator, so any experimental
+        // message is inert. All process-owned WAM account/fingerprint state is
+        // cleared when this window exits.
+        //
+        // Under the experimental gate the window ALSO wires the bounded Work-account
+        // profile presentation channel (posted to THIS window's top-level document)
+        // and the native different-account clear seam. The stable/default build has
+        // no profile channel at all, so a stable window never posts a presentation
+        // and never handles a different-account intent.
+#if EXPERIMENTAL_WAM
+        var experimentalWamComponents = ExperimentalWamWindowFactory.CreateWithProfile(() => form.Handle);
+        var experimentalWamBridge = experimentalWamComponents.Bridge;
+#else
+        var experimentalWamBridge = ExperimentalWamWindowFactory.Create(() => form.Handle);
+#endif        // Native-only two-stage client that resolves the daemon descriptor and
+        // delivers the bounded WAM result to the daemon over the same-user pipe.
+        // The pipe name is derived from the workspace path (userDataFolder is
+        // <workspace>\WebView2), matching the daemon. The window holds no WAM
+        // account state, so window teardown needs no WAM-specific cleanup and the
+        // MSAL account cache (which enables restart continuity) is preserved.
+        var experimentalWamPipeClient = new ExperimentalWamPipeClient(
+            ExperimentalWamPipe.PipeName(System.IO.Path.GetDirectoryName(userDataFolder) ?? userDataFolder));
 
         // Window icons. The taskbar button uses the window's large icon and
         // the title bar uses the small icon. We realize BOTH from the bundled
@@ -552,6 +601,39 @@ internal static class WebViewShell
             catch { /* Non-fatal: the form may already be closing. */ }
         }
 
+        // Handle a cookbook:close-app ("Exit") decision. A standalone window owns
+        // its in-process broker and simply closes; an attached window must stop
+        // the SEPARATE daemon first and only close once it is confirmed stopped.
+        // A daemon that refuses to stop (e.g. 423 while Locked) or a failed
+        // request keeps the window open and posts a truthful bounded failure
+        // instead of silently orphaning the daemon. Awaited without
+        // ConfigureAwait(false) so the window teardown resumes on the UI thread.
+        async Task OnCloseAppRequestedAsync()
+        {
+            var coordinator = new AttachedWindowCloseCoordinator(
+                attachedDaemonShutdown is null ? CloseAppMode.Standalone : CloseAppMode.Attached,
+                attachedDaemonShutdown);
+            CloseAppAction action;
+            try
+            {
+                action = await coordinator.DecideCloseAppAsync(CancellationToken.None);
+            }
+            catch
+            {
+                action = CloseAppAction.SurfaceDaemonFailure;
+            }
+
+            if (action == CloseAppAction.CloseWindow)
+            {
+                RequestFullClose();
+            }
+            else
+            {
+                try { web.CoreWebView2?.PostWebMessageAsString("cookbook:close-both-failed"); }
+                catch { /* Non-fatal: the window stays open; the failure is truthful either way. */ }
+            }
+        }
+
         // Intercept window-close requests. Unless a full-close has already been
         // decided, cancel the native close and ask the SPA to open the shared
         // close modal (title-bar X, taskbar Close, and Alt+F4 all land here).
@@ -586,11 +668,10 @@ internal static class WebViewShell
 
         // Route input focus into the embedded web content whenever the
         // window becomes active. Browser-owned Windows Hello / WebAuthn
-        // prompts (used by both the unlock ceremony and the manual-cook
-        // step-up) are parented to the active top-level window; keeping
-        // the WebView2 focused when the form is activated keeps those
-        // prompts owned by — and in front of — the app window rather
-        // than appearing behind it.
+        // prompts (used by the session-unlock ceremony) are parented to the
+        // active top-level window; keeping the WebView2 focused when the form
+        // is activated keeps those prompts owned by — and in front of — the app
+        // window rather than appearing behind it.
         form.Activated += (_, _) =>
         {
             try
@@ -648,12 +729,174 @@ internal static class WebViewShell
                 settings.IsStatusBarEnabled = false;
                 settings.AreBrowserAcceleratorKeysEnabled = false;
 
+#if EXPERIMENTAL_WAM
+                // Wire the bounded Work-account profile presentation channel to the
+                // TOP-LEVEL document now that the CoreWebView2 is ready. The channel
+                // posts a bounded, closed-shape envelope (state photo|initials|none)
+                // via PostWebMessageAsJson, marshalled onto the UI thread. It NEVER
+                // reaches the daemon; the token/identity never leave this process.
+                experimentalWamComponents.Channel.SetPoster(
+                    json =>
+                    {
+                        try { web.CoreWebView2?.PostWebMessageAsJson(json); }
+                        catch { /* delivery is best-effort; a failed post degrades cleanly */ }
+                    },
+                    action =>
+                    {
+                        try
+                        {
+                            if (form.IsHandleCreated && form.InvokeRequired)
+                            {
+                                form.BeginInvoke(action);
+                            }
+                            else
+                            {
+                                action();
+                            }
+                        }
+                        catch { /* marshalling failure is non-fatal */ }
+                    });
+#endif
+
+                // PHASE-1 Hello capability diagnostic seam (cycle-01r).
+                // MEASUREMENT ONLY. When enabled, inject a tiny document-created
+                // script that sets a read-only marker on EVERY frame (the top-
+                // level legacy shell AND the React iframe) BEFORE the frame's own
+                // scripts run. The gated web-layer recorder keys off this marker;
+                // when absent (every stable build and every unflagged launch) the
+                // recorder is a no-op. The marker carries no identity/credential
+                // material — only the enabled flag and the cycle id.
+                if (helloDiagEnabled)
+                {
+                    try
+                    {
+                        await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                            "window.__paxHelloDiag=Object.freeze({enabled:true,cycleId:'cycle-01r-hello-capability-probe-repair',schemaVersion:'hello-diag-1'});");
+                    }
+                    catch
+                    {
+                        // Non-fatal: the diagnostic simply does not run; the shell
+                        // behaves exactly as a normal launch.
+                    }
+                }
+
+                // PHASE-2 attended Hello capability diagnostic seam (cycle-01r).
+                // MEASUREMENT ONLY. When enabled (isolated runtime), inject a
+                // read-only marker on EVERY frame so the gated attended recorder
+                // observes a REAL human-driven switch (including the gesture-
+                // dependent create() ceremony). Carries no identity/credential
+                // material — only the enabled flag, cycle id, and schema tag.
+                if (helloAttendedDiagEnabled)
+                {
+                    try
+                    {
+                        await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                            "window.__paxHelloAttendedDiag=Object.freeze({enabled:true,cycleId:'cycle-01r-hello-capability-probe-repair',schemaVersion:'hello-attended-1'});");
+                    }
+                    catch
+                    {
+                        // Non-fatal: the diagnostic simply does not run; the shell
+                        // behaves exactly as a normal launch.
+                    }
+                }
+
                 // Receive the close-modal decisions the SPA posts back over the
                 // WebView2 message channel. "minimize-to-tray" hides the window
                 // and keeps the server running; "close-app" performs a full
                 // shutdown via the same teardown path as the title-bar X.
                 web.CoreWebView2.WebMessageReceived += (_, args) =>
                 {
+                    // Experimental Entra WAM request envelope (JSON). Disabled by
+                    // default: the bridge uses the disabled authenticator unless the
+                    // experimental gate is configured, so this is inert in stable
+                    // builds. Security-sensitive: the message Source origin must be
+                    // EXACTLY the loopback application origin the window navigated
+                    // to, and the envelope is requestId-only. The window then runs
+                    // the two-stage native pipe exchange (descriptor lookup then
+                    // bounded result) with the daemon; the renderer never posts an
+                    // outcome and never authors a security field.
+                    string? rawJson = null;
+                    try { rawJson = args.WebMessageAsJson; } catch { rawJson = null; }
+
+                    string? messageSource = null;
+                    try { messageSource = args.Source; } catch { messageSource = null; }
+
+                    if (WebMessageOrigin.IsSameOrigin(messageSource, url) &&
+                        ExperimentalWamWindowMessage.TryHandle(
+                            rawJson, experimentalWamBridge, experimentalWamPipeClient))
+                    {
+                        return;
+                    }
+
+#if EXPERIMENTAL_WAM
+                    // Presentation-only replay control (top-level shell -> native).
+                    // Exact application origin and exact { type }-only shape are
+                    // required. Ready can only replay the latest already-bounded
+                    // window-memory envelope; clear can only discard it and post
+                    // the existing none envelope. Neither action authenticates,
+                    // unlocks, selects a provider/account, or reaches daemon state.
+                    if (WebMessageOrigin.IsSameOrigin(messageSource, url) &&
+                        WorkAccountProfileControlMessage.TryHandle(
+                            rawJson, experimentalWamComponents.Channel))
+                    {
+                        return;
+                    }
+
+                    // Native different-account intent (top-level shell -> native).
+                    // Security-sensitive: the Source origin must be EXACTLY the
+                    // loopback application origin, and the envelope is a closed
+                    // { type }-only shape with NO account-selection field. The
+                    // window clears the protected preferred-account reference (and,
+                    // via the sink, the in-memory presentation) and posts a bounded
+                    // { cleared | failed } ack back to the top-level document. It
+                    // never selects an account and never authenticates here.
+                    if (WebMessageOrigin.IsSameOrigin(messageSource, url) &&
+                        WorkAccountDifferentAccountMessage.IsExactRequest(rawJson))
+                    {
+                        WorkAccountPreferredClearAck ack;
+                        try { ack = experimentalWamComponents.ClearPreferredAccount(); }
+                        catch { ack = WorkAccountPreferredClearAck.Failed; }
+
+                        string ackJson = WorkAccountDifferentAccountMessage.BuildAck(
+                            ack == WorkAccountPreferredClearAck.Cleared);
+                        try { web.CoreWebView2?.PostWebMessageAsJson(ackJson); }
+                        catch { /* ack delivery is best-effort */ }
+                        return;
+                    }
+#endif
+
+                    // PHASE-1 Hello capability diagnostic capture (cycle-01r).
+                    // MEASUREMENT ONLY. Accept exactly one bounded, PII-free
+                    // envelope and persist it to the launch-supplied evidence
+                    // directory. Only wired when the seam is enabled (isolated +
+                    // PAXCB_HELLO_DIAG=1); origin must be exactly the loopback
+                    // application origin. The renderer authors only booleans /
+                    // bounded enums / timestamps — never identity or credential
+                    // material — and the host writes the JSON verbatim without
+                    // interpreting any path from the message.
+                    if (helloDiagEnabled &&
+                        WebMessageOrigin.IsSameOrigin(messageSource, url) &&
+                        HelloDiagCapture.TryHandle(rawJson, helloDiagOutDir))
+                    {
+                        return;
+                    }
+
+                    // PHASE-2 attended Hello capability diagnostic capture
+                    // (cycle-01r). MEASUREMENT ONLY. Accept exactly one bounded,
+                    // PII-free envelope and persist it to the launch-supplied
+                    // evidence directory. Only wired when the attended seam is
+                    // enabled (isolated runtime); origin must be exactly the
+                    // loopback application origin. The renderer authors only
+                    // booleans / bounded enums / timestamps (including the
+                    // create() ceremony rejection CLASS derived from a
+                    // DOMException name) — never identity or credential material.
+                    if (helloAttendedDiagEnabled &&
+                        WebMessageOrigin.IsSameOrigin(messageSource, url) &&
+                        HelloAttendedDiagCapture.TryHandle(rawJson, helloAttendedDiagOutDir))
+                    {
+                        return;
+                    }
+
                     string message;
                     try { message = args.TryGetWebMessageAsString(); }
                     catch { return; }
@@ -664,7 +907,7 @@ internal static class WebViewShell
                             HideToTray();
                             break;
                         case "cookbook:close-app":
-                            RequestFullClose();
+                            _ = OnCloseAppRequestedAsync();
                             break;
                     }
                 };

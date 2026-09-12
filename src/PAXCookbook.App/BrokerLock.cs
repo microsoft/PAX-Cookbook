@@ -35,11 +35,22 @@ internal static class BrokerLock
     private static long _lastActivityMonoTicks = Stopwatch.GetTimestamp();
     private static TimeAnomaly? _timeAnomaly;
 
+    // Provenance of the CURRENT unlocked session (T1-S3): how the session was
+    // unlocked. One of "windows_hello", "work_account", or null when Locked.
+    // NEVER persisted — it is process-scoped in-memory state, so a broker
+    // restart, shutdown, explicit Lock, or failed unlock all clear it. Bearer
+    // possession is NOT provenance; provenance is set only after a verified
+    // unlock ceremony completes. It records HOW the current session unlocked
+    // ("windows_hello" or "work_account") so provider-switching in Settings can
+    // reason about the active provider. It is NOT used to gate OAuth
+    // administration — either selected provider's Unlocked session may
+    // administer configuration (OAuth is the Hello replacement).
+    private static string? _unlockProvenance;
+
     // Monotonically increasing counter bumped on every transition into the
     // Locked state (explicit lock, inactivity timeout, or time-anomaly
-    // re-lock). A per-operation re-authorization captures this value when it is
-    // granted; if any lock event occurs before the authorization is consumed,
-    // the generation no longer matches and the stale authorization is rejected.
+    // re-lock). It is exposed as a bounded, non-secret indicator that the lock
+    // state machine advanced.
     private static long _lockGeneration;
 
     // Exact lock-bypass allow-list (oracle $Script:BrokerLockAllowedWhenLockedRoutes).
@@ -57,16 +68,25 @@ internal static class BrokerLock
         ("POST", "/api/v1/broker/webauthn/bootstrap-register-challenge"),
         ("POST", "/api/v1/broker/webauthn/bootstrap-register-unlock"),
 
-        // The manual-cook step-up is reachable while Locked so the bake's own
-        // Windows Hello can clear an inactivity auto-lock in the SAME ceremony
-        // that authorizes the cook: a verified assertion lifts the lock (see
-        // WebAuthnService.VerifyManualCook) and refreshes the session. Both
-        // routes still require a valid WebAuthn assertion, so this is at least as
-        // strong as the unlock ceremony already on this list, and it keeps a
-        // bake to a single Windows Hello prompt instead of dead-ending at the
-        // lock gate with a "locked" error the bake flow cannot clear on its own.
-        ("POST", "/api/v1/broker/reauth/manual-cook/challenge"),
-        ("POST", "/api/v1/broker/reauth/manual-cook/verify"),
+        // Experimental Entra WAM session unlock must be able to run its ceremony
+        // while Locked: the renderer initiates a request and polls a bounded
+        // status, and a valid NATIVE result unlocks once. Only these exact paths
+        // are lock-bypass (no prefix wildcard); the security-critical result
+        // arrives over native IPC, never an HTTP route. Bearer + CSRF still apply
+        // (the capability probe is a safe GET, so no CSRF). The capability GET is
+        // reachable while Locked so the lock overlay can decide whether to offer
+        // the experimental work-account action before an unlock.
+        ("GET",  "/api/v1/broker/experimental/wam/capability"),
+        ("POST", "/api/v1/broker/experimental/wam/initiate"),
+        ("POST", "/api/v1/broker/experimental/wam/status"),
+        ("GET",  "/api/v1/broker/experimental/wam/config-state"),
+
+        // The selected-session-provider status is a safe, bounded GET the lock
+        // overlay reads while Locked to render EXACTLY the selected provider's
+        // experience (Windows Hello OR work account, never both). It returns no
+        // identifiers — only the selected provider id, a usable flag, a bounded
+        // health/recovery code, and whether recovery is required.
+        ("GET",  "/api/v1/broker/session-provider"),
     };
 
     // Returns "Locked" or "Unlocked" after applying the lazy inactivity sweep.
@@ -121,7 +141,12 @@ internal static class BrokerLock
     // Transition any state -> Unlocked. Callers MUST have already obtained a
     // verified verdict; this method does NOT independently verify (parity
     // with Set-BrokerLockUnlocked). Bumps both anchors and clears any anomaly.
-    internal static void SetUnlocked()
+    internal static void SetUnlocked() => SetUnlocked(null);
+
+    // Provenance-carrying unlock. provenance is the verified unlock method
+    // ("windows_hello" or "work_account"); null records an unspecified unlock
+    // (test seams). Provenance is never persisted.
+    internal static void SetUnlocked(string? provenance)
     {
         lock (Gate)
         {
@@ -129,6 +154,18 @@ internal static class BrokerLock
             _lastActivityUtc = DateTime.UtcNow;
             _lastActivityMonoTicks = Stopwatch.GetTimestamp();
             _timeAnomaly = null;
+            _unlockProvenance = provenance;
+        }
+    }
+
+    // Provenance of the current unlocked session, or null when Locked. Never
+    // persisted; cleared on Lock/restart/shutdown.
+    internal static string? GetUnlockProvenance()
+    {
+        lock (Gate)
+        {
+            Sweep();
+            return _state == "Unlocked" ? _unlockProvenance : null;
         }
     }
 
@@ -144,6 +181,7 @@ internal static class BrokerLock
                 _lockGeneration++;
             }
             _state = "Locked";
+            _unlockProvenance = null;
         }
     }
 

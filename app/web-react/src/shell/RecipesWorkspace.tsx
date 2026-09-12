@@ -31,10 +31,6 @@ import type {
   RecipeSummary,
   RecipeReadinessBody,
 } from '../host/brokerBridge';
-import {
-  reauthManualCook,
-  describeReauthFailure,
-} from '../host/manualCookReauth';
 import { listChefKeys } from '../host/chefKeys';
 import { getRuntimeVersion, getPaxEngineState } from '../host/systemInfo';
 import { MiniKitchenBuilderPreview } from '../features/mini-kitchen/MiniKitchenBuilderPreview';
@@ -43,6 +39,7 @@ import {
   type CommandImportSaveOutcome,
 } from '../features/mini-kitchen/components/ImportCommandModal';
 import { BakeConfirmModal } from '../features/mini-kitchen/components/BakeConfirmModal';
+import { isReadinessBakeConfirmable } from '../features/mini-kitchen/lib/bakeGate';
 import { translateLiteRecipeToFullRecipe } from '../features/mini-kitchen/lib/translateLiteRecipeToFullRecipe';
 import { buildRecipeRequestBody } from '../features/mini-kitchen/lib/candidateToRecipeBody';
 import { fullRecipeToState } from '../features/mini-kitchen/lib/fullRecipeToState';
@@ -636,17 +633,43 @@ export function RecipesWorkspace() {
     }
   }
 
-  // Open the bake confirmation modal for the selected saved recipe. The gate is
-  // re-checked here so a stale click can never open the modal when there is no
-  // loaded saved selection. The selected recipe is the persisted on-disk recipe
-  // (saved + clean by definition), so its id is a valid bake target — the same
-  // single startCook channel the editor uses, started from a different button.
+  // Open the bake confirmation modal for the selected saved recipe. Because a
+  // manual bake now proceeds on the Unlocked broker session plus this explicit
+  // confirmation alone (there is NO per-operation identity ceremony), readiness
+  // is re-read here, immediately before the confirmation modal may open. If the
+  // recipe is not currently Bake-ready, the modal does NOT open: the readiness
+  // inspector shows the specific blockers instead, and no cook-start request is
+  // ever issued. This keeps a keyless/invalid recipe from ever reaching a
+  // confirmable Bake state, and prevents a stale "ready" badge from opening an
+  // invalid confirmation.
   function handleBakeClick() {
-    if (!selectedId || detailPhase !== 'loaded') {
+    if (!selectedId || detailPhase !== 'loaded' || !detail) {
       return;
     }
+    const recipe = detail;
     setBakeError(null);
-    setBakeConfirmOpen(true);
+    void (async () => {
+      setReadinessPhase('loading');
+      setReadinessError(null);
+      const res = await getRecipeReadiness(recipe);
+      if (!(res.ok && res.data)) {
+        setReadinessPhase('error');
+        setReadinessError(
+          res.networkError
+            ? 'Could not reach PAX Cookbook. Make sure it is running, then try again.'
+            : 'PAX Cookbook could not complete the readiness check.',
+        );
+        return;
+      }
+      setReadiness(res.data);
+      setReadinessPhase('loaded');
+      if (!isReadinessBakeConfirmable(res.data)) {
+        // Not Bake-ready — the readiness inspector above now shows the specific
+        // blockers. Do NOT open the confirmation modal and issue no cook-start.
+        return;
+      }
+      setBakeConfirmOpen(true);
+    })();
   }
 
   function handleBakeCancel() {
@@ -657,14 +680,15 @@ export function RecipesWorkspace() {
     setBakeError(null);
   }
 
-  // Start the bake through the single sanctioned channel. `allowReauth` is true
-  // on the first attempt; on a broker reAuthRequired it runs the browser-owned
-  // Windows Hello ceremony and retries EXACTLY ONCE with `allowReauth = false`,
-  // so there is no retry loop. A started bake (201) is reported only from the
-  // broker's own cookId, which is handed to the Bakes page to focus. This is
-  // the same startCook helper and the same step-up the editor uses; there is no
-  // second execution channel.
-  async function runBake(allowReauth: boolean): Promise<void> {
+  // Start the bake through the single sanctioned channel. A manual bake is
+  // authorized by the Unlocked broker session plus this explicit confirmation —
+  // there is NO per-operation identity ceremony. A started bake (201) is reported
+  // only from the broker's own cookId, which is handed to the Bakes page to
+  // focus. If the broker is Locked, startCook returns the bounded 'locked'
+  // outcome; its message asks the operator to unlock and bake again. Nothing is
+  // retried automatically — the operator must unlock, then click Confirm Bake
+  // again for a fresh, explicit start.
+  async function runBake(): Promise<void> {
     if (!selectedId) {
       return;
     }
@@ -679,18 +703,6 @@ export function RecipesWorkspace() {
         requestShellSection('bakes');
         return;
       }
-      if (
-        (outcome.kind === 'reauthRequired' || outcome.kind === 'locked') &&
-        allowReauth
-      ) {
-        const reauth = await reauthManualCook(selectedId);
-        if (reauth.ok) {
-          await runBake(false);
-          return;
-        }
-        setBakeError(describeReauthFailure(reauth));
-        return;
-      }
       setBakeError(describeStartCookFailure(outcome));
     } finally {
       setBakeSubmitting(false);
@@ -701,7 +713,14 @@ export function RecipesWorkspace() {
     if (bakeSubmitting || !selectedId) {
       return;
     }
-    void runBake(true);
+    // Confirm Bake independently requires a currently-valid readiness result.
+    // If readiness changed since the modal opened (or a stale badge lingered),
+    // do not start — the modal's disabled Confirm and not-ready note already
+    // reflect this.
+    if (!isReadinessBakeConfirmable(readiness)) {
+      return;
+    }
+    void runBake();
   }
 
   // Open the resume modal. Resume recovers an interrupted PAX run from its
@@ -721,17 +740,19 @@ export function RecipesWorkspace() {
   }
 
   // Start the resume through the broker's single sanctioned cook core, mirroring
-  // runBake. `allowReauth` is true on the first attempt; on a broker
-  // reAuthRequired it runs the browser-owned Windows Hello ceremony — keyed to
-  // the resume sentinel id, the same step-up a manual bake uses — and retries
-  // EXACTLY ONCE with `allowReauth = false`, so there is no retry loop. A
+  // runBake. A resume is authorized by the Unlocked broker session plus this
+  // explicit confirmation — there is NO per-operation identity ceremony. A
   // started run (201) is reported only from the broker's own cookId, which is
-  // handed to the Bakes page to focus; nothing is ever fabricated. The body
-  // carries no secret and no script path.
-  async function runResume(
-    input: { checkpointPath: string; force: boolean; chefKeyId: string | null },
-    allowReauth: boolean,
-  ): Promise<void> {
+  // handed to the Bakes page to focus; nothing is ever fabricated. If the broker
+  // is Locked, resumeCook returns the bounded 'locked' outcome; its message asks
+  // the operator to unlock and resume again. Nothing is retried automatically —
+  // the operator must unlock, then confirm resume again for a fresh, explicit
+  // start. The body carries no secret and no script path.
+  async function runResume(input: {
+    checkpointPath: string;
+    force: boolean;
+    chefKeyId: string | null;
+  }): Promise<void> {
     setResumeSubmitting(true);
     setResumeError(null);
     try {
@@ -748,18 +769,6 @@ export function RecipesWorkspace() {
         requestShellSection('bakes');
         return;
       }
-      if (
-        (outcome.kind === 'reauthRequired' || outcome.kind === 'locked') &&
-        allowReauth
-      ) {
-        const reauth = await reauthManualCook('__resume__');
-        if (reauth.ok) {
-          await runResume(input, false);
-          return;
-        }
-        setResumeError(describeReauthFailure(reauth));
-        return;
-      }
       setResumeError(describeResumeCookFailure(outcome));
     } finally {
       setResumeSubmitting(false);
@@ -774,7 +783,7 @@ export function RecipesWorkspace() {
     if (resumeSubmitting) {
       return;
     }
-    void runResume(input, true);
+    void runResume(input);
   }
 
   // Open the delete confirmation modal for the selected saved recipe. The gate
@@ -1346,6 +1355,8 @@ export function RecipesWorkspace() {
             destinationSummary={bakeSummaries.destinationSummary}
             commandSummary={bakeSummaries.commandSummary}
             submitting={bakeSubmitting}
+            confirmDisabled={!isReadinessBakeConfirmable(readiness)}
+            notReadyMessage={'This recipe is no longer ready to bake. Review the readiness details, resolve the blockers, then try again.'}
             error={bakeError}
             onCancel={handleBakeCancel}
             onConfirm={handleConfirmBake}
@@ -1372,8 +1383,7 @@ export function RecipesWorkspace() {
         </div>
       )}
 
-      {deleteConfirmOpen && (
-        <div className="mini-kitchen-page">
+      {deleteConfirmOpen && (        <div className="mini-kitchen-page">
           <DeleteRecipeConfirmModal
             recipeName={deleteRecipeName}
             scheduled={isScheduledForSelected}

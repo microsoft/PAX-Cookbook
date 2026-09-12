@@ -3467,11 +3467,96 @@
   gap: var(--sp-2);
 }
 
+/* Nested SUB-dropdowns ("For your IT team", "Organization setup details").
+   These are children of the "Sign-in method" section, not peers of it / of
+   About / Help, so they get a distinct subordinate treatment: the whole nested
+   <details> is indented and carries a connecting nesting rail on the left, and
+   its summary uses a small sentence-case sub-heading with a LEFT tree-style
+   expander triangle (▸ collapsed, ▾ open) — never the parent's uppercase head
+   or far-right chevron. Compose with .dvw-settings__collapse in markup so the
+   block layout + body margins are inherited; this rule only adds the indent,
+   rail, and sub treatment. A deeper nested subcollapse compounds the indent and
+   rail, showing the third level. */
+.dvw-settings__subcollapse {
+  margin-left: var(--sp-5);
+  padding-left: var(--sp-4);
+  border-left: 2px solid var(--c-border);
+}
+.dvw-settings__subcollapse-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  list-style: none;
+  padding: var(--sp-1) 0;
+}
+.dvw-settings__subcollapse-summary::-webkit-details-marker {
+  display: none;
+}
+/* LEFT tree-style expander, before the label (distinct from the parent's
+   far-right ::after chevron). Points right (▸) when collapsed, down (▾) when
+   open. */
+.dvw-settings__subcollapse-summary::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--c-muted, #64748b);
+  border-bottom: 2px solid var(--c-muted, #64748b);
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.dvw-settings__subcollapse[open] > .dvw-settings__subcollapse-summary::before {
+  transform: rotate(45deg);
+}
+/* De-emphasized SUB heading: sentence case, smaller and lighter than the
+   uppercase parent section heads, so the nested dropdowns read as children. */
+.dvw-settings__subcollapse-summary .dvw-keys__section-head,
+.dvw-settings__subcollapse-summary .dvw-settings__head-title {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--c-muted);
+}
+.dvw-settings__subcollapse-summary:hover {
+  color: var(--c-ink-strong, #0f172a);
+}
+
 /* Chef's Keys page intro blurb. */
 .dvw-keys__intro {
   margin: 0 0 var(--sp-4);
   max-width: 72ch;
   font-size: var(--fs-14, 14px);
+  line-height: 1.5;
+  color: var(--c-muted, #475569);
+}
+
+/* Read-only organization-managed key status + certificate readiness summary.
+   Tabular figures and a reserved minimum height keep a changing count from
+   shifting the surrounding layout. */
+.dvw-keys__orgstatus {
+  margin: 0 0 var(--sp-4);
+  max-width: 72ch;
+  min-height: var(--sp-6);
+  font-variant-numeric: tabular-nums;
+}
+.dvw-keys__orgstatus-line {
+  margin: 0;
+  font-size: var(--fs-14, 14px);
+  line-height: 1.5;
+  color: var(--c-ink-strong, #0f172a);
+}
+.dvw-keys__orgstatus-note {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-13, 13px);
+  line-height: 1.5;
+  color: var(--c-muted, #475569);
+}
+.dvw-keys__orgstatus-reasons {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-5);
+  font-size: var(--fs-13, 13px);
   line-height: 1.5;
   color: var(--c-muted, #475569);
 }
@@ -3608,4 +3693,106 @@
   .dvw-keys__cols {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---- Sign-in method surface (Settings) -----------------------------------
+   The everyday "Sign-in method" section: each method is a row with a title,
+   a plain-language description, a "Current method" chip on the active one, and
+   a single action on the inactive one. Token-only; no raw controls. */
+.signin-methods {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.signin-method {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--c-border, #e2e8f0);
+}
+
+.signin-method:last-child {
+  border-bottom: 0;
+}
+
+.signin-method__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.signin-method__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.signin-method__title {
+  font-size: var(--fs-15, 15px);
+  font-weight: 700;
+  color: var(--c-ink-strong);
+}
+
+.signin-method__desc {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--c-muted);
+  line-height: var(--lh-base);
+  max-width: 60ch;
+}
+
+.signin-method__action {
+  flex: 0 0 auto;
+  margin-top: var(--sp-3);
+}
+
+/* Inline dialog panels used only inside the collapsed "For your IT team" area. */
+.dvw-settings__inline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--c-border, #e2e8f0);
+  border-radius: var(--r-md, 8px);
+  background: var(--c-surface-muted, #f8fafc);
+}
+
+.dvw-settings__kv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.dvw-settings__kv > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dvw-settings__kv dt {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--c-muted);
+}
+
+.dvw-settings__kv dd {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--c-ink);
+  word-break: break-all;
+}
+
+.dvw-settings__confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--fs-14);
+  color: var(--c-ink);
 }

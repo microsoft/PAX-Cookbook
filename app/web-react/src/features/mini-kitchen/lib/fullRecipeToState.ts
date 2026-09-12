@@ -284,6 +284,12 @@ export function fullRecipeToState(recipe: unknown): FullRecipeOpenResult {
   const chefKeyId = asString(auth.chefKeyId);
   if (chefKeyId) {
     state.auth.chefKeyId = chefKeyId;
+  } else {
+    // Opaque organization reference only, and only when no personal key is set.
+    const organizationKeyId = asString(auth.organizationKeyId);
+    if (organizationKeyId) {
+      state.auth.organizationKeyId = organizationKeyId;
+    }
   }
 
   // ---- Advanced ----

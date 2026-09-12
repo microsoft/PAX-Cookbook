@@ -5,6 +5,15 @@
     <IsTestProject>true</IsTestProject>
     <RootNamespace>PAXCookbookSetup.Tests</RootNamespace>
   </PropertyGroup>
+  <!-- Mirror of the Setup activation boundary. The provisioning executor +
+       adapters in PAXCookbookSetup are gated behind MANAGED_INVENTORY_PROVISIONING.
+       To exercise them the test project must be built with the SAME gate so the
+       referenced Setup assembly exposes the gated internals; the executor/failpoint
+       tests are themselves compiled only under the gate. A default test build
+       compiles just the always-on contract tests. -->
+  <PropertyGroup Condition="'$(ManagedInventoryProvisioning)' == 'true'">
+    <DefineConstants>$(DefineConstants);MANAGED_INVENTORY_PROVISIONING</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
     <PackageReference Include="xunit" Version="2.9.0" />

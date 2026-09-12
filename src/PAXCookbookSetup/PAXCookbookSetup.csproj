@@ -18,15 +18,79 @@
     <ApplicationIcon>..\..\app\web\images\pax-cookbook-app-icon.ico</ApplicationIcon>
     <!--
       Distribution channel stamped at build time by tools\release\Build-Setup.ps1
-      via -p:PaxChannel=<stable|experimental>. Defaults to 'stable' so a plain
+      via -p:PaxChannel=<stable|experimental|internal>. Defaults to 'stable' so a plain
       build (and every test build of this project) is a stable installer. The
-      wizard reads this back through AssemblyMetadata to show the "(Experimental)"
-      marker on pre-release installers.
+      wizard reads this back through AssemblyMetadata. Only exact experimental
+      metadata enables pre-release chrome; internal stays fail-closed.
     -->
     <PaxChannel Condition="'$(PaxChannel)' == ''">stable</PaxChannel>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="PaxChannel" Value="$(PaxChannel)" />
+  </ItemGroup>
+  <!-- Test-isolation activation boundary (mirrors the App). OFF by default:
+       a stable/customer Setup build defines no PAXCOOKBOOK_TEST_ISOLATION
+       constant, so the apply-update / install-root isolation invariant that
+       honors a test-isolation descriptor is compiled out. A test harness opts
+       in with /p:TestIsolation=true. The contract/validator (via the Shared
+       project reference) always compiles; only ACTIVATION is gated. -->
+  <PropertyGroup Condition="'$(TestIsolation)' == 'true'">
+    <DefineConstants>$(DefineConstants);PAXCOOKBOOK_TEST_ISOLATION</DefineConstants>
+  </PropertyGroup>
+  <!-- Cycle-8 managed-inventory provisioning activation boundary. OFF by default:
+       a stable/customer Setup build defines no MANAGED_INVENTORY_PROVISIONING
+       constant, so the elevated provisioning verb is NOT registered in dispatch
+       and is rejected as an unknown verb (UsageError) before any machine access.
+       The amended Cycle-7 contract (via the Shared project reference) ALWAYS
+       compiles and is always tested; only the Setup EXECUTOR + verb ACTIVATION
+       are gated. A test harness opts in with /p:ManagedInventoryProvisioning=true.
+       This cycle wires NO live execution, NO UAC, and NO real ProgramData/ACL
+       mutation; the executor is exercised only by tests with injected/OS-temp
+       adapters. -->
+  <PropertyGroup Condition="'$(ManagedInventoryProvisioning)' == 'true'">
+    <DefineConstants>$(DefineConstants);MANAGED_INVENTORY_PROVISIONING</DefineConstants>
+  </PropertyGroup>
+  <!-- Cycle-62 service-enablement signing boundary. It is the SAME compile-time
+       opt-in the service admin helper already uses, mirrored here because the
+       NON-ELEVATED coordinator must refuse before it ever requests elevation.
+       OFF by default: a stable/customer Setup build defines no
+       PAXCOOKBOOK_PRERELEASE_UNSIGNED_HELPER constant, so the configured signing
+       policy resolves to SigningPolicyUnavailable and service-enable is
+       permanently refusing. There is deliberately NO environment variable, NO
+       command-line argument, NO registry value and NO configuration file that
+       can grant it - only /p:PrereleaseUnsignedHelper=true at compile time. -->
+  <PropertyGroup Condition="'$(PrereleaseUnsignedHelper)' == 'true'">
+    <DefineConstants>$(DefineConstants);PAXCOOKBOOK_PRERELEASE_UNSIGNED_HELPER</DefineConstants>
+  </PropertyGroup>
+  <!-- ONE signing-policy source, two assemblies. The policy is a pure
+       compile-time decision function: it opens no certificate store, reads no
+       chain, contacts no revocation endpoint and elevates nothing. Linking the
+       file is what stops the coordinator and the helper drifting into two
+       different answers to "may this build enable a service at all". -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.ServiceAdminHelper\Signing\ServiceHelperSigningPolicy.cs"
+             Link="Linked\Signing\ServiceHelperSigningPolicy.cs" />
+  </ItemGroup>
+  <!-- ONE Recipe validator, two assemblies. Setup links the SAME canonical
+       parser + semantic gate source the App compiles, so a certificate Recipe is
+       accepted or refused identically on both sides with no second
+       implementation to drift. These files are shared SOURCE (namespace
+       PAXCookbook.App); Shared itself excludes them from its own compile, so
+       nothing here adds an App project reference or an ASP.NET dependency. The
+       ASP.NET-only JsonModel.ReadBodyAsync stays in the App and is deliberately
+       NOT linked. -->
+  <ItemGroup>
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\JsonModel.cs"
+             Link="Linked\AppSharedSource\JsonModel.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\RecipeValidationModel.cs"
+             Link="Linked\AppSharedSource\RecipeValidationModel.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\PaxAdapter.Validation.cs"
+             Link="Linked\AppSharedSource\PaxAdapter.Validation.cs" />
+    <Compile Include="..\PAXCookbook.Shared\Contracts\AppSharedSource\OrganizationKeyIdentifierPattern.cs"
+             Link="Linked\AppSharedSource\OrganizationKeyIdentifierPattern.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="PAXCookbookSetup.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PAXCookbook.Shared\PAXCookbook.Shared.csproj" />
@@ -40,6 +104,7 @@
     <EmbeddedResource Include="Assets\logo-horizontal.png" LogicalName="PAXCookbookSetup.Assets.logo-horizontal.png" />
     <EmbeddedResource Include="Assets\app-icon.png" LogicalName="PAXCookbookSetup.Assets.app-icon.png" />
     <EmbeddedResource Include="Assets\microsoft-open-source-logo.png" LogicalName="PAXCookbookSetup.Assets.microsoft-open-source-logo.png" />
+    <EmbeddedResource Include="..\..\tools\entra\New-PaxCookbookEntraWamSetup.ps1" LogicalName="PAXCookbookSetup.Entra.New-PaxCookbookEntraWamSetup.ps1" />
   </ItemGroup>
   <!--
     Phase 11 single-EXE payload bundle.

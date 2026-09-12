@@ -18,10 +18,10 @@
  *    the browser (no network, no broker).
  *  - Bake (run) is the single execution path. It is gated behind a saved,
  *    unchanged, ready recipe and an explicit confirmation; confirming calls the
- *    one startCook bridge helper (POST /api/v1/recipes/{id}/cook) and, when the
- *    broker asks for a Windows Hello step-up, runs the browser-owned reauth
- *    ceremony and retries exactly once. The browser never spawns PAX and never
- *    fabricates a cook record — success routes to the Bakes page.
+ *    one startCook bridge helper (POST /api/v1/recipes/{id}/cook). A manual bake
+ *    is authorized by the Unlocked broker session plus that confirmation — there
+ *    is NO per-operation identity ceremony. The browser never spawns PAX and
+ *    never fabricates a cook record — success routes to the Bakes page.
  *
  * Boundaries (intentional, unchanged):
  *  - Taste Test / Schedule remain disabled and unwired. Nothing here schedules
@@ -57,10 +57,6 @@ import type {
   RecipeReadinessBody,
   RecipeSummary,
 } from '../../host/brokerBridge';
-import {
-  reauthManualCook,
-  describeReauthFailure,
-} from '../../host/manualCookReauth';
 import { rememberPendingBakeSelect, requestShellSection } from '../../shell/shellNav';
 import { setNavigationGuard, type NavIntent } from '../../shell/navigationGuard';
 import { subscribePendingImport, takePendingImport } from '../../host/importHandoff';
@@ -123,7 +119,7 @@ import { BakeConfirmModal } from './components/BakeConfirmModal';
 import { DiscardConfirmModal } from './components/DiscardConfirmModal';
 import { NavGuardModal } from './components/NavGuardModal';
 import { OpenRecipeConfirmModal } from './components/OpenRecipeConfirmModal';
-import { computeBakeBlockReason } from './lib/bakeGate';
+import { computeBakeBlockReason, isReadinessBakeConfirmable } from './lib/bakeGate';
 import './mini-kitchen.css';
 
 const PRESET_LABELS: Record<PresetId, string> = {
@@ -1088,14 +1084,47 @@ export function MiniKitchenBuilderPreview({
     });
   }
 
-  // Open the confirmation modal. The gate is re-evaluated here so a stale click
-  // can never open the modal for a recipe that is no longer bakeable.
+  // Open the confirmation modal. The fast gate is re-evaluated here so a stale
+  // click can never open the modal for a recipe that is no longer bakeable, and
+  // then FRESH readiness is fetched immediately before the modal may open. If
+  // the recipe is not currently Bake-ready the modal does NOT open — the
+  // readiness panel shows the specific blockers instead and no cook-start is
+  // issued. A keyless/invalid recipe can never reach a confirmable Bake state.
   function handleBakeClick() {
     if (deriveBakeBlockReason() !== null) {
       return;
     }
+    if (!createBuild.body) {
+      return;
+    }
+    const body = createBuild.body;
     setBakeError(null);
-    setBakeConfirmOpen(true);
+    void (async () => {
+      setReadinessPhase('loading');
+      setReadiness(null);
+      setReadinessError(null);
+      const result = await getRecipeReadiness(body);
+      if (!(result.ok && result.data)) {
+        setReadinessPhase('error');
+        setReadiness(null);
+        setReadinessError(
+          result.networkError
+            ? 'Could not reach PAX Cookbook. Make sure it is running, then try again.'
+            : 'PAX Cookbook could not check readiness for this recipe. Try again in a moment.',
+        );
+        scrollReadinessIntoView();
+        return;
+      }
+      setReadiness(result.data);
+      setReadinessPhase('loaded');
+      if (!isReadinessBakeConfirmable(result.data)) {
+        // Not Bake-ready — the readiness panel shows the blockers. Do NOT open
+        // the confirmation modal and issue no cook-start.
+        scrollReadinessIntoView();
+        return;
+      }
+      setBakeConfirmOpen(true);
+    })();
   }
 
   function handleBakeCancel() {
@@ -1106,15 +1135,14 @@ export function MiniKitchenBuilderPreview({
     setBakeError(null);
   }
 
-  // Start the bake. `allowReauth` is true on the first attempt; on a broker
-  // `reAuthRequired` (401) OR a `Locked` (423) it runs the browser-owned
-  // Windows Hello step-up and retries EXACTLY ONCE with `allowReauth = false`,
-  // so there is no retry loop. The step-up is the same single ceremony in both
-  // cases: a verified assertion authorizes the cook AND lifts/refreshes the
-  // session lock on the broker, so a timed-out session never dead-ends the bake
-  // with a "locked" error — one Windows Hello prompt covers both. A started bake
-  // (201) is reported only from the broker's own cookId, handed to Bakes.
-  async function runBake(allowReauth: boolean): Promise<void> {
+  // Start the bake. A manual bake is authorized by the Unlocked broker session
+  // plus this explicit confirmation — there is NO per-operation identity
+  // ceremony. A started bake (201) is reported only from the broker's own
+  // cookId, handed to Bakes. If the broker is Locked, startCook returns the
+  // bounded 'locked' outcome; its message asks the operator to unlock and bake
+  // again. Nothing is retried automatically — the operator must unlock, then
+  // click Confirm Bake again for a fresh, explicit start.
+  async function runBake(): Promise<void> {
     if (!savedRecipeId) {
       return;
     }
@@ -1133,18 +1161,6 @@ export function MiniKitchenBuilderPreview({
         requestShellSection('bakes');
         return;
       }
-      if (
-        (outcome.kind === 'reauthRequired' || outcome.kind === 'locked') &&
-        allowReauth
-      ) {
-        const reauth = await reauthManualCook(savedRecipeId);
-        if (reauth.ok) {
-          await runBake(false);
-          return;
-        }
-        setBakeError(describeReauthFailure(reauth));
-        return;
-      }
       setBakeError(describeStartCookFailure(outcome));
     } finally {
       setBakeSubmitting(false);
@@ -1155,7 +1171,13 @@ export function MiniKitchenBuilderPreview({
     if (bakeSubmitting || savedRecipeId === null) {
       return;
     }
-    void runBake(true);
+    // Confirm Bake independently requires a currently-valid readiness result.
+    // If readiness changed since the modal opened, do not start — the modal's
+    // disabled Confirm and not-ready note already reflect this.
+    if (!isReadinessBakeConfirmable(readiness)) {
+      return;
+    }
+    void runBake();
   }
 
   // Issue 2: the full Cookbook app's primary export writes the complete,
@@ -2522,6 +2544,8 @@ export function MiniKitchenBuilderPreview({
           destinationSummary={bakeDestinationSummary}
           commandSummary={bakeCommandSummary}
           submitting={bakeSubmitting}
+          confirmDisabled={!isReadinessBakeConfirmable(readiness)}
+          notReadyMessage={'This recipe is no longer ready to bake. Review the readiness details, resolve the blockers, then try again.'}
           error={bakeError}
           onCancel={handleBakeCancel}
           onConfirm={handleConfirmBake}

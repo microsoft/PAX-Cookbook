@@ -67,7 +67,10 @@ internal sealed record ApprovedEngineEntry(
     string Status,
     string MinCookbookVersion,
     string MaxCookbookVersion,
-    string? ReleaseNotesUrl);
+    string? ReleaseNotesUrl,
+    // Cycle 15. Validated engine capability tokens. Schema-v1 entries have no
+    // capability field at all and therefore always get an EMPTY list.
+    IReadOnlyList<string> Capabilities);
 
 internal sealed record ManifestValidationResult
 {
@@ -111,18 +114,42 @@ internal static class ManifestSchemaValidator
         "releaseNotesUrl",
     };
 
+    // Cycle 15. Schema v2 adds exactly one entry key. Because the v1 allow-list
+    // above is CLOSED and untouched, a v1 entry carrying "capabilities" is
+    // rejected as unknown_field by the existing rule — that IS the mechanism
+    // enforcing "schema v1 implies no capability". There is no special case.
+    private static readonly HashSet<string> AllowedEntryKeysV2 =
+        new(AllowedEntryKeys, StringComparer.Ordinal) { CapabilitiesKey };
+
+    private const string CapabilitiesKey = "capabilities";
+
     private static readonly string[] RequiredEntryKeys = new[]
     {
         "name", "version", "sha256", "downloadUrl", "status",
         "minCookbookVersion", "maxCookbookVersion",
     };
 
+    private static readonly string[] RequiredEntryKeysV2 = new[]
+    {
+        "name", "version", "sha256", "downloadUrl", "status",
+        "minCookbookVersion", "maxCookbookVersion", CapabilitiesKey,
+    };
+
+    // The CLOSED recognized capability set. Exactly one member this cycle.
+    internal const string OrganizationCertificateSha256SelectorV1 =
+        "organization_certificate_sha256_selector_v1";
+
+    internal static readonly IReadOnlySet<string> RecognizedCapabilities =
+        new HashSet<string>(StringComparer.Ordinal) { OrganizationCertificateSha256SelectorV1 };
+
+    internal const int MaxCapabilitiesPerEntry = 8;
+
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.Ordinal)
     {
         "approved", "deprecated", "withdrawn",
     };
 
-    private static readonly int[] SupportedSchemaVersions = new[] { 1 };
+    private static readonly int[] SupportedSchemaVersions = new[] { 1, 2 };
 
     internal static ManifestValidationResult Validate(JsonElement root)
         => Validate(root, allowLoopbackHttpDownloadUrl: false);
@@ -231,6 +258,10 @@ internal static class ManifestSchemaValidator
             };
         }
 
+        bool schemaV2 = schemaVer >= 2;
+        HashSet<string> allowedEntryKeys = schemaV2 ? AllowedEntryKeysV2 : AllowedEntryKeys;
+        string[] requiredEntryKeys = schemaV2 ? RequiredEntryKeysV2 : RequiredEntryKeys;
+
         List<ApprovedEngineEntry> entries = new();
         int idx = -1;
         foreach (JsonElement entryEl in scriptsEl.EnumerateArray())
@@ -247,7 +278,7 @@ internal static class ManifestSchemaValidator
 
             foreach (JsonProperty p in entryEl.EnumerateObject())
             {
-                if (!AllowedEntryKeys.Contains(p.Name))
+                if (!allowedEntryKeys.Contains(p.Name))
                 {
                     return new ManifestValidationResult
                     {
@@ -257,7 +288,7 @@ internal static class ManifestSchemaValidator
                 }
             }
 
-            foreach (string req in RequiredEntryKeys)
+            foreach (string req in requiredEntryKeys)
             {
                 if (!entryEl.TryGetProperty(req, out _))
                 {
@@ -333,6 +364,15 @@ internal static class ManifestSchemaValidator
                 }
             }
 
+            IReadOnlyList<string> capabilities = Array.Empty<string>();
+            if (schemaV2)
+            {
+                (ManifestValidationResult? capFailure, IReadOnlyList<string> parsed) =
+                    ValidateCapabilities(entryEl, idx);
+                if (capFailure is not null) { return capFailure; }
+                capabilities = parsed;
+            }
+
             entries.Add(new ApprovedEngineEntry(
                 Name: entryName!,
                 Version: entryVersion!,
@@ -341,7 +381,8 @@ internal static class ManifestSchemaValidator
                 Status: status,
                 MinCookbookVersion: minVer!,
                 MaxCookbookVersion: maxVer!,
-                ReleaseNotesUrl: releaseNotesUrl));
+                ReleaseNotesUrl: releaseNotesUrl,
+                Capabilities: capabilities));
         }
 
         return new ManifestValidationResult
@@ -354,6 +395,74 @@ internal static class ManifestSchemaValidator
             SigningKeyId = signingKeyId,
             Entries = entries,
         };
+    }
+
+    // Cycle 15. Closed, fail-closed capability validation for schema v2. Every
+    // failure is a HARD reject with a bounded error code; an EMPTY array is
+    // valid and means "this engine declares no capability".
+    private static (ManifestValidationResult? Failure, IReadOnlyList<string> Capabilities)
+        ValidateCapabilities(JsonElement entryEl, int idx)
+    {
+        JsonElement capEl = entryEl.GetProperty(CapabilitiesKey);
+        if (capEl.ValueKind != JsonValueKind.Array)
+        {
+            return (new ManifestValidationResult
+            {
+                Ok = false, Error = "type_mismatch",
+                Message = "scripts[" + idx + "].capabilities must be an array.",
+            }, Array.Empty<string>());
+        }
+
+        List<string> tokens = new();
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (JsonElement element in capEl.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String)
+            {
+                return (new ManifestValidationResult
+                {
+                    Ok = false, Error = "type_mismatch",
+                    Message = "scripts[" + idx + "].capabilities entries must be non-empty strings.",
+                }, Array.Empty<string>());
+            }
+            string? token = element.GetString();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return (new ManifestValidationResult
+                {
+                    Ok = false, Error = "type_mismatch",
+                    Message = "scripts[" + idx + "].capabilities entries must be non-empty strings.",
+                }, Array.Empty<string>());
+            }
+            if (tokens.Count >= MaxCapabilitiesPerEntry)
+            {
+                return (new ManifestValidationResult
+                {
+                    Ok = false, Error = "capability_limit_exceeded",
+                    Message = "scripts[" + idx + "].capabilities may declare at most " +
+                        MaxCapabilitiesPerEntry + " tokens.",
+                }, Array.Empty<string>());
+            }
+            if (!RecognizedCapabilities.Contains(token))
+            {
+                return (new ManifestValidationResult
+                {
+                    Ok = false, Error = "unknown_capability",
+                    Message = "scripts[" + idx + "].capabilities contains an unrecognized token.",
+                }, Array.Empty<string>());
+            }
+            if (!seen.Add(token))
+            {
+                return (new ManifestValidationResult
+                {
+                    Ok = false, Error = "duplicate_capability",
+                    Message = "scripts[" + idx + "].capabilities contains a duplicate token.",
+                }, Array.Empty<string>());
+            }
+            tokens.Add(token);
+        }
+
+        return (null, tokens);
     }
 
     private static ManifestValidationResult MissingField(string name) => new()
@@ -418,11 +527,15 @@ internal static class ManifestSelector
 {
     // Oracle Select-CompatibleEngineEntry parity: approved-only selection,
     // version range gating, highest version among approved candidates wins.
+    // requiredCapability is Cycle 15 and OPTIONAL: null reproduces the previous
+    // behavior exactly, so every existing call site is unchanged. When non-null,
+    // an entry is a candidate only if it ALSO declares that capability token.
     internal static (ApprovedEngineEntry? Entry, string? Error, string? Message, int Evaluated) Select(
         IReadOnlyList<ApprovedEngineEntry> entries,
         string cookbookVersion,
         string? targetVersion,
-        string? targetSha256)
+        string? targetSha256,
+        string? requiredCapability = null)
     {
         if (!Version.TryParse(cookbookVersion, out Version? cookbookVer))
         {
@@ -440,6 +553,12 @@ internal static class ManifestSelector
         {
             evaluated++;
             if (entry.Status != "approved") { continue; }
+
+            if (requiredCapability is not null &&
+                !entry.Capabilities.Contains(requiredCapability, StringComparer.Ordinal))
+            {
+                continue;
+            }
 
             if (!string.IsNullOrWhiteSpace(targetVersion) && entry.Version != targetVersion)
             {

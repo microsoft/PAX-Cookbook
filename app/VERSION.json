@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "channel": "stable",
+  "channel": "experimental",
   "minimumCompatibleManifestSchema": 1,
   "cookbook": {
-    "version": "2.0.0",
+    "version": "2.0.0-exp.5",
     "releaseTimestamp": "2026-07-06T00:00:00Z",
     "installedAt": null,
     "signedHash": null
@@ -19,5 +19,5 @@
     "engineManifestTrustAnchorThumbprint": null,
     "manifestSignaturePolicy": "required"
   },
-  "updateManifestUrl": null
+  "updateManifestUrl": "https://github.com/microsoft/PAX-Cookbook/releases/download/v2.0.0-exp.5/versions.json"
 }

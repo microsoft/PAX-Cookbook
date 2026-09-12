@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography.X509Certificates;
+using PAXCookbook.Shared.Contracts;
 
 namespace PAXCookbook.App;
 
@@ -16,8 +17,9 @@ namespace PAXCookbook.App;
 //   WebLogin          metadata: upn (+ optional tenantId), displayName. No secret.
 //   DeviceCode        metadata: upn (+ optional tenantId), displayName. No secret.
 //   AppReg-Certificate metadata: tenantId, clientId, certThumbprint, displayName.
-//                     The certificate + private key live in CurrentUser\My; the
-//                     Chef's Key holds ONLY the thumbprint reference.
+//                     The certificate lives in a Personal store (Current User or
+//                     Local Machine); the Chef's Key holds ONLY the thumbprint
+//                     reference and never records which store it came from.
 //   AppReg-Secret     metadata: tenantId, clientId, displayName; secret: clientSecret.
 //
 // Constraint 14 (secrets never leak) is enforced structurally: the list / detail
@@ -56,7 +58,12 @@ internal static class ChefKeyModel
     // ---------------------------------------------------------------------
     // GET /api/v1/chef-keys -- list (metadata only; secrets never included)
     // ---------------------------------------------------------------------
-    public static (int Status, object Body) List()
+    // The personal `chefKeys` array is unchanged. An additive, read-only
+    // `organizationKeys` status object reports whether machine policy AUTHORIZES
+    // a FUTURE organization-provided inventory. It is authorization/status only:
+    // it enumerates no key, exposes no identifier or secret, and never asserts
+    // availability (inventoryLoaded is always false).
+    public static (int Status, object Body) List(ManagedChefKeysGateProjection organizationKeys)
     {
         IReadOnlyList<WindowsCredentialStore.CredentialRecord> records =
             WindowsCredentialStore.Enumerate(TargetPrefix + "*");
@@ -75,7 +82,199 @@ internal static class ChefKeyModel
         // Stable, display-friendly ordering by displayName then id.
         items.Sort((a, b) => string.Compare(ItemSortKey(a), ItemSortKey(b), StringComparison.OrdinalIgnoreCase));
 
-        return (200, new { chefKeys = items });
+        return (200, new
+        {
+            chefKeys = items,
+            organizationKeys = new
+            {
+                state = organizationKeys.WireState,
+                reason = organizationKeys.WireReason,
+                readOnly = true,
+                certificateOnly = true,
+                inventoryLoaded = false,
+            },
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // GET /api/v1/chef-keys -- list (organization INVENTORY projection overload)
+    // ---------------------------------------------------------------------
+    // The organization status flows from the read-only inventory evaluator
+    // (Cycle-4 gate + read-only ProgramData source + bounded parser). The wire
+    // object surfaces the REAL projection: the bounded state/reason tokens, the
+    // constant read-only / certificate-only markers, the real
+    // `inventoryLoaded` flag (true ONLY for authorized_provisioned), and a
+    // non-negative `entryCount` present ONLY in the provisioned state (omitted
+    // entirely otherwise -- never emitted as 0/null). It still emits NO
+    // organization identifier, display name, tenant/client reference,
+    // certificate reference, path, ACL, reason detail, or raw source. The
+    // personal `chefKeys` array is unchanged and independent.
+    public static (int Status, object Body) List(OrganizationInventoryProjection organizationInventory)
+    {
+        IReadOnlyList<WindowsCredentialStore.CredentialRecord> records =
+            WindowsCredentialStore.Enumerate(TargetPrefix + "*");
+
+        var items = new List<object>();
+        foreach (WindowsCredentialStore.CredentialRecord rec in records)
+        {
+            if (!rec.TargetName.StartsWith(TargetPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            string id = rec.TargetName.Substring(TargetPrefix.Length);
+            items.Add(BuildItem(id, rec.UserName, rec.HasSecret));
+        }
+
+        // Stable, display-friendly ordering by displayName then id.
+        items.Sort((a, b) => string.Compare(ItemSortKey(a), ItemSortKey(b), StringComparison.OrdinalIgnoreCase));
+
+        // `entryCount` is present ONLY when the inventory is provisioned; in every
+        // other bounded state the property is OMITTED entirely (not 0/null).
+        object organizationKeys = organizationInventory.InventoryLoaded
+            ? new
+            {
+                state = organizationInventory.WireState,
+                reason = organizationInventory.WireReason,
+                readOnly = true,
+                certificateOnly = true,
+                inventoryLoaded = organizationInventory.InventoryLoaded,
+                entryCount = organizationInventory.EntryCount,
+            }
+            : new
+            {
+                state = organizationInventory.WireState,
+                reason = organizationInventory.WireReason,
+                readOnly = true,
+                certificateOnly = true,
+                inventoryLoaded = organizationInventory.InventoryLoaded,
+            };
+
+        return (200, new
+        {
+            chefKeys = items,
+            organizationKeys,
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // GET /api/v1/chef-keys -- list (inventory projection + certificate AGGREGATE)
+    // ---------------------------------------------------------------------
+    // Identical to the projection-only overload, plus BOUNDED AGGREGATE COUNTS
+    // from the read-only certificate catalog. The counts appear ONLY in the
+    // provisioned state, alongside `entryCount`, and are tallies and nothing
+    // else: no per-entry result, no organization identifier, no display name, no
+    // tenant/client reference, no certificate reference, fingerprint, or other
+    // certificate field, no validity timestamp, no key or provider name, no store
+    // path, and no reason detail. A resolved count is a METADATA MATCH COUNT
+    // ONLY, and a usable count is a BOUNDED LOCAL CHECK COUNT ONLY -- neither
+    // asserts that a key is trusted, chain-valid, non-revoked, tenant-accepted,
+    // Recipe-bound, or Bake-authorized, and every capability on the aggregate
+    // stays constant-false. `clientAuthNotAllowedCount` names the TLS Client
+    // Authentication PURPOSE POLICY state, never a client identifier. The
+    // personal `chefKeys` array is unchanged and independent.
+    public static (int Status, object Body) List(
+        OrganizationInventoryProjection organizationInventory,
+        OrganizationCertificateAggregate? organizationCertificates)
+        => List(organizationInventory, organizationCertificates, null);
+
+    // ---------------------------------------------------------------------
+    // GET /api/v1/chef-keys -- list (+ bounded ORGANIZATION SELECTOR array)
+    // ---------------------------------------------------------------------
+    // Identical to the aggregate overload, plus a PRESENTATION-ONLY nested
+    // `selectableKeys` array so the Mini-Kitchen Chef's Key dropdown can offer a
+    // separate, read-only organization group. Each element carries EXACTLY three
+    // fields -- `organizationKeyId`, `displayName`, `eligible` -- and nothing
+    // else: no tenant/client reference, no certificate SHA-256, thumbprint,
+    // subject, issuer, serial, store or location, no admin state, no raw
+    // readiness reason, no private-key detail, no path, secret, token, or claim.
+    //
+    // `eligible` means LOCALLY READY BY POLICY / INVENTORY / RESOLUTION /
+    // USABILITY. It does NOT mean runnable: an organization-bound Recipe is
+    // ALWAYS `organization_key_not_yet_runnable`. The array appears ONLY in the
+    // provisioned state and is OMITTED ENTIRELY when nothing is selectable. This
+    // overload only PROJECTS: there is no new route and no mutation route.
+    public static (int Status, object Body) List(
+        OrganizationInventoryProjection organizationInventory,
+        OrganizationCertificateAggregate? organizationCertificates,
+        IReadOnlyList<OrganizationKeySelectorEntry>? organizationSelector)
+    {
+        List<object> items = BuildPersonalItems();
+
+        // Fail closed: a missing aggregate is treated as "nothing was resolved".
+        OrganizationCertificateAggregate certificates =
+            organizationCertificates ?? OrganizationCertificateAggregate.None();
+
+        // Insertion-ordered so the projected key sequence is identical to the
+        // anonymous shapes this replaced.
+        var organizationKeys = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["state"] = organizationInventory.WireState,
+            ["reason"] = organizationInventory.WireReason,
+            ["readOnly"] = true,
+            ["certificateOnly"] = true,
+            ["inventoryLoaded"] = organizationInventory.InventoryLoaded,
+        };
+
+        if (organizationInventory.InventoryLoaded)
+        {
+            organizationKeys["entryCount"] = organizationInventory.EntryCount;
+            organizationKeys["resolvedMetadataCount"] = certificates.ResolvedMetadataCount;
+            organizationKeys["notFoundCount"] = certificates.NotFoundCount;
+            organizationKeys["ambiguousCount"] = certificates.AmbiguousCount;
+            organizationKeys["referenceMissingCount"] = certificates.ReferenceMissingCount;
+            organizationKeys["disabledCount"] = certificates.DisabledCount;
+            organizationKeys["catalogUnavailable"] = certificates.CatalogUnavailable;
+            organizationKeys["usableCount"] = certificates.UsableCount;
+            organizationKeys["notYetValidCount"] = certificates.NotYetValidCount;
+            organizationKeys["expiredCount"] = certificates.ExpiredCount;
+            organizationKeys["clientAuthNotAllowedCount"] = certificates.ClientAuthNotAllowedCount;
+            organizationKeys["digitalSignatureNotAllowedCount"] = certificates.DigitalSignatureNotAllowedCount;
+            organizationKeys["unsupportedKeyAlgorithmCount"] = certificates.UnsupportedKeyAlgorithmCount;
+            organizationKeys["privateKeyUnavailableCount"] = certificates.PrivateKeyUnavailableCount;
+            organizationKeys["usabilityInvalidCount"] = certificates.UsabilityInvalidCount;
+            organizationKeys["usabilityUnavailable"] = certificates.UsabilityUnavailable;
+
+            // The selector array exists ONLY here, and only when non-empty. Each
+            // element owns its own closed three-field wire shape, so this
+            // projection cannot widen it.
+            if (organizationSelector is not null && organizationSelector.Count > 0)
+            {
+                var selectable = new List<object>();
+                foreach (OrganizationKeySelectorEntry entry in organizationSelector)
+                {
+                    selectable.Add(entry.ToWireObject());
+                }
+                organizationKeys["selectableKeys"] = selectable;
+            }
+        }
+
+        return (200, new
+        {
+            chefKeys = items,
+            organizationKeys,
+        });
+    }
+
+    // The personal Chef's Keys array, unchanged: Windows-Credential-Manager
+    // metadata only, in the same stable display order, with no secret.
+    private static List<object> BuildPersonalItems()
+    {
+        IReadOnlyList<WindowsCredentialStore.CredentialRecord> records =
+            WindowsCredentialStore.Enumerate(TargetPrefix + "*");
+
+        var items = new List<object>();
+        foreach (WindowsCredentialStore.CredentialRecord rec in records)
+        {
+            if (!rec.TargetName.StartsWith(TargetPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            string id = rec.TargetName.Substring(TargetPrefix.Length);
+            items.Add(BuildItem(id, rec.UserName, rec.HasSecret));
+        }
+
+        items.Sort((a, b) => string.Compare(ItemSortKey(a), ItemSortKey(b), StringComparison.OrdinalIgnoreCase));
+        return items;
     }
 
     // ---------------------------------------------------------------------
@@ -232,9 +431,14 @@ internal static class ChefKeyModel
     //
     // Bounded for CK-1: NO PAX, NO interactive sign-in, NO Microsoft Graph call.
     // Validates required fields per type, UPN format for WebLogin/DeviceCode,
-    // certificate-thumbprint existence in CurrentUser\My (read-only), and secret
-    // presence for AppReg-Secret. A real Graph connectivity test is deferred to
-    // CK-3 / X5B.
+    // the personal certificate reference across BOTH fixed Personal stores
+    // (read-only), and secret presence for AppReg-Secret. A real Graph
+    // connectivity test is deferred to CK-3 / X5B.
+    //
+    // Cycle 37 -- the certificate check no longer claims a CurrentUser-only
+    // result, and no longer reports an unreadable store as a definite absence.
+    // Store location is NEVER persisted in the Chef's Key: the reference is
+    // re-resolved from scratch every time Test runs.
     // ---------------------------------------------------------------------
     public static (int Status, object Body) Test(string id)
     {
@@ -253,6 +457,33 @@ internal static class ChefKeyModel
         var metaDict = meta as Dictionary<string, object?> ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         string authType = Str(metaDict, "authType") ?? "unknown";
 
+        // The ONLY certificate-store I/O on the Test path. It runs at most once
+        // per request, and ONLY for a certificate key that actually carries a
+        // thumbprint -- every other Chef's Key type opens no store at all.
+        PersonalCertificateResolution certResolution = PersonalCertificateResolution.Invalid;
+        if (string.Equals(authType, AuthAppRegCertificate, StringComparison.Ordinal))
+        {
+            string? thumb = Str(metaDict, "certThumbprint");
+            if (thumb is { Length: > 0 })
+            {
+                certResolution = ResolvePersonalCertificateReference(thumb);
+            }
+        }
+
+        return ProjectTestResponse(authType, metaDict, rec.HasSecret, certResolution);
+    }
+
+    // Pure projection of the Test response. It performs NO I/O of any kind: the
+    // certificate resolution reaches it as an already-closed state produced by
+    // the fixed two-store shim. Keeping it separate lets every resolution state
+    // be proven against the real response shape without touching a certificate
+    // store or the Windows Credential Manager.
+    internal static (int Status, object Body) ProjectTestResponse(
+        string authType,
+        Dictionary<string, object?> metaDict,
+        bool hasSecret,
+        PersonalCertificateResolution certResolution)
+    {
         var checks = new List<object>();
         bool pass = true;
 
@@ -285,11 +516,8 @@ internal static class ChefKeyModel
                 Check("cert_thumbprint_present", thumbPresent, thumbPresent ? "Certificate thumbprint is set." : "Certificate thumbprint is missing.");
                 if (thumbPresent)
                 {
-                    bool certExists = CertificateExistsInCurrentUserMy(thumb!);
-                    Check("cert_in_store", certExists,
-                        certExists
-                            ? "A certificate with this thumbprint was found in your personal certificate store."
-                            : "No certificate with this thumbprint was found in your personal certificate store (Current User > Personal).");
+                    (bool certOk, string certDetail) = ProjectCertInStoreCheck(certResolution);
+                    Check("cert_in_store", certOk, certDetail);
                 }
                 break;
             }
@@ -299,7 +527,7 @@ internal static class ChefKeyModel
                 string? clientId = Str(metaDict, "clientId");
                 Check("tenant_id_present", tenantId is { Length: > 0 }, tenantId is { Length: > 0 } ? "Tenant ID is set." : "Tenant ID is missing.");
                 Check("client_id_present", clientId is { Length: > 0 }, clientId is { Length: > 0 } ? "Application (client) ID is set." : "Application (client) ID is missing.");
-                Check("client_secret_present", rec.HasSecret, rec.HasSecret ? "A client secret is stored." : "No client secret is stored.");
+                Check("client_secret_present", hasSecret, hasSecret ? "A client secret is stored." : "No client secret is stored.");
                 break;
             }
             default:
@@ -536,19 +764,214 @@ internal static class ChefKeyModel
         return string.Empty;
     }
 
-    private static bool CertificateExistsInCurrentUserMy(string thumbprint)
+    // ---------------------------------------------------------------------
+    // Cycle 37 -- personal certificate reference resolution across BOTH fixed
+    // Personal stores.
+    //
+    // A Chef's Key holds ONLY a thumbprint. A certificate carrying that
+    // thumbprint may live in Current User > Personal or in Local Machine >
+    // Personal, so the Test check must inspect BOTH before it may claim a
+    // uniqueness result, and must fail closed when it cannot inspect both.
+    //
+    // Nothing about a certificate is retained: no certificate, key, handle, DER
+    // bytes, subject, issuer, serial, provider or container name. No private-key
+    // API is used at all. Matching occurrences are counted, never de-duplicated
+    // and never preferred; a store is never judged by how many UNRELATED
+    // certificates it holds.
+    // ---------------------------------------------------------------------
+
+    // The closed set of resolution outcomes. There is no permissive default:
+    // anything unknown or malformed fails closed.
+    internal enum PersonalCertificateResolution
+    {
+        Invalid,
+        NotFound,
+        UniqueCurrentUser,
+        UniqueLocalMachine,
+        Ambiguous,
+        Unavailable,
+    }
+
+    // One store's MATCHING-OCCURRENCE count, saturated to the closed 0 / 1 / many
+    // domain. Any total above one is already ambiguous, so no larger cap exists.
+    internal enum PersonalCertificateStoreMatchCount
+    {
+        Zero,
+        One,
+        Many,
+    }
+
+    // PURE resolver -- ZERO I/O. Inputs are reference validity plus each fixed
+    // store's availability and saturated match count; the output is the closed
+    // resolution state. Every decision-table case is provable here without a
+    // certificate store.
+    internal static PersonalCertificateResolution ResolvePersonalCertificateState(
+        bool referenceValid,
+        bool currentUserAvailable,
+        PersonalCertificateStoreMatchCount currentUserMatches,
+        bool localMachineAvailable,
+        PersonalCertificateStoreMatchCount localMachineMatches)
+    {
+        // An invalid reference is decided WITHOUT consulting either store, so the
+        // store inputs are deliberately ignored on this path.
+        if (!referenceValid)
+        {
+            return PersonalCertificateResolution.Invalid;
+        }
+
+        // Strict WHOLE-CHECK availability. The check claims a CROSS-STORE
+        // uniqueness result, which cannot be established from a single store --
+        // so one unreadable store fails the whole check even when the other
+        // store reports exactly one match.
+        if (!currentUserAvailable || !localMachineAvailable)
+        {
+            return PersonalCertificateResolution.Unavailable;
+        }
+
+        // An unmapped enum value fails closed instead of defaulting to success.
+        if (!IsKnownMatchCount(currentUserMatches) || !IsKnownMatchCount(localMachineMatches))
+        {
+            return PersonalCertificateResolution.Unavailable;
+        }
+
+        if (currentUserMatches == PersonalCertificateStoreMatchCount.Many ||
+            localMachineMatches == PersonalCertificateStoreMatchCount.Many)
+        {
+            return PersonalCertificateResolution.Ambiguous;
+        }
+
+        bool oneCurrentUser = currentUserMatches == PersonalCertificateStoreMatchCount.One;
+        bool oneLocalMachine = localMachineMatches == PersonalCertificateStoreMatchCount.One;
+
+        if (oneCurrentUser && oneLocalMachine)
+        {
+            return PersonalCertificateResolution.Ambiguous;
+        }
+        if (oneCurrentUser)
+        {
+            return PersonalCertificateResolution.UniqueCurrentUser;
+        }
+        if (oneLocalMachine)
+        {
+            return PersonalCertificateResolution.UniqueLocalMachine;
+        }
+        return PersonalCertificateResolution.NotFound;
+    }
+
+    private static bool IsKnownMatchCount(PersonalCertificateStoreMatchCount value) =>
+        value == PersonalCertificateStoreMatchCount.Zero ||
+        value == PersonalCertificateStoreMatchCount.One ||
+        value == PersonalCertificateStoreMatchCount.Many;
+
+    // Saturate a raw matching-occurrence count. `many` is never truncated to `one`.
+    internal static PersonalCertificateStoreMatchCount SaturateMatchCount(int matchCount) => matchCount switch
+    {
+        <= 0 => PersonalCertificateStoreMatchCount.Zero,
+        1 => PersonalCertificateStoreMatchCount.One,
+        _ => PersonalCertificateStoreMatchCount.Many,
+    };
+
+    // Pure copy mapping for the `cert_in_store` check. ONLY a unique match in
+    // exactly one of the two stores passes. No exception text and no engine
+    // internals ever reach the customer.
+    internal static (bool Ok, string Detail) ProjectCertInStoreCheck(PersonalCertificateResolution resolution) =>
+        resolution switch
+        {
+            PersonalCertificateResolution.UniqueCurrentUser => (true,
+                "A certificate with this thumbprint was found in Current User > Personal."),
+            PersonalCertificateResolution.UniqueLocalMachine => (true,
+                "A certificate with this thumbprint was found in Local Machine > Personal. " +
+                "This confirms the certificate reference only; background service access has not been configured or verified."),
+            PersonalCertificateResolution.NotFound => (false,
+                "No certificate with this thumbprint was found in Current User > Personal or Local Machine > Personal."),
+            PersonalCertificateResolution.Ambiguous => (false,
+                "More than one certificate with this thumbprint was found. Remove the duplicate certificate reference before using this Chef's Key."),
+            PersonalCertificateResolution.Invalid => (false,
+                "The certificate thumbprint is not a valid certificate reference."),
+            PersonalCertificateResolution.Unavailable => (false,
+                "PAX Cookbook could not safely check both Personal certificate stores."),
+            _ => (false,
+                "PAX Cookbook could not safely check both Personal certificate stores."),
+        };
+
+    // FIXED production I/O shim. Exactly ONE Current User > Personal query and
+    // exactly ONE Local Machine > Personal query, both hard-coded. There is no
+    // caller-supplied location, store, delegate, enumerator or override, so no
+    // caller can redirect this resolution or make it run a different number of
+    // times.
+    private static PersonalCertificateResolution ResolvePersonalCertificateReference(string? thumbprint)
+    {
+        string? normalized = NormalizeThumbprint(thumbprint);
+        if (normalized is null)
+        {
+            // Fails closed on the reference itself -- NEITHER store is opened.
+            return ResolvePersonalCertificateState(
+                referenceValid: false,
+                currentUserAvailable: false,
+                currentUserMatches: PersonalCertificateStoreMatchCount.Zero,
+                localMachineAvailable: false,
+                localMachineMatches: PersonalCertificateStoreMatchCount.Zero);
+        }
+
+        (bool currentUserAvailable, PersonalCertificateStoreMatchCount currentUserMatches) =
+            CountCurrentUserPersonalMatches(normalized);
+        (bool localMachineAvailable, PersonalCertificateStoreMatchCount localMachineMatches) =
+            CountLocalMachinePersonalMatches(normalized);
+
+        return ResolvePersonalCertificateState(
+            referenceValid: true,
+            currentUserAvailable: currentUserAvailable,
+            currentUserMatches: currentUserMatches,
+            localMachineAvailable: localMachineAvailable,
+            localMachineMatches: localMachineMatches);
+    }
+
+    // The ONE fixed Current User > Personal read-only query. Deliberately not
+    // shared with the machine-store query so neither can be re-pointed.
+    private static (bool Available, PersonalCertificateStoreMatchCount Matches) CountCurrentUserPersonalMatches(string thumbprint)
     {
         try
         {
             using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
-            store.Open(OpenFlags.ReadOnly);
+            store.Open(OpenFlags.OpenExistingOnly | OpenFlags.ReadOnly);
+            X509Certificate2Collection all = store.Certificates;
             X509Certificate2Collection matches =
-                store.Certificates.Find(X509FindType.FindByThumbprint, thumbprint, validOnly: false);
-            return matches.Count > 0;
+                all.Find(X509FindType.FindByThumbprint, thumbprint, validOnly: false);
+            PersonalCertificateStoreMatchCount saturated = SaturateMatchCount(matches.Count);
+            foreach (X509Certificate2 match in matches) { match.Dispose(); }
+            foreach (X509Certificate2 certificate in all) { certificate.Dispose(); }
+            return (true, saturated);
         }
         catch
         {
-            return false;
+            // The store could not be opened or queried. That is NOT an absence,
+            // so it is reported as unavailable rather than as zero matches.
+            return (false, PersonalCertificateStoreMatchCount.Zero);
+        }
+    }
+
+    // The ONE fixed Local Machine > Personal read-only query. A match here proves
+    // the certificate REFERENCE only -- never private-key access, service
+    // ownership, or ACL readiness, none of which are inspected.
+    private static (bool Available, PersonalCertificateStoreMatchCount Matches) CountLocalMachinePersonalMatches(string thumbprint)
+    {
+        try
+        {
+            using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
+            store.Open(OpenFlags.OpenExistingOnly | OpenFlags.ReadOnly);
+            X509Certificate2Collection all = store.Certificates;
+            X509Certificate2Collection matches =
+                all.Find(X509FindType.FindByThumbprint, thumbprint, validOnly: false);
+            PersonalCertificateStoreMatchCount saturated = SaturateMatchCount(matches.Count);
+            foreach (X509Certificate2 match in matches) { match.Dispose(); }
+            foreach (X509Certificate2 certificate in all) { certificate.Dispose(); }
+            return (true, saturated);
+        }
+        catch
+        {
+            // The store could not be opened or queried. That is NOT an absence,
+            // so it is reported as unavailable rather than as zero matches.
+            return (false, PersonalCertificateStoreMatchCount.Zero);
         }
     }
 

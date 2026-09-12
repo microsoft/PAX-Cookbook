@@ -4,4 +4,16 @@
     <RootNamespace>PAXCookbook.Shared</RootNamespace>
     <AssemblyName>PAXCookbook.Shared</AssemblyName>
   </PropertyGroup>
+  <!--
+    Contracts\AppSharedSource is SHARED SOURCE, not part of the Shared API. Its
+    files declare namespace PAXCookbook.App and are compiled IN PLACE by
+    PAXCookbook.App and PAXCookbookSetup through Compile/Link items, exactly like
+    the native host already consumes SessionProviderContract.cs. Shared itself
+    must NOT compile them: PAXCookbook.Shared.dll would otherwise publish App
+    types, and Setup would end up with the same types twice (once from the
+    project reference, once from its own link) as duplicate definitions.
+  -->
+  <ItemGroup>
+    <Compile Remove="Contracts\AppSharedSource\**\*.cs" />
+  </ItemGroup>
 </Project>

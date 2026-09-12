@@ -206,6 +206,11 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status)
         ("orphan_probe_verdict", "TEXT"),
         ("recovery_run_id", "TEXT"),
         ("broker_session_id_at_shutdown", "TEXT"),
+        // Case-normalized canonical checkpoint path of a resume cook, NULL for
+        // every other trigger. It is the concurrency identity behind the partial
+        // unique index below. Non-secret: a local filesystem path the operator
+        // supplied.
+        ("resume_checkpoint_identity", "TEXT"),
     };
 
     private static void MigrateCookColumns(SqliteConnection conn)
@@ -232,6 +237,20 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status)
         }
 
         Execute(conn, "CREATE INDEX IF NOT EXISTS idx_cooks_closure_reason ON cooks(closure_reason);");
+
+        // The resume concurrency gate. A PARTIAL UNIQUE index is what makes the
+        // gate ATOMIC: the duplicate is rejected by the very statement that would
+        // have created it, so there is no check-then-insert window two callers
+        // can both pass. Restricting it to status='running' also means a cook
+        // that reached ANY terminal state leaves the index automatically, so a
+        // previously completed, failed, interrupted, or cancelled resume of the
+        // same checkpoint can never block a new one. Rows with a NULL identity
+        // (every recipe cook) are outside the index entirely and are unaffected.
+        Execute(
+            conn,
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_cooks_resume_running_identity " +
+            "ON cooks(resume_checkpoint_identity) " +
+            "WHERE resume_checkpoint_identity IS NOT NULL AND status = 'running';");
     }
 
     private static void Execute(SqliteConnection conn, string sql)

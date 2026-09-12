@@ -11,6 +11,21 @@
          reference resolution while we only consume the WinForms surface. -->
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
   </PropertyGroup>
+  <!-- Mirror the App project's experimental gate so compile-mode-aware tests
+       (e.g. capability activation) can branch on EXPERIMENTAL_WAM under the same
+       /p:ExperimentalWam=true build. The set of test methods is identical in both
+       modes; only assertions inside a few methods differ by build. -->
+  <PropertyGroup Condition="'$(ExperimentalWam)' == 'true'">
+    <DefineConstants>$(DefineConstants);EXPERIMENTAL_WAM</DefineConstants>
+  </PropertyGroup>
+  <!-- Mirror the App project's test-isolation activation gate so activation-mode
+       tests (e.g. gated TryActivate behavior) can branch on
+       PAXCOOKBOOK_TEST_ISOLATION under the same /p:TestIsolation=true build. The
+       contract + pure routing seam are always compiled and tested unconditionally;
+       only the activation assertions differ by build. -->
+  <PropertyGroup Condition="'$(TestIsolation)' == 'true'">
+    <DefineConstants>$(DefineConstants);PAXCOOKBOOK_TEST_ISOLATION</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
     <PackageReference Include="xunit" Version="2.9.0" />

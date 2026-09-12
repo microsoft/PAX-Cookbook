@@ -45,8 +45,79 @@ export interface ChefKeyItem {
   hasSecret: boolean;
 }
 
+/**
+ * Cycle 14s — ONE bounded element of the read-only organization selector.
+ *
+ * The broker projects EXACTLY these three fields and nothing else: no tenant or
+ * client reference, no certificate SHA-256, thumbprint, subject, issuer, serial,
+ * store, admin state, raw readiness reason, private-key detail, path, secret,
+ * token, or claim.
+ *
+ * `eligible` means LOCALLY READY on this PC. It does NOT mean runnable: an
+ * organization-bound Recipe is ALWAYS `organization_key_not_yet_runnable` until a
+ * sanctioned engine update provides a fail-closed certificate selector.
+ *
+ * `organizationKeyId` is OPAQUE. It is used only as a select value and as the
+ * saved Recipe reference; it is NEVER rendered as visible text.
+ */
+export interface OrganizationKeySelectorItem {
+  organizationKeyId: string;
+  displayName: string;
+  eligible: boolean;
+}
+
 export interface ChefKeyListBody {
   chefKeys: ChefKeyItem[];
+  organizationKeys?: OrganizationKeysStatus;
+}
+
+// Read-only status of a FUTURE organization-provided Chef's Keys inventory,
+// mirrored from the broker's managed-keys authorization gate + read-only
+// ProgramData inventory evaluator. This is status ONLY: it lists no key, exposes
+// no identifier or secret, and never asserts certificate/availability beyond
+// bounded aggregate counts. `state` is a closed set; `inventoryLoaded` is true
+// ONLY in the `authorized_provisioned` state; `entryCount` and every aggregate
+// below are present ONLY when provisioned (omitted entirely in every other
+// state, which is why they are all optional). `readOnly` and `certificateOnly`
+// are always true.
+export interface OrganizationKeysStatus {
+  state:
+    | 'not_configured'
+    | 'disabled'
+    | 'authorized_not_provisioned'
+    | 'authorized_provisioned'
+    | 'unavailable'
+    | 'untrusted'
+    | 'invalid';
+  reason: string;
+  readOnly: true;
+  certificateOnly: true;
+  inventoryLoaded: boolean;
+  entryCount?: number;
+  // Resolution aggregates (how the listed entries map to certificates on this PC).
+  resolvedMetadataCount?: number;
+  notFoundCount?: number;
+  ambiguousCount?: number;
+  referenceMissingCount?: number;
+  disabledCount?: number;
+  catalogUnavailable?: boolean;
+  // Usability aggregates (whether a resolved certificate is usable on THIS PC).
+  usableCount?: number;
+  notYetValidCount?: number;
+  expiredCount?: number;
+  clientAuthNotAllowedCount?: number;
+  digitalSignatureNotAllowedCount?: number;
+  unsupportedKeyAlgorithmCount?: number;
+  privateKeyUnavailableCount?: number;
+  usabilityInvalidCount?: number;
+  usabilityUnavailable?: boolean;
+  /**
+   * Cycle 14s — the bounded, read-only organization selector list. Present ONLY
+   * in the `authorized_provisioned` state, and OMITTED ENTIRELY when nothing is
+   * selectable (never an empty array). Enabled entries only; stable ordinal
+   * order by display name then opaque id. There is no companion mutation route.
+   */
+  selectableKeys?: OrganizationKeySelectorItem[];
 }
 
 export interface ChefKeyDetailBody {

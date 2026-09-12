@@ -48,6 +48,7 @@ import {
   type ChefKeyWriteRequest,
   type ChefKeyResponse,
   type ChefKeyTestBody,
+  type OrganizationKeysStatus,
 } from '../host/chefKeys';
 import { CopyButton } from '../features/mini-kitchen/components/CopyButton';
 import {
@@ -182,6 +183,131 @@ function formatError(res: ChefKeyResponse<unknown>): string {
 
 type LoadPhase = 'loading' | 'ready' | 'error';
 
+// ---------------------------------------------------------------------------
+// Organization-managed certificate readiness (read-only projection).
+//
+// A BOUNDED, aggregate-only restatement of the broker's organization key
+// readiness status. It renders counts and plain-language sentences ONLY: never
+// an entry, display name, identifier, reference, thumbprint, subject, issuer,
+// serial, store, provider, key container, or private-key detail, and never a
+// raw status token. "Ready on this PC" means exactly that - it never implies a
+// Recipe binding, a Bake, unattended execution, or service readiness, which is
+// why an unavailable private key also carries the service caveat.
+// ---------------------------------------------------------------------------
+
+type OrgReadiness = 'unchecked' | 'empty' | 'ready' | 'partial' | 'none';
+
+// Aggregates are absent outside the provisioned state, so an absent or
+// negative value is treated as "nothing to report" rather than rendered.
+function orgCount(value: number | undefined): number {
+  return typeof value === 'number' && value > 0 ? value : 0;
+}
+
+const ORG_ATTENTION_REASONS: ReadonlyArray<{
+  get: (o: OrganizationKeysStatus) => number | undefined;
+  one: string;
+  many: (n: number) => string;
+}> = [
+  {
+    get: (o) => o.referenceMissingCount,
+    one: 'One entry does not name a certificate yet.',
+    many: (n) => `${n} entries do not name a certificate yet.`,
+  },
+  {
+    get: (o) => o.notFoundCount,
+    one: 'One certificate was not found on this PC.',
+    many: (n) => `${n} certificates were not found on this PC.`,
+  },
+  {
+    get: (o) => o.ambiguousCount,
+    one: 'One entry matches more than one certificate on this PC.',
+    many: (n) => `${n} entries match more than one certificate on this PC.`,
+  },
+  {
+    get: (o) => o.notYetValidCount,
+    one: 'One certificate is not valid yet.',
+    many: (n) => `${n} certificates are not valid yet.`,
+  },
+  {
+    get: (o) => o.expiredCount,
+    one: 'One certificate has expired.',
+    many: (n) => `${n} certificates have expired.`,
+  },
+  {
+    get: (o) => o.clientAuthNotAllowedCount,
+    one: 'The certificate does not explicitly allow client authentication.',
+    many: (n) => `${n} certificates do not explicitly allow client authentication.`,
+  },
+  {
+    get: (o) => o.digitalSignatureNotAllowedCount,
+    one: 'The certificate does not explicitly allow digital signatures.',
+    many: (n) => `${n} certificates do not explicitly allow digital signatures.`,
+  },
+  {
+    get: (o) => o.privateKeyUnavailableCount,
+    one: 'The certificate\u2019s private key is not available to this Windows user.',
+    many: (n) =>
+      `${n} certificates have a private key that is not available to this Windows user.`,
+  },
+  {
+    get: (o) => o.unsupportedKeyAlgorithmCount,
+    one: 'One certificate uses a key type PAX Cookbook does not support.',
+    many: (n) => `${n} certificates use a key type PAX Cookbook does not support.`,
+  },
+  {
+    get: (o) => o.usabilityInvalidCount,
+    one: 'One certificate could not be read.',
+    many: (n) => `${n} certificates could not be read.`,
+  },
+  {
+    get: (o) => o.disabledCount,
+    one: 'One entry is turned off by your organization.',
+    many: (n) => `${n} entries are turned off by your organization.`,
+  },
+];
+
+// A zero count is omitted entirely - it is never rendered as "0".
+function orgAttentionReasons(org: OrganizationKeysStatus): string[] {
+  const lines: string[] = [];
+  for (const reason of ORG_ATTENTION_REASONS) {
+    const n = orgCount(reason.get(org));
+    if (n === 1) {
+      lines.push(reason.one);
+    } else if (n > 1) {
+      lines.push(reason.many(n));
+    }
+  }
+  return lines;
+}
+
+function orgReadinessKind(org: OrganizationKeysStatus, attentionCount: number): OrgReadiness {
+  if (org.catalogUnavailable === true || org.usabilityUnavailable === true) {
+    return 'unchecked';
+  }
+  if (orgCount(org.entryCount) === 0) {
+    return 'empty';
+  }
+  if (orgCount(org.usableCount) > 0 && attentionCount === 0) {
+    return 'ready';
+  }
+  if (orgCount(org.resolvedMetadataCount) > 0 && attentionCount > 0) {
+    return 'partial';
+  }
+  return 'none';
+}
+
+const ORG_READINESS_LINE: Record<OrgReadiness, string> = {
+  unchecked: 'Certificate readiness could not be checked on this PC.',
+  empty: 'Your organization has not listed any certificates yet.',
+  ready: 'Organization-provided certificates are ready on this PC.',
+  partial:
+    'Organization-provided certificates were found, but some are not ready for desktop use.',
+  none: 'Organization-provided certificates are listed, but none are ready to use on this PC.',
+};
+
+const ORG_SERVICE_CAVEAT =
+  'A service may use a separately permissioned key. Desktop availability does not confirm service availability.';
+
 const NOT_REPORTED = 'Not reported by this build';
 
 function lockStatusLabel(phase: LoadPhase, lock: LockStateInfo | null): string {
@@ -288,6 +414,7 @@ export function ChefsKeysWorkspace() {
   }, []);
 
   const [keys, setKeys] = useState<ChefKeyItem[] | null>(null);
+  const [organizationKeys, setOrganizationKeys] = useState<OrganizationKeysStatus | null>(null);
   const [keysPhase, setKeysPhase] = useState<LoadPhase>('loading');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(CLOSED_FORM);
@@ -306,9 +433,11 @@ export function ChefsKeysWorkspace() {
     const res = await listChefKeys();
     if (res.ok && res.data) {
       setKeys(res.data.chefKeys);
+      setOrganizationKeys(res.data.organizationKeys ?? null);
       setKeysPhase('ready');
     } else {
       setKeys(null);
+      setOrganizationKeys(null);
       setKeysPhase('error');
     }
   }, []);
@@ -433,6 +562,20 @@ export function ChefsKeysWorkspace() {
   const selectedItem =
     selectedId && keys ? keys.find((k) => k.id === selectedId) ?? null : null;
 
+  // Readiness is aggregate-only and exists solely in the provisioned state.
+  const orgProvisioned =
+    organizationKeys !== null && organizationKeys.state === 'authorized_provisioned';
+  const orgAttention =
+    orgProvisioned && organizationKeys ? orgAttentionReasons(organizationKeys) : [];
+  const orgReadiness =
+    orgProvisioned && organizationKeys
+      ? orgReadinessKind(organizationKeys, orgAttention.length)
+      : null;
+  const orgServiceCaveat =
+    orgProvisioned &&
+    organizationKeys !== null &&
+    orgCount(organizationKeys.privateKeyUnavailableCount) > 0;
+
   const lockStatus = lockStatusLabel(phase, lock);
   const passkeyStatus = passkeyStatusLabel(phase, protect);
   const verification =
@@ -488,6 +631,65 @@ export function ChefsKeysWorkspace() {
         to sign in every time you bake. Secrets are stored securely in Windows Credential
         Manager on this PC and are never sent anywhere else.
       </p>
+
+      {organizationKeys && organizationKeys.state !== 'not_configured' ? (
+        <div
+          className="dvw-keys__orgstatus"
+          data-org-keys-state={organizationKeys.state}
+          data-org-readiness={orgReadiness ?? undefined}
+        >
+          {organizationKeys.state === 'disabled' ? (
+            <p className="dvw-keys__orgstatus-line">
+              Organization-provided keys are turned off by your organization&rsquo;s policy.
+            </p>
+          ) : null}
+          {organizationKeys.state === 'authorized_not_provisioned' ? (
+            <>
+              <p className="dvw-keys__orgstatus-line">
+                Organization-provided keys are enabled by your organization&rsquo;s policy.
+              </p>
+              <p className="dvw-keys__orgstatus-note">
+                A managed key inventory is not connected yet, so there is nothing to use here for now.
+              </p>
+            </>
+          ) : null}
+          {organizationKeys.state === 'unavailable' ? (
+            <>
+              <p className="dvw-keys__orgstatus-line">
+                Organization key policy needs attention.
+              </p>
+              <p className="dvw-keys__orgstatus-note">
+                Contact your administrator.
+              </p>
+            </>
+          ) : null}
+          {organizationKeys.state === 'untrusted' || organizationKeys.state === 'invalid' ? (
+            <>
+              <p className="dvw-keys__orgstatus-line">
+                Organization key settings need attention.
+              </p>
+              <p className="dvw-keys__orgstatus-note">
+                Contact your administrator.
+              </p>
+            </>
+          ) : null}
+          {orgReadiness ? (
+            <>
+              <p className="dvw-keys__orgstatus-line">{ORG_READINESS_LINE[orgReadiness]}</p>
+              {orgAttention.length > 0 ? (
+                <ul className="dvw-keys__orgstatus-reasons">
+                  {orgAttention.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {orgServiceCaveat ? (
+                <p className="dvw-keys__orgstatus-note">{ORG_SERVICE_CAVEAT}</p>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="dvw-keys">
         <div className="dvw-commandbar" role="group" aria-label="Chef's Keys actions">

@@ -22,7 +22,14 @@ notify_brian.ps1
 .github/prompts/
 .github/copilot-instructions.md
 .copilot-bridge/
-_temp/
+
+# ---- Internal admin / dev tooling (never public) ----
+# tools/admin holds dev-trio handoff, managed-engine update and
+# script-compatibility tooling; tools/guards holds internal governance
+# enforcement; neither directory may ship in the public repo.
+# tools/entra (product helpers) and tools/release (payload builds) stay tracked.
+tools/admin/
+tools/guards/
 
 # ---- .NET build output (contains machine-specific absolute paths) ----
 **/bin/
@@ -50,6 +57,8 @@ app/bin/
 Backups/
 stage/
 PreviousVersions/
+Logs/
+/Logs/
 
 # ---- IDE / user-specific ----
 .vs/
@@ -66,3 +75,29 @@ PreviousVersions/
 *.p12
 secrets.json
 appsettings.*.local.json
+.dev-trio/wizard-progress.json
+
+# Dev-Trio scaffolded files
+# Remove entries below if your team wants to share
+# these configurations across the repo.
+
+# Agent role definitions (GitHub Copilot)
+copilot-instructions.md
+.github/agents/
+constraints.instructions.md
+dev-trio.prompt.md
+
+# Agent role definitions (Claude Code)
+.claude/agents/
+.claude/commands/dt-upgrade.md
+
+# Agent role definitions (Codex)
+.codex/agents/
+
+# Per-developer project memory (always keep ignored)
+memory/MEMORY.md
+memory/ROADMAP.md
+memory/PROMPT_EXAMPLES.md
+
+# Dev-Trio internal state
+.dev-trio/

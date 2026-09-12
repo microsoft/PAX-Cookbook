@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using PAXCookbook.Shared.Contracts;
 
 namespace PAXCookbook.App;
 
@@ -25,13 +26,15 @@ internal static class Program
     private const string AppName = "PAX Cookbook";
     private const string RuntimeKind = "dotnet-kestrel";
 
-    // The native window title. Experimental (test-channel) builds append an
-    // " — Experimental" suffix so a tester can never confuse a pre-release
-    // window with a production one. Stable builds keep the bare product name.
-    private static string WindowTitle(VersionInfo versionInfo)
-        => string.Equals(versionInfo.ReleaseChannel, "experimental", StringComparison.OrdinalIgnoreCase)
-            ? AppName + " \u2014 Experimental"
-            : AppName;
+    // The native window title is always the BARE product name on every build.
+    // The pre-release (test-channel) marker was removed from the window chrome;
+    // the single authorized customer-visible pre-release notice is the running
+    // app's top-of-app banner, not the window title. The internal ReleaseChannel
+    // token "experimental" is UNCHANGED elsewhere (VersionInfo, runtime/version,
+    // SetupChannel) — it is a data value, never a display string. The parameter
+    // is retained so both attach/daemon call sites stay untouched.
+    internal static string WindowTitle(VersionInfo versionInfo)
+        => AppName;
 
     // Stable Windows taskbar identity. MUST exactly match
     // PAXCookbook.Shared.ProductConstants.Aumid — the value the Start-menu
@@ -90,9 +93,44 @@ internal static class Program
     // dialog that would hang an unattended test run.
     private static bool _interactiveLaunch;
 
+    // RETIRED test-only seam. The X15 no-child cook-preparation seam is gone:
+    // every supported desktop Cook execution entry point now traverses
+    // CookPreparationSequence and the shared SpawnAndSupervise core, so there is
+    // no preparation-only path left for this flag to drive. A stale invocation
+    // must FAIL CLOSED before anything product-owned runs.
+    internal const string RetiredCookPrepareSeamFlag = "--test-seam-cook-prepare";
+
+    // Unused by every other App exit path, and deliberately just above the
+    // test-infrastructure refusal band (78 isolation-activation failure, 79
+    // not-isolated) so a retirement refusal can never be read as a real startup
+    // outcome.
+    internal const int RetiredCookPrepareSeamExit = 80;
+
+    // The ONLY thing the refusal path emits. Constant and bounded: no path,
+    // workspace, user, engine, exception, or any other dynamic state.
+    internal const string RetiredCookPrepareSeamToken =
+        "COOK_PREPARE_SEAM_RETIRED=--test-seam-cook-prepare";
+
+    // Ordinal-ignore-case EXACT equality. Every case variant IS the retired flag
+    // and is refused; a prefix, suffix, combined token, or substring lookalike is
+    // NOT this flag and is left to normal argument handling.
+    internal static bool IsRetiredCookPrepareSeamRequested(string[] args)
+        => args is not null && args.Any(a =>
+            string.Equals(a, RetiredCookPrepareSeamFlag, StringComparison.OrdinalIgnoreCase));
+
     [STAThread]
     public static int Main(string[] args)
     {
+        // FIRST statement. The retired cook-preparation seam is refused ahead of
+        // the taskbar identity, the interactive-launch capture, provider native
+        // test mode, isolation activation, and StartupLog — so a stale invocation
+        // touches no real startup log, no broker port, no tray, and no WebView2.
+        if (IsRetiredCookPrepareSeamRequested(args))
+        {
+            Console.WriteLine(RetiredCookPrepareSeamToken);
+            return RetiredCookPrepareSeamExit;
+        }
+
         // Establish the stable taskbar identity BEFORE any window or tray icon is
         // created, so Windows groups the pinned shortcut and this process's window
         // as one app (no duplicate taskbar icons). Best-effort: a taskbar nicety,
@@ -117,12 +155,17 @@ internal static class Program
             _interactiveLaunch = false;
         }
 
-        // Persistent startup diagnostics + last-chance handlers, installed BEFORE
-        // any startup work. The console is hidden later (after early init), so
-        // without this a launch that throws would be completely silent: no
-        // window, no tray, no message. The log captures milestones and any fatal
-        // error with a stack trace; the try/catch turns an unhandled startup
-        // exception into a visible dialog instead of a silent exit.
+        // Provider-native test mode has precedence over isolation activation.
+        // Every other launch validates isolation before diagnostics resolve a
+        // path, so an isolated launch cannot touch the real startup log.
+        if (!ProviderNativeTestMode.IsRequested(args))
+        {
+            int? isolationExit = TestIsolationRuntime.TryActivate(args);
+            if (isolationExit is int isoExitCode) return isoExitCode;
+        }
+
+        // Persistent startup diagnostics + last-chance handlers are installed
+        // after isolation activation so diagnostics use the active root.
         StartupLog.Begin(args);
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             StartupLog.Fatal("AppDomain.UnhandledException", e.ExceptionObject as Exception);
@@ -165,6 +208,70 @@ internal static class Program
 
     private static int Run(string[] args)
     {
+        // Bounded one-shot provider native-test mode (invoked by the Setup
+        // installer to verify a work-account configuration can actually sign in).
+        // Intercepted FIRST so it never starts the broker, tray, cook, PAX, or
+        // the WebView shell. In a stable build it reports unavailable without
+        // loading MSAL.
+        if (ProviderNativeTestMode.IsRequested(args))
+        {
+            return ProviderNativeTestMode.Run(args);
+        }
+
+#if PAXCOOKBOOK_TEST_ISOLATION
+        // Build-gated, non-interactive isolation activation PROOF. Runs the
+        // instant activation is resolved and BEFORE any real root, broker, port,
+        // window, named pipe, provider endpoint, engine acquisition, or network
+        // work. It requires an active isolation context and otherwise fails
+        // closed; it resolves the routed roots read-only, prints a JSON verdict,
+        // and returns. Absent entirely from stable/customer builds.
+        if (IsolationSelfCheck.IsRequested(args))
+        {
+            return IsolationSelfCheck.Run();
+        }
+#endif
+
+        // Complete local-state isolation for test-only runs. When the explicit
+        // --engine-localappdata override is present, route the broker.port
+        // coordination anchor through the SAME isolated base as engine/provider/
+        // config/verification state (which already honor it), BEFORE any broker
+        // detection runs. This closes the one coordination path that used the
+        // platform LocalApplicationData folder directly, so an isolated launch can
+        // never read, attach to, or overwrite the real installation's broker.port.
+        // No-op in production: the shipping launcher never passes the arg.
+        string? engineLocalAppDataOverrideEarly = ResolveEngineLocalAppDataOverride(args);
+        if (engineLocalAppDataOverrideEarly is not null)
+        {
+            BrokerDetection.SetLocalAppDataBaseOverride(
+                EngineAcquisition.ResolveLocalAppDataBase(engineLocalAppDataOverrideEarly));
+        }
+
+        // When the authoritative isolation context is active it is the single
+        // source of truth for coordination state: anchor broker.port under the
+        // isolated local-state root so an isolated run can never read, attach to,
+        // or overwrite the real installation's broker.port — regardless of any
+        // other seam argument.
+        if (TestIsolationRuntime.IsActive)
+        {
+            BrokerDetection.SetLocalAppDataBaseOverride(
+                TestIsolationRuntime.Current!.LocalStateRoot);
+        }
+
+        // The window-side experimental WAM bridge resolves its options from the
+        // same durable per-user base the daemon uses (the platform
+        // LocalApplicationData folder in production, or the isolated base under
+        // the test-only override), so the work-account lock action authenticates
+        // against the durable configuration written by Setup/Settings.
+        // When the authoritative isolation context is active it is the single
+        // source of truth for the durable base: route the window-side WAM bridge
+        // through the isolated LocalStateRoot, never the --engine-localappdata
+        // seam (which is null under a bare --test-isolation launch and would
+        // otherwise resolve the REAL per-user profile).
+        ExperimentalWamWindowFactory.SetLocalAppDataBase(
+            TestIsolationStartup.ResolveLocalAppDataBase(
+                TestIsolationRuntime.Current,
+                () => EngineAcquisition.ResolveLocalAppDataBase(engineLocalAppDataOverrideEarly)));
+
         // --headless runs the long-lived background broker daemon: the
         // in-process Kestrel broker with a system-tray presence but no WebView2
         // window, so scheduled bakes fire in the background and the user can open
@@ -187,25 +294,6 @@ internal static class Program
         // same BrokerLock.SetUnlocked() path the WebAuthn ceremony uses.
         bool bootUnlockedSeam = args.Any(a =>
             string.Equals(a, "--test-seam-boot-unlocked", StringComparison.OrdinalIgnoreCase));
-
-        // Narrowly-scoped test-only cook-preparation seam (X15). The public cook
-        // route always stops at the no-child boundary (501). This flag lets the
-        // smoke harness drive the pre-spawn preparation pipeline (cook-folder
-        // files + cook row, status='running', started_at NULL) and assert it,
-        // still WITHOUT spawning the PAX engine. Not an HTTP endpoint, never
-        // passed by the desktop launcher.
-        bool cookPrepareSeam = args.Any(a =>
-            string.Equals(a, "--test-seam-cook-prepare", StringComparison.OrdinalIgnoreCase));
-
-        // Narrowly-scoped test-only manual-cook re-auth seam (X16). The manual
-        // cook route fails closed at gate 10 (401 reAuthRequired) unless a fresh
-        // Windows Hello verdict is satisfied. There is no scriptable WebAuthn
-        // ceremony in the smoke harness, so this CLI-only flag stands in for a
-        // Verified verdict. It is NOT an HTTP endpoint, NOT a product force-unlock,
-        // NOT a lock-state bypass, and is never passed by the desktop launcher;
-        // its use is logged as a discovery marker on stdout below.
-        bool manualCookReAuthSeam = args.Any(a =>
-            string.Equals(a, "--test-seam-manual-cook-reauth-verified", StringComparison.OrdinalIgnoreCase));
 
         // Test-only override for the cook child interpreter path (X16). Lets the
         // smoke harness point the supervisor at a known pwsh (or an invalid path
@@ -348,9 +436,10 @@ internal static class Program
         // starts NO HTTP server. It runs the cook through the SINGLE sanctioned
         // cook pipeline (constraint 8) via RecipeReadModel.StartScheduledCook,
         // which authorizes the run by the recipe's ENABLED schedule plus its bound
-        // Chef's Key — the Brian-approved constraint-10 modification waives the
-        // per-operation Windows Hello step-up for SCHEDULED cooks ONLY; the manual
-        // cook route is untouched. The desktop launcher never passes this flag.
+        // Chef's Key — the Brian-approved constraint-10 modification that lets a
+        // SCHEDULED cook run unattended (no interactive operator confirmation);
+        // the manual cook route is untouched. The desktop launcher never passes
+        // this flag.
         //
         // DEPRECATED (V2 two-process): prefer --bake, which DELEGATES the cook to
         // the running headless daemon (one broker, one cook supervisor, shared
@@ -390,7 +479,12 @@ internal static class Program
         // navigates.
         FileOpenRequest? fileOpenRequest = ResolveFileOpenRequest(args);
 
-        string workspacePath = ResolveWorkspacePath(args);
+        // Under the authoritative isolation context the workspace is the isolated
+        // Workspace root, never the real %LOCALAPPDATA%\PAXCookbook\Workspace
+        // default (which the --workspace seam falls back to when absent).
+        string workspacePath = TestIsolationStartup.ResolveWorkspaceRoot(
+            TestIsolationRuntime.Current,
+            () => ResolveWorkspacePath(args));
         string runtimeDir = Path.Combine(workspacePath, "Runtime");
         Directory.CreateDirectory(runtimeDir);
 
@@ -491,6 +585,19 @@ internal static class Program
             ShowStartupError(appRootError);
             return 4;
         }
+
+        // Under active test isolation, prove the resolved app root belongs to the
+        // isolated install root. A mismatch means an isolated process is about to
+        // run against a real-tree app root — fail closed and start nothing.
+        if (TestIsolationRuntime.IsActive &&
+            !TestIsolationRuntime.Current!.ContainsPath(appRoot))
+        {
+            const string isoAppRootError =
+                "test-isolation active but the resolved app root is not inside the isolated install root.";
+            Console.Error.WriteLine("FATAL: " + isoAppRootError);
+            StartupLog.Fatal("TestIsolation", isoAppRootError);
+            return TestIsolationRuntime.IsolationActivationFailureExit;
+        }
         string webRoot = Path.GetFullPath(Path.Combine(appRoot, "web"));
         string versionFile = Path.Combine(appRoot, "VERSION.json");
         string iconPath = Path.Combine(webRoot, "images", "pax-cookbook-app-icon.ico");
@@ -560,9 +667,51 @@ internal static class Program
                 Console.WriteLine($"X2V_ATTACH_PORT={daemonPort}");
                 Console.WriteLine($"X2_APP_URL={attachUrl}");
                 int attachExit = 0;
+
+                // Attached "Exit" must stop the SEPARATE daemon this window does
+                // not own. This authenticated loopback shutdown is awaited by the
+                // shell before the window closes; a confirmed stop (HTTP 200, or a
+                // daemon already not serving) permits the window teardown, while a
+                // refusal (e.g. 423 while Locked) or error surfaces a truthful
+                // bounded failure instead of orphaning the daemon.
+                int attachDaemonPort = daemonPort;
+                Func<CancellationToken, Task<bool>> attachedDaemonShutdown = async ct =>
+                {
+                    try
+                    {
+                        using var shutdownHttp = new System.Net.Http.HttpClient
+                        {
+                            Timeout = TimeSpan.FromSeconds(5),
+                        };
+                        using var shutdownReq = new System.Net.Http.HttpRequestMessage(
+                            System.Net.Http.HttpMethod.Post,
+                            $"http://127.0.0.1:{attachDaemonPort}/api/v1/shutdown");
+                        string daemonToken = File.ReadAllText(tokenFile).Trim();
+                        shutdownReq.Headers.TryAddWithoutValidation("Authorization", "Bearer " + daemonToken);
+                        shutdownReq.Headers.TryAddWithoutValidation("X-Cookbook-Request", "1");
+                        using System.Net.Http.HttpResponseMessage shutdownResp =
+                            await shutdownHttp.SendAsync(shutdownReq, ct).ConfigureAwait(false);
+                        return (int)shutdownResp.StatusCode == 200;
+                    }
+                    catch (System.Net.Http.HttpRequestException)
+                    {
+                        // Loopback connection refused: the daemon is already not
+                        // serving, so the stop goal is satisfied.
+                        return true;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                };
+
                 try
                 {
-                    WebViewShell.Run(attachUrl, WindowTitle(versionInfo), iconPath, attachUserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir, showTray: false);
+                    WebViewShell.Run(attachUrl, WindowTitle(versionInfo), iconPath, attachUserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir, showTray: false, attachedDaemonShutdown: attachedDaemonShutdown);
                 }
                 catch (WebView2RuntimeMissingException ex)
                 {
@@ -636,7 +785,12 @@ internal static class Program
         // profile. Acquisition state is read-only: nothing under this anchor is
         // created, repaired, copied, downloaded, mutated, or invoked.
         string? engineLocalAppDataOverride = ResolveEngineLocalAppDataOverride(args);
-        string engineLocalAppDataBase = EngineAcquisition.ResolveLocalAppDataBase(engineLocalAppDataOverride);
+        // Under the authoritative isolation context the engine / provider / WAM /
+        // coordination anchor is the isolated LocalStateRoot, never the real
+        // per-user profile the --engine-localappdata seam falls back to.
+        string engineLocalAppDataBase = TestIsolationStartup.ResolveLocalAppDataBase(
+            TestIsolationRuntime.Current,
+            () => EngineAcquisition.ResolveLocalAppDataBase(engineLocalAppDataOverride));
 
         // First-launch engine auto-acquisition. When the per-user managed engine
         // has not been acquired yet, silently activate the approved engine that
@@ -645,7 +799,7 @@ internal static class Program
         // override so the acquisition-flow smokes still exercise the pending
         // state against their isolated fixtures. appRoot is non-null here (an
         // earlier guard returns when it cannot be located).
-        if (engineLocalAppDataOverride is null)
+        if (engineLocalAppDataOverride is null && !TestIsolationRuntime.IsActive)
         {
             EngineBundleAutoAcquire.TryAcquireFromBundle(versionInfo, appRoot, engineLocalAppDataBase);
         }
@@ -680,6 +834,44 @@ internal static class Program
         // <workspace>\Auth\webauthn-credentials.json. The broker always boots
         // Locked (BrokerLock default state).
         var webAuthn = new WebAuthnService(workspacePath, port);
+
+        // Experimental Entra WAM live runtime (T1-S3 Phase 3 backend). Owns the
+        // native endpoint + IPC pipe and recomputes the bounded configuration
+        // state on demand from the durable stores, so Settings mutations reflect
+        // immediately and the endpoint hot-activates/deactivates as the effective
+        // state crosses ready.
+        //
+        // Durable-first precedence (Phase 2): a per-user durable configuration is
+        // preferred so the product needs NO environment variables. SECURITY GATE
+        // (T1-S3): customer-ready capability requires an independently recorded
+        // READ-ONLY cloud verification (state == ready), NOT structural validity
+        // alone; the endpoint (hence the capability route, the IPC pipe, and WAM
+        // request minting) activates ONLY at ready. A build-gated dev-only
+        // override can substitute for cloud verification in experimental builds
+        // for smokes; it is inert in stable builds.
+        bool experimentalWamCompiled = ExperimentalWamCapability.IsExperimentalAuthenticatorCompiled;
+        var experimentalWamRuntime = new ExperimentalWamRuntime(
+            engineLocalAppDataBase,
+            ExperimentalWamPipe.PipeName(workspacePath),
+            experimentalWamCompiled);
+
+        // Initial reconcile: activates the endpoint + pipe now if the durable
+        // state is already ready (e.g. a previously verified configuration or the
+        // dev override), so a fresh launch is immediately usable at ready. The
+        // config-state route recomputes on every request thereafter.
+        ExperimentalWamStateInfo experimentalWamInitialState = experimentalWamRuntime.GetState();
+        string experimentalWamStateCode = experimentalWamInitialState.StateCode;
+
+        // Selected session-authentication provider (mutually-exclusive: Windows
+        // Hello OR work account, never both). Bound to the same per-user anchor
+        // so an isolated test fixture points selection and WAM config at one
+        // profile.
+        var sessionProviderRuntime = new SessionProviderRuntime(engineLocalAppDataBase);
+        SessionProviderSelection sessionProviderInitial = sessionProviderRuntime.GetSelection();
+        string sessionProviderStateCode = sessionProviderInitial.RecoveryRequired
+            ? "recovery_required"
+            : SessionProviderStore.ToWire(sessionProviderInitial.Provider);
+
 
         // Bundled template catalog (X4). Loaded ONCE at startup from the
         // read-only install tree (app\templates\*.template.json). No per-request
@@ -988,7 +1180,10 @@ internal static class Program
         {
             object? previewBody = await JsonModel.ReadBodyAsync(context);
             (int status, object responseBody) =
-                RecipePreviewModel.Handle(workspacePath, paxScriptPath, versionInfo, previewBody);
+                RecipePreviewModel.Handle(
+                    workspacePath, paxScriptPath, versionInfo, previewBody,
+                    () => ProductionOrganizationAuthority.CreateSnapshot(
+                        versionInfo, EngineAcquisition.Resolve(versionInfo, engineLocalAppDataBase)));
             return Results.Json(responseBody, statusCode: status);
         });
 
@@ -1250,7 +1445,68 @@ internal static class Program
         // these run, exactly like the recipe CRUD routes.
         app.MapGet("/api/v1/chef-keys", () =>
         {
-            (int status, object body) = ChefKeyModel.List();
+            // Cycle 16 — the machine policy -> authorization gate -> trusted
+            // ProgramData inventory -> certificate catalog -> clock chain is
+            // built by the SINGLE production factory, which is the same chain
+            // the readiness / preview / pre-Cook paths evaluate. This route no
+            // longer assembles its own copy, so there is exactly ONE production
+            // wiring location.
+            //
+            // Read-only throughout: the gate authorizes a FUTURE organization
+            // inventory only; the ProgramData source reads
+            // CommonApplicationData\PAXCookbook\ManagedChefKeys\organization-key-
+            // inventory.json only after path-containment, per-component reparse
+            // rejection, closed-SID owner/ACL trust, size, and stable-read /
+            // strict-UTF-8 checks all pass, and it never creates, writes,
+            // deletes, repairs, or ACL-mutates ProgramData, never touches a
+            // private key/service/Graph, and never runs a Cook/PAX/Bake. On a
+            // machine with no provisioned inventory it reports not_provisioned,
+            // so an authorized machine stays authorized_not_provisioned /
+            // inventoryLoaded:false. Even a valid provisioned document only
+            // PARSES; no key is resolved or activated.
+            LocalOrganizationAuthority authority =
+                ProductionOrganizationAuthority.CreateLocalAuthority();
+            OrganizationInventoryEvaluation organizationEvaluation = authority.Evaluation;
+            // Resolve each provisioned entry's PUBLIC certificate reference against
+            // the read-only machine catalog. The inventory gates short-circuit
+            // FIRST: the catalog is opened ONLY when an inventory is provisioned
+            // AND at least one entry actually needs a lookup, so an unauthorized,
+            // not-provisioned, unavailable, untrusted, or invalid inventory never
+            // opens it at all. The catalog is READ-ONLY and existing-only: it
+            // reports bounded per-certificate SHA-256 metadata, never a
+            // certificate, a handle, or a key, and it never creates, writes,
+            // installs, deletes, or ACL-mutates anything. Resolution is a METADATA
+            // MATCH ONLY -- it touches no key pair, obtains no credential, queries
+            // no tenant/Graph/service, uses no WAM/Hello, binds no Recipe, adds no
+            // Cook step, and runs no PAX/Bake. For an entry that resolves to
+            // EXACTLY one certificate, bounded USABILITY VALIDATION then reads
+            // only the validity window, the client-auth purpose, Digital
+            // Signature key usage, the supported algorithm, and private-key
+            // AVAILABILITY -- with the production clock injected below. It fails
+            // closed on an absent extension, never builds a chain, never checks
+            // revocation, never judges issuer trust, and NEVER USES the key. Only
+            // bounded AGGREGATE COUNTS reach the wire.
+            //
+            // The catalog is wrapped so the whole request performs AT MOST ONE
+            // certificate-store read, shared by the aggregate coordinator and the
+            // per-entry selector eligibility below.
+            ICertificateCatalog machineCatalog = authority.Catalog;
+            ICertificateUsabilityClock usabilityClock = authority.Clock;
+            OrganizationCertificateAggregate organizationCertificates =
+                OrganizationCertificateResolutionCoordinator.Resolve(
+                    organizationEvaluation, machineCatalog, usabilityClock);
+            // Cycle 14s — the bounded, PRESENTATION-ONLY organization selector.
+            // It reuses the Cycle-14 binding readiness evaluator per ENABLED
+            // entry and emits EXACTLY organizationKeyId / displayName / eligible.
+            // `eligible` is LOCAL readiness only: an organization-bound Recipe is
+            // ALWAYS organization_key_not_yet_runnable, and nothing here derives a
+            // thumbprint, builds argv, reaches PaxAdapter, spawns a process, or
+            // authorizes a Bake. There is no new route and no mutation route.
+            IReadOnlyList<OrganizationKeySelectorEntry> organizationSelector =
+                OrganizationKeySelectorProjection.Build(
+                    organizationEvaluation, machineCatalog, usabilityClock);
+            (int status, object body) = ChefKeyModel.List(
+                organizationEvaluation.Projection, organizationCertificates, organizationSelector);
             return Results.Json(body, statusCode: status);
         });
 
@@ -1434,80 +1690,397 @@ internal static class Program
             return Results.Json(r.Body, statusCode: r.Status);
         });
 
-        // Manual-cook re-auth step-up (X16B). A real browser-owned WebAuthn
-        // ceremony that authorizes exactly one manual cook of a named recipe.
-        // These routes are NOT lock-bypass: a step-up presupposes an already
-        // unlocked broker session, so the Bearer token, CSRF marker, and broker
-        // lock gates all apply upstream. The challenge route mints a single-use
-        // purpose-tagged challenge; the verify route validates the ES256
-        // assertion and, on success, records a single-use in-memory
-        // authorization the cook route consumes at gate 10. No authorization is
-        // ever returned to the client, persisted, or logged.
-        app.MapPost("/api/v1/broker/reauth/manual-cook/challenge", () =>
+        // Experimental Entra WAM cross-process endpoints (T1-S2A, DISABLED by
+        // default). The daemon mints a single-use challenge for the attached
+        // window and consumes only a bounded neutral result (no token, no raw
+        // identity claim). Both fail closed with 404 experimental_wam_not_enabled
+        // unless the provider is fully configured via explicit experimental
+        // runtime configuration; a stable/customer build never enables them and
+        // no Settings text or stable route advertises them. Bearer, CSRF, and
+        // broker-lock gates apply upstream exactly as for the other auth routes.
+
+        // GET capability probe (T1-S2B). A safe, bounded GET the lock overlay and
+        // the React operation flow use to decide whether to offer the experimental
+        // work-account action. It always answers (never 404): { available:false }
+        // unless the daemon endpoint is active (compiled experimental authenticator
+        // + valid runtime config + ready native pipe), in which case
+        // { available:true, providerId:"entra-wam" }. It returns no tenant/client
+        // id, pipe name, salt, registration, identity, or release-gate detail.
+        app.MapGet("/api/v1/broker/experimental/wam/capability", () =>
         {
-            WebAuthnResponse r = webAuthn.NewManualCookChallenge();
-            return Results.Json(r.Body, statusCode: r.Status);
+            (int status, object payload) = ExperimentalWamRoutes.HandleCapability(experimentalWamRuntime.Endpoint);
+            return Results.Json(payload, statusCode: status);
         });
 
-        app.MapPost("/api/v1/broker/reauth/manual-cook/verify", async (HttpContext context) =>
+        // GET bounded config-state (T1-S3). A safe, lock-bypass GET the Settings
+        // experience and the lock overlay use to render the correct work-account
+        // guidance for exactly one bounded state. RECOMPUTED LIVE on every request
+        // (never a frozen startup value) and reconciles native activation as a
+        // side effect. It returns ONLY bounded state + the closed provider id —
+        // never a tenant/client/resource identifier, pipe name, salt, claim, or
+        // release-gate detail. It always answers (never 404): a stable/default
+        // build reports unavailable_in_this_build.
+        app.MapGet("/api/v1/broker/experimental/wam/config-state", () =>
+        {
+            ExperimentalWamStateInfo st = experimentalWamRuntime.GetState();
+            return Results.Json(new
+            {
+                state = st.StateCode,
+                providerId = st.ProviderId,
+                disabled = st.Disabled,
+                configured = st.Configured,
+                capabilityAvailable = st.CapabilityAvailable,
+                verifiedUtc = st.VerifiedUtc,
+            });
+        });
+
+        // GET bounded selected-session-provider status (mutually-exclusive
+        // provider model). A safe, lock-bypass GET the lock overlay and Settings
+        // use to render EXACTLY the selected provider's experience (Windows Hello
+        // OR work account, never both). Selection and health are independent: this
+        // route reports the selected provider plus a bounded usable/health signal
+        // composed live from the provider's own health source. It returns NO
+        // tenant/client identifier, credential id, pipe name, or claim.
+        app.MapGet("/api/v1/broker/session-provider", () =>
+        {
+            SessionProviderSelection sel = sessionProviderRuntime.GetSelection();
+            if (sel.RecoveryRequired)
+            {
+                // The persisted selection is missing/invalid in a way that must
+                // not be silently defaulted; drive the operator to Setup repair.
+                return Results.Json(new
+                {
+                    selectedProvider = "recovery_required",
+                    recoveryRequired = true,
+                    usable = false,
+                    healthCode = "recovery_required",
+                });
+            }
+
+            if (sel.Provider == SelectedSessionProvider.WorkAccount)
+            {
+                ExperimentalWamStateInfo ws = experimentalWamRuntime.GetState();
+                return Results.Json(new
+                {
+                    selectedProvider = "work_account",
+                    recoveryRequired = false,
+                    usable = ws.CapabilityAvailable,
+                    healthCode = ws.StateCode,
+                });
+            }
+
+            bool helloEnrolled = webAuthn.HasRegisteredCredential();
+            return Results.Json(new
+            {
+                selectedProvider = "windows_hello",
+                recoveryRequired = false,
+                usable = true,
+                healthCode = helloEnrolled ? "ready" : "enrollment_required",
+            });
+        });
+
+        // Switch the selected provider to the work account (Windows Hello ->
+        // work account). Requires an Unlocked broker (bearer + CSRF + lock gate)
+        // whose current session was unlocked through a successful NATIVE work-
+        // account authentication test (provenance == work_account) AND a ready
+        // work-account configuration. On success the selection is persisted
+        // atomically; any failure leaves the current selection untouched (no
+        // partial switch). The caller Locks/restarts afterward so the new
+        // selected provider governs the next unlock.
+        app.MapPost("/api/v1/broker/session-provider/select-work-account", () =>
+        {
+            ExperimentalWamStateInfo ws = experimentalWamRuntime.GetState();
+            if (!ws.CapabilityAvailable)
+            {
+                return Results.Json(new { ok = false, reason = "work_account_not_ready" }, statusCode: StatusCodes.Status409Conflict);
+            }
+            if (!string.Equals(BrokerLock.GetUnlockProvenance(), "work_account", StringComparison.Ordinal))
+            {
+                // The mandatory native work-account authentication test has not
+                // been completed in this session, so the switch is not authorized.
+                return Results.Json(new { ok = false, reason = "work_account_auth_test_required" }, statusCode: StatusCodes.Status409Conflict);
+            }
+            sessionProviderRuntime.Select(SelectedSessionProvider.WorkAccount);
+            return Results.Json(new { ok = true, selectedProvider = "work_account" });
+        });
+
+        // Switch the selected provider to Windows Hello (work account -> Windows
+        // Hello). The current Unlocked session authorizes the switch, but the
+        // switch is decided by TWO SEPARATE predicates, never persisting on an
+        // unproven platform or a broken registration:
+        //   platformAvailable  the browser isUserVerifyingPlatformAuthenticator-
+        //                       Available() result, supplied as a bounded boolean
+        //                       (the SAME capability signal the lock shell uses,
+        //                       NOT the local credential count). A missing/invalid
+        //                       body fails closed to unavailable.
+        //   local registration EvaluateLocalRegistration() — valid / not
+        //                       registered / malformed.
+        // Four bounded outcomes (see WindowsHelloSwitchEvaluator):
+        //   (a) available + valid       -> atomic Select(WindowsHello) [persists]
+        //   (b) available + unregistered-> windows_hello_enrollment_required (the
+        //                                  renderer reuses the WebAuthn enrollment
+        //                                  ceremony, then calls again) [no persist]
+        //   (c) unavailable             -> windows_hello_platform_unavailable [no persist]
+        //   (d) malformed               -> windows_hello_registration_repair_required [no persist]
+        // Persistence happens ONLY on (a); (b)/(c)/(d) leave work_account selected.
+        app.MapPost("/api/v1/broker/session-provider/select-windows-hello", async (HttpContext context) =>
         {
             JsonElement? body = await ReadJsonBodyAsync(context);
-            WebAuthnResponse r = webAuthn.VerifyManualCook(body);
-            return Results.Json(r.Body, statusCode: r.Status);
+            bool platformAvailable = false;
+            if (body is JsonElement je && je.ValueKind == JsonValueKind.Object &&
+                je.TryGetProperty("platformAvailable", out JsonElement pa) &&
+                (pa.ValueKind == JsonValueKind.True || pa.ValueKind == JsonValueKind.False))
+            {
+                platformAvailable = pa.GetBoolean();
+            }
+
+            HelloLocalRegistration registration = webAuthn.EvaluateLocalRegistration();
+            WindowsHelloSwitchDecision decision =
+                WindowsHelloSwitchEvaluator.Evaluate(platformAvailable, registration);
+
+            if (decision == WindowsHelloSwitchDecision.SwitchReady)
+            {
+                // ONLY reachable when platformAvailable == true AND the local
+                // registration is Valid. This is the sole line that persists
+                // windows_hello; every other decision returns first.
+                sessionProviderRuntime.Select(SelectedSessionProvider.WindowsHello);
+                return Results.Json(new { ok = true, selectedProvider = "windows_hello" });
+            }
+
+            // No partial write: the current selection (work_account) is untouched.
+            return Results.Json(
+                new { ok = false, reason = WindowsHelloSwitchEvaluator.ReasonFor(decision) },
+                statusCode: StatusCodes.Status409Conflict);
         });
+
+        app.MapPost("/api/v1/broker/experimental/wam/initiate", async (HttpContext context) =>
+        {
+            ExperimentalWamDaemonEndpoint? endpoint = experimentalWamRuntime.Endpoint;
+            if (endpoint is null)
+            {
+                return Results.Json(new { error = "experimental_wam_not_enabled" }, statusCode: StatusCodes.Status404NotFound);
+            }
+
+            JsonElement? body = await ReadJsonBodyAsync(context);
+            (int status, object payload) = ExperimentalWamRoutes.HandleInitiate(endpoint, body);
+            return Results.Json(payload, statusCode: status);
+        });
+
+        app.MapPost("/api/v1/broker/experimental/wam/status", async (HttpContext context) =>
+        {
+            ExperimentalWamDaemonEndpoint? endpoint = experimentalWamRuntime.Endpoint;
+            if (endpoint is null)
+            {
+                return Results.Json(new { error = "experimental_wam_not_enabled" }, statusCode: StatusCodes.Status404NotFound);
+            }
+
+            JsonElement? body = await ReadJsonBodyAsync(context);
+            string? requestId = null;
+            if (body is JsonElement je && je.ValueKind == JsonValueKind.Object &&
+                je.TryGetProperty("requestId", out JsonElement rid) && rid.ValueKind == JsonValueKind.String)
+            {
+                requestId = rid.GetString();
+            }
+
+            (int status, object payload) = ExperimentalWamRoutes.HandleStatus(endpoint, requestId);
+            return Results.Json(payload, statusCode: status);
+        });
+
+        // ---- Work-account Settings mutation routes (T1-S3 Phase 3) ----------
+        // NOT in the lock-bypass allow-list, so the broker-lock gate requires an
+        // Unlocked session for every one of them (bearer + CSRF apply upstream).
+        // Identity-provider REMOVAL additionally requires a Windows Hello session
+        // (a work-account session may use the app but cannot alter the provider).
+        // A stable/default build compiles no authenticator, so these all report
+        // unavailable_in_this_build and perform no storage or helper operation.
+
+        static IResult WamStateJson(ExperimentalWamActionResult r, int successStatus = 200)
+            => Results.Json(new
+            {
+                ok = r.Success,
+                reason = r.Reason,
+                state = r.State.StateCode,
+                providerId = r.State.ProviderId,
+                disabled = r.State.Disabled,
+                configured = r.State.Configured,
+                capabilityAvailable = r.State.CapabilityAvailable,
+                verifiedUtc = r.State.VerifiedUtc,
+            }, statusCode: r.Success ? successStatus : StatusCodes.Status400BadRequest);
+
+        // Import a helper setup-result: strict validation, atomic save, drop to
+        // configured_unverified. The whole request body IS the setup-result JSON.
+        app.MapPost("/api/v1/broker/experimental/wam/import", async (HttpContext context) =>
+        {
+            string bodyText;
+            using (var reader = new System.IO.StreamReader(context.Request.Body, System.Text.Encoding.UTF8))
+            {
+                bodyText = await reader.ReadToEndAsync();
+            }
+            return WamStateJson(experimentalWamRuntime.ImportSetupResult(bodyText));
+        });
+
+        // Local enable / disable (retains identifiers; toggles capability).
+        app.MapPost("/api/v1/broker/experimental/wam/enable", () =>
+            WamStateJson(experimentalWamRuntime.SetLocallyEnabled(true)));
+        app.MapPost("/api/v1/broker/experimental/wam/disable", () =>
+            WamStateJson(experimentalWamRuntime.SetLocallyEnabled(false)));
+
+        // Remove local configuration ONLY (never cloud objects). Requires only an
+        // Unlocked broker (bearer + CSRF + the lock gate) — the session may be
+        // unlocked through EITHER selected provider. OAuth administration must
+        // never require Windows Hello (OAuth is the Hello replacement on machines
+        // where Hello is unavailable).
+        app.MapPost("/api/v1/broker/experimental/wam/remove", () =>
+        {
+            return WamStateJson(experimentalWamRuntime.RemoveLocalConfiguration());
+        });
+
+        // Administrator-details disclosure (the ONLY route that returns raw
+        // identifiers) — Unlocked only (already enforced by the lock gate). The
+        // values are labelled non-secret identifiers; no token/grant/claim/SP is
+        // ever returned.
+        app.MapGet("/api/v1/broker/experimental/wam/admin-details", () =>
+        {
+            ExperimentalWamAdminDetails? details = experimentalWamRuntime.GetAdminDetails();
+            if (details is null)
+            {
+                return Results.Json(new { available = false }, statusCode: StatusCodes.Status404NotFound);
+            }
+            return Results.Json(new
+            {
+                available = true,
+                nonSecretIdentifiers = true,
+                tenantId = details.TenantId,
+                clientId = details.ClientId,
+            });
+        });
+
+        // Builds the fixed, guarded helper runner. The helper path is resolved
+        // from the verified application root (never from UI input); an optional
+        // bundled ".sha256" sidecar enforces integrity.
+        ExperimentalWamHelperRunner BuildWamHelperRunner()
+        {
+            string helperPath = ExperimentalWamHelperRunner.ResolveHelperPath(appRoot);
+            string? expectedHash = null;
+            string sidecar = helperPath + ".sha256";
+            if (File.Exists(sidecar))
+            {
+                try { expectedHash = File.ReadAllText(sidecar).Trim(); }
+                catch { expectedHash = null; }
+            }
+            return new ExperimentalWamHelperRunner(helperPath, expectedSha256: expectedHash);
+        }
+
+        // Verify setup: launch the fixed helper (administrator's transient Azure
+        // CLI session, read-only), independently validate its strict result
+        // against the local configuration, and transition to ready ONLY on exact
+        // success. Requires an experimental build and an Unlocked broker (bearer +
+        // CSRF + lock gate). The Unlocked session may be through EITHER provider;
+        // OAuth verification never requires Windows Hello.
+        app.MapPost("/api/v1/broker/experimental/wam/verify", () =>
+        {
+            if (!experimentalWamCompiled)
+            {
+                return Results.Json(new { ok = false, reason = "unavailable_in_this_build" }, statusCode: StatusCodes.Status404NotFound);
+            }
+            ExperimentalWamHelperRunner runner = BuildWamHelperRunner();
+            ExperimentalWamActionResult r = ExperimentalWamVerifyCoordinator.RunVerify(
+                experimentalWamRuntime, runner, experimentalWamCompiled, DateTimeOffset.UtcNow);
+            return WamStateJson(r);
+        });
+
+        // Prepare deprovision (read-only dry run): runs the fixed helper in plan
+        // mode and returns bounded object categories + a short-lived plan id bound
+        // to the current configuration fingerprint. Deletes nothing. Requires an
+        // experimental build and an Unlocked broker (either provider); never Hello.
+        app.MapPost("/api/v1/broker/experimental/wam/prepare-deprovision", () =>
+        {
+            if (!experimentalWamCompiled)
+            {
+                return Results.Json(new { ok = false, reason = "unavailable_in_this_build" }, statusCode: StatusCodes.Status404NotFound);
+            }
+            ExperimentalWamHelperRunner runner = BuildWamHelperRunner();
+            ExperimentalWamDeprovisionCoordinator.PrepareResult plan =
+                ExperimentalWamDeprovisionCoordinator.Prepare(experimentalWamRuntime, runner, experimentalWamCompiled, DateTimeOffset.UtcNow);
+            return Results.Json(new { ok = plan.Ok, reason = plan.Reason, planId = plan.PlanId, categories = plan.Categories },
+                statusCode: plan.Ok ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+        });
+
+        // Execute deprovision: requires the exact short-lived plan id, runs the
+        // fixed helper's real deletion, verifies cleanup, and removes local
+        // configuration ONLY after complete verified success (partial failure
+        // preserves it). Requires an experimental build and an Unlocked broker
+        // (either provider); never Windows Hello.
+        app.MapPost("/api/v1/broker/experimental/wam/execute-deprovision", async (HttpContext context) =>
+        {
+            if (!experimentalWamCompiled)
+            {
+                return Results.Json(new { ok = false, reason = "unavailable_in_this_build" }, statusCode: StatusCodes.Status404NotFound);
+            }
+            JsonElement? body = await ReadJsonBodyAsync(context);
+            string? planId = null;
+            if (body is JsonElement je && je.ValueKind == JsonValueKind.Object &&
+                je.TryGetProperty("planId", out JsonElement pid) && pid.ValueKind == JsonValueKind.String)
+            {
+                planId = pid.GetString();
+            }
+            ExperimentalWamHelperRunner runner = BuildWamHelperRunner();
+            ExperimentalWamActionResult r = ExperimentalWamDeprovisionCoordinator.Execute(
+                experimentalWamRuntime, runner, experimentalWamCompiled, planId, DateTimeOffset.UtcNow);
+            return WamStateJson(r);
+        });
+
+        // The former HTTP result endpoint is PERMANENTLY non-authoritative: the
+        // bounded native result now arrives only over native IPC. A renderer POST
+        // here can never apply an outcome — it returns 410 Gone and grants nothing.
+        app.MapPost("/api/v1/broker/experimental/wam/result", () =>
+            Results.Json(new { error = "experimental_wam_result_moved_to_native_ipc" }, statusCode: StatusCodes.Status410Gone));
 
         // Manual cook-start (X16). The public route runs the full native
         // cook-start pipeline AND launches the single sanctioned PAX engine
-        // child: gates 1..9 (recipe / acquisition / busy), gate 10 (per-operation
-        // manualCook re-auth — 401 reAuthRequired unless satisfied), a bounded
-        // 501 for App-registration recipes (secret-at-spawn is out of scope),
+        // child: gates 1..9 (recipe / acquisition / busy), the session-only
+        // authorization step (a manual cook is authorized by the Unlocked broker
+        // session plus explicit user confirmation, both enforced upstream), a
+        // bounded 412 for App-registration recipes with no usable Chef's Key,
         // then gates 11..18 (folder + files + row) and the supervised spawn
-        // (201 on success, bounded 500 on spawn failure). The test-only
-        // --test-seam-cook-prepare flag still drives the X15 pre-spawn
-        // preparation and returns a bounded 200 cook_prepared_no_child WITHOUT
-        // spawning. Bearer, CSRF, and broker-lock gates have all run upstream.
+        // (201 on success, bounded 500 on spawn failure). Bearer, CSRF, and
+        // broker-lock gates have all run upstream. There is exactly ONE path
+        // through this handler.
         IResult CookStartHandler(HttpContext ctx, string id)
         {
             EngineAcquisitionResult engine = EngineAcquisition.Resolve(versionInfo, engineLocalAppDataBase);
             string method = ctx.Request.Method;
             string path = ctx.Request.Path.Value ?? string.Empty;
-            if (cookPrepareSeam)
-            {
-                (int prepStatus, object prepBody) = RecipeReadModel.PrepareCookStart(
-                    workspacePath, versionInfo, engine, id, persist: true, method, path, cookMinFreeBytes);
-                return Results.Json(prepBody, statusCode: prepStatus);
-            }
             (int status, object body) = RecipeReadModel.StartManualCook(
                 workspacePath, versionInfo, engine, id, method, path, cookMinFreeBytes,
-                manualCookReAuthSeam, cookPwshPathOverride);
+                cookPwshPathOverride);
             return Results.Json(body, statusCode: status);
         }
 
         // Scheduled cook-start (V2 two-process). The daemon-side endpoint the
         // --bake CLI (Windows Task Scheduler → daemon delegation) calls. It runs
         // the SAME single cook pipeline (constraint 8) as the manual route with
-        // ONE difference: CookKind.Scheduled WAIVES gate 10 (the per-operation
-        // Windows Hello step-up) and REPLACES it with the scheduled-auth gate (the
-        // recipe must have an ENABLED schedule, created earlier while the app was
-        // unlocked and Hello-verified). EVERY other gate is identical to the manual
+        // ONE difference in the authorization step: CookKind.Scheduled requires
+        // the recipe to have an ENABLED schedule (created earlier while the app
+        // was unlocked and Hello-verified) as its distinct unattended-run
+        // authority. EVERY other gate is identical to the manual
         // route — Bearer + CSRF + broker-lock (423 when Locked) all run upstream,
         // and recipe validation (QueryShapeGate / DateRangeGate), acquisition,
         // busy, disk, path, Chef's Key resolution, and the pre-spawn SHA re-verify
         // all still apply. This is the approved constraint-10 modification (X7)
-        // extended to a loopback HTTP route (Brian-directed): the gate-10 waiver,
-        // previously reachable ONLY via the --run-scheduled-recipe one-shot, is now
-        // also reachable here.
+        // extended to a loopback HTTP route (Brian-directed): the unattended
+        // scheduled run, previously reachable ONLY via the --run-scheduled-recipe
+        // one-shot, is now also reachable here.
         //
-        // SECURITY — this is NOT a gate-10 bypass for manual cooks:
-        //   * The React UI's Bake button still calls the MANUAL route (gate 10
-        //     enforced). Nothing in the SPA calls this route.
+        // SECURITY — this route cannot run an arbitrary recipe unattended:
+        //   * The React UI's Bake button still calls the MANUAL route. Nothing in
+        //     the SPA calls this route.
         //   * Defense-in-depth: this route requires an explicit X-Cookbook-Scheduled
         //     marker header that the --bake CLI sends and the React brokerBridge
         //     never sends, so a stock SPA fetch is refused 403 before the pipeline.
         //   * The real boundary is the scheduled-auth gate: only a recipe the user
         //     ALREADY authorized for scheduling (enabled schedule) can run here; an
-        //     unscheduled recipe is refused 409 recipe_not_scheduled. So this route
-        //     can never run an arbitrary recipe without Windows Hello.
+        //     unscheduled recipe is refused 409 recipe_not_scheduled.
         IResult CookStartScheduledHandler(HttpContext ctx, string id)
         {
             // Defense-in-depth scheduled-only marker (see route comment). The
@@ -1591,9 +2164,9 @@ internal static class Program
         // mechanism, not a second channel. A resume is a one-time recovery action,
         // NOT a recipe - there is no recipes-table row, no recipe validation, and
         // no recipe-list entry. It still enforces the engine acquisition gate (the
-        // engine SHA is re-verified immediately before spawn, constraint 6) and the
-        // per-operation Windows Hello step-up (gate 10, keyed to the resume
-        // sentinel; fails closed with 401 reAuthRequired). Bearer, CSRF, and
+        // engine SHA is re-verified immediately before spawn, constraint 6). A
+        // Resume is authorized by the Unlocked broker session plus explicit user
+        // confirmation; Bearer, CSRF, and
         // broker-lock gates have all run upstream. The request body is
         // { checkpointPath, force?, chefKeyId? }: force defaults to false, and a
         // missing / empty chefKeyId means "restore the saved sign-in from the
@@ -1633,7 +2206,7 @@ internal static class Program
 
             (int status, object respBody) = RecipeReadModel.StartResumeCook(
                 workspacePath, versionInfo, engine, checkpointPath, force, chefKeyId,
-                manualCookReAuthSeam, cookPwshPathOverride);
+                cookPwshPathOverride);
             return Results.Json(respBody, statusCode: status);
         });
 
@@ -1825,20 +2398,17 @@ internal static class Program
         Console.WriteLine($"X3_LOCK_STATE_URL=http://127.0.0.1:{port}/api/v1/broker/lock-state");
         Console.WriteLine($"X3_WEBAUTHN_STATUS_URL=http://127.0.0.1:{port}/api/v1/broker/webauthn/status");
         Console.WriteLine($"X3_CREDENTIAL_STORE={Path.Combine(workspacePath, "Auth", "webauthn-credentials.json")}");
+        Console.WriteLine($"X3_WAM_CONFIG_STATE={experimentalWamStateCode}");
+        Console.WriteLine($"X3_SESSION_PROVIDER={sessionProviderStateCode}");
         Console.WriteLine($"X4_TEST_SEAM_BOOT_UNLOCKED={(bootUnlockedSeam ? "1" : "0")}");
         Console.WriteLine($"X4_TEMPLATE_CATALOG_COUNT={templateModel.Count}");
         Console.WriteLine($"X13_ENGINE_ACQUISITION_GATE=on");
         Console.WriteLine($"X13_ENGINE_LOCALAPPDATA_OVERRIDE={(engineLocalAppDataOverride is null ? "0" : "1")}");
         Console.WriteLine($"X13_ENGINE_LOCALAPPDATA_BASE={engineLocalAppDataBase}");
         Console.WriteLine($"X15_COOK_PREPARE_GATE=on");
-        Console.WriteLine($"X15_TEST_SEAM_COOK_PREPARE={(cookPrepareSeam ? "1" : "0")}");
         Console.WriteLine($"X15_TEST_SEAM_COOK_MIN_FREE_BYTES={cookMinFreeBytes}");
         Console.WriteLine($"X16_MANUAL_COOK_SUPERVISOR=on");
-        Console.WriteLine($"X16_TEST_SEAM_MANUAL_COOK_REAUTH_VERIFIED={(manualCookReAuthSeam ? "1" : "0")}");
         Console.WriteLine($"X16_TEST_SEAM_COOK_PWSH_PATH_OVERRIDE={(cookPwshPathOverride is null ? "0" : "1")}");
-        Console.WriteLine($"X16B_MANUAL_COOK_REAL_REAUTH=on");
-        Console.WriteLine($"X16B_REAUTH_CHALLENGE_URL=http://127.0.0.1:{port}/api/v1/broker/reauth/manual-cook/challenge");
-        Console.WriteLine($"X16B_REAUTH_VERIFY_URL=http://127.0.0.1:{port}/api/v1/broker/reauth/manual-cook/verify");
         Console.WriteLine($"X16C_TEST_SEAM_CLOSE_AFTER_MS={selfCloseAfterMs}");
         Console.WriteLine($"X16C_SINGLE_INSTANCE={(noWindow ? "exempt-headless" : "primary")}");
         Console.WriteLine($"X16C_AUMID={(testSeamAumid is null ? "PAXCookbook.Local.v1" : testSeamAumid)}");
@@ -1909,12 +2479,20 @@ internal static class Program
                 // The HKCU Run key launches this at login.
                 Console.WriteLine("X2V_TWO_PROCESS=on");
                 Console.WriteLine("X2V_ROLE=daemon");
+                // Test-only lifecycle-smoke seam: drive the real tray Exit path on
+                // the UI thread after a delay. 0 (default) when absent; the desktop
+                // launcher never passes it.
+                int trayExitSeamMs = int.TryParse(
+                    ResolveSeamValueArg(args, "--test-seam-tray-exit-after-ms"), out int trayExitParsed)
+                    ? trayExitParsed
+                    : 0;
                 try
                 {
                     TrayIconHost.Run(
                         iconPath,
                         "PAX Cookbook is running in the background",
-                        () => StopBrokerHost(app));
+                        ct => app.StopAsync(ct),
+                        trayExitSeamMs);
                 }
                 catch (Exception ex)
                 {
@@ -1925,10 +2503,18 @@ internal static class Program
                     return 1;
                 }
 
-                // Tray Exit chosen: the broker is stopped; release the port file
-                // so a fresh launch can claim ownership.
+                // Shutdown was requested (tray Exit or /shutdown). The coordinator
+                // disposed the tray UI and stops Kestrel OFF the UI thread; once the
+                // message loop ended, complete a clean, deadlock-free stop here (the
+                // WinForms SynchronizationContext is no longer installed, so
+                // StopAsync cannot deadlock the way it did on the tray UI thread),
+                // release the port file, and force a deterministic exit so a
+                // lingering background thread can never hold the process — and the
+                // exe write-lock — open.
+                StopBrokerHost(app);
                 BrokerDetection.ReleasePortFile(portFileHandle);
                 portFileHandle = null;
+                Environment.Exit(0);
                 return 0;
             }
 
@@ -1955,9 +2541,48 @@ internal static class Program
         string url = $"http://localhost:{port}/";
         string webView2UserData = Path.Combine(workspacePath, "WebView2");
         StartupLog.Mark("Startup complete \u2014 opening application window");
+
+        // PHASE-1 Hello capability diagnostic seam (cycle-01r-hello-capability-
+        // probe-repair). MEASUREMENT ONLY: it changes no switch/enrollment
+        // behavior. It is gated behind BOTH an explicit one-shot environment
+        // flag (PAXCB_HELLO_DIAG=1) AND the build-gated authoritative test-
+        // isolation runtime. A stable/customer build has no isolation activation
+        // path, so TestIsolationRuntime.IsActive is always false there and the
+        // seam can NEVER run — regardless of the env var. An attended isolated
+        // launch WITHOUT the env flag is likewise pristine (no injected script,
+        // no auto-drive, no diag WebMessage handler). When enabled, the
+        // bounded, PII-free evidence JSON is written under the directory the
+        // launch supplies via PAXCB_HELLO_DIAG_OUT.
+        bool helloDiagEnabled =
+            TestIsolationRuntime.IsActive &&
+            string.Equals(
+                Environment.GetEnvironmentVariable("PAXCB_HELLO_DIAG"),
+                "1",
+                StringComparison.Ordinal);
+        string? helloDiagOutDir = helloDiagEnabled
+            ? Environment.GetEnvironmentVariable("PAXCB_HELLO_DIAG_OUT")
+            : null;
+
+        // PHASE-2 attended Hello capability diagnostic seam (cycle-01r-hello-
+        // capability-probe-repair). MEASUREMENT ONLY: it changes no switch/
+        // enrollment behavior. Unlike the PHASE-1 seam it needs NO env flag — it
+        // arms whenever the build-gated authoritative test-isolation runtime is
+        // active, so a REAL attended isolated switch (a human clicking "Use
+        // Windows Hello" and completing the gesture-dependent create() ceremony)
+        // is captured without any special launch argument. A stable/customer
+        // build has no isolation activation path, so TestIsolationRuntime.IsActive
+        // is always false there and this seam can NEVER run — no attended marker
+        // is injected and the attended capture handler is never wired. When
+        // enabled, the bounded, PII-free evidence JSON is written under the
+        // directory the launch supplies via PAXCB_HELLO_ATTENDED_OUT.
+        bool helloAttendedDiagEnabled = TestIsolationRuntime.IsActive;
+        string? helloAttendedDiagOutDir = helloAttendedDiagEnabled
+            ? Environment.GetEnvironmentVariable("PAXCB_HELLO_ATTENDED_OUT")
+            : null;
+
         try
         {
-            WebViewShell.Run(url, WindowTitle(versionInfo), iconPath, webView2UserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir);
+            WebViewShell.Run(url, WindowTitle(versionInfo), iconPath, webView2UserData, selfCloseAfterMs, restoreSignal, testSeamAumid, importHandoffDir, helloDiagEnabled: helloDiagEnabled, helloDiagOutDir: helloDiagOutDir, helloAttendedDiagEnabled: helloAttendedDiagEnabled, helloAttendedDiagOutDir: helloAttendedDiagOutDir);
         }
         catch (WebView2RuntimeMissingException ex)
         {
@@ -2271,10 +2896,10 @@ internal static class Program
     // single-instance mutex, and starts NO Kestrel / UI-port HTTP server (it
     // returned from Main before any of those were reached). It resolves its own
     // dependencies (workspace / appRoot / version / engine), then calls
-    // RecipeReadModel.StartScheduledCook, which (a) WAIVES the per-operation
-    // Windows Hello step-up (gate 10) — the Brian-approved constraint-10
-    // modification, scheduled path ONLY — and instead requires the recipe to have
-    // an enabled schedule, and (b) blocks until the cook has fully finalized
+    // RecipeReadModel.StartScheduledCook, which (a) authorizes the run by
+    // requiring the recipe to have an enabled schedule — the Brian-approved
+    // constraint-10 modification, scheduled path ONLY — and (b) blocks until the
+    // cook has fully finalized
     // (joinSupervisor=true), so this process never exits early and orphans the
     // pwsh child. Every stdout marker and refusal token is secret-free
     // (constraint 14): only the recipe/cook id, the terminal cook status, and a
@@ -2409,15 +3034,15 @@ internal static class Program
     // daemon, and never written to stdout (constraint 14 — every printed line is a
     // secret-free id / status / bounded error token).
     //
-    // GATE MODEL: the daemon's /cook/scheduled route WAIVES gate 10 (the
-    // per-operation Windows Hello step-up — an unattended Task Scheduler fire has
-    // no human to verify) but enforces EVERY other gate: Bearer + CSRF + the
-    // broker-lock gate (Locked daemon -> 423 -> exit 1), recipe validation, the
+    // GATE MODEL: the daemon's /cook/scheduled route authorizes the run by the
     // scheduled-auth gate (the recipe must have an ENABLED schedule, so an
-    // unscheduled recipe is refused 409 -> exit 1), acquisition, busy, disk, path,
-    // Chef's Key resolution, and the pre-spawn SHA re-verify. The gate-10 waiver
-    // is NOT a manual-cook bypass: the React Bake button still uses the manual
-    // route with gate 10, and only a recipe the user already authorized for
+    // unscheduled recipe is refused 409 -> exit 1) — an unattended Task Scheduler
+    // fire has no human to confirm it — and enforces EVERY other gate: Bearer +
+    // CSRF + the broker-lock gate (Locked daemon -> 423 -> exit 1), recipe
+    // validation, acquisition, busy, disk, path,
+    // Chef's Key resolution, and the pre-spawn SHA re-verify. This is NOT a
+    // manual-cook bypass: the React Bake button still uses the manual
+    // route, and only a recipe the user already authorized for
     // scheduling can run here.
     //
     // Exit codes (deterministic): 0 = bake completed; 1 = bake failed / errored /
@@ -2481,14 +3106,14 @@ internal static class Program
         http.DefaultRequestHeaders.TryAddWithoutValidation("X-Cookbook-Request", "1");
         // Scheduled-only marker — the daemon's /cook/scheduled route requires it
         // (defense-in-depth so the React UI, which never sends it, cannot reach
-        // the gate-10-waived scheduled path).
+        // the scheduled path).
         http.DefaultRequestHeaders.TryAddWithoutValidation("X-Cookbook-Scheduled", "1");
 
         // 4. POST the cook to the daemon's SCHEDULED-cook route
         //    (POST /api/v1/recipes/{id}/cook/scheduled). Unlike the manual route,
-        //    this waives gate 10 (Windows Hello) — an unattended Task Scheduler
-        //    fire has no human to verify — but keeps Bearer + CSRF + lock + the
-        //    scheduled-auth gate (the recipe must have an enabled schedule) + full
+        //    this is authorized by the scheduled-auth gate (the recipe must have
+        //    an enabled schedule) — an unattended Task Scheduler
+        //    fire has no human to confirm it — and keeps Bearer + CSRF + lock + full
         //    recipe validation. The daemon owns every gate; any non-201 is the
         //    broker refusing, mapped to exit 1. A 404 with NO broker error body
         //    means the running daemon is an OLDER build without this route.

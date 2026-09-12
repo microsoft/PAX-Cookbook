@@ -2981,6 +2981,63 @@ select.form-input {
     color: var(--c-fg-on-elevated);
 }
 
+/* Work-account PRIMARY action (lock-overlay.js injectWorkAccountButton).     */
+/* When the work account is the selected provider the Windows Hello primary   */
+/* is hidden and this is the single blue PRIMARY call to action. It shares    */
+/* the exact box metrics of the sibling Close / Close app buttons (see        */
+/* .lock-overlay-actions > button) while carrying the accent fill so it reads */
+/* as the primary action, and it stays the primary retry action after a       */
+/* failure -- it never degrades to a ghost/link. All colors come from the     */
+/* theme accent tokens, so light + dark themes are handled automatically. The */
+/* button.<class> selector outranks body.ux-redesign .btn-primary so the      */
+/* shared 11px/14px box metrics win over the global primary padding.          */
+.lock-overlay-actions > button.lock-overlay-workaccount {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+    padding: 11px 14px;
+    font-size: var(--font-14);
+    font-weight: 600;
+    border-radius: 9px;
+    background: var(--c-accent);
+    color: var(--c-accent-fg);
+    border: 1px solid var(--c-accent-active);
+}
+.lock-overlay-actions > button.lock-overlay-workaccount:hover:not(:disabled) {
+    background: var(--c-accent-hover);
+    border-color: var(--c-accent-hover);
+    color: var(--c-accent-fg);
+}
+.lock-overlay-actions > button.lock-overlay-workaccount:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+/* Disabled == in-flight: the button is disabled while a sign-in attempt runs. */
+/* It greys like every other primary so it reads as non-interactive, then     */
+/* returns to the accent fill as the retry action once the attempt ends.      */
+.lock-overlay-actions > button.lock-overlay-workaccount:disabled {
+    background: var(--c-border-strong);
+    border-color: var(--c-border-strong);
+    color: var(--c-fg-subtle);
+    cursor: not-allowed;
+}
+/* Forced-colors / high-contrast: keep a real button silhouette (a solid      */
+/* border can otherwise disappear) and a Highlight focus ring. The UA forces  */
+/* system colors for background/text, so the button never collapses to bare   */
+/* link text.                                                                 */
+@media (forced-colors: active) {
+    .lock-overlay-actions > button.lock-overlay-workaccount {
+        border: 2px solid ButtonText;
+    }
+    .lock-overlay-actions > button.lock-overlay-workaccount:disabled {
+        border-color: GrayText;
+    }
+    .lock-overlay-actions > button.lock-overlay-workaccount:focus-visible {
+        outline: 2px solid Highlight;
+        outline-offset: 2px;
+    }
+}
+
 .lock-overlay-status {
     margin: 0;
     font-size: var(--font-12);
@@ -3539,6 +3596,101 @@ body.cookbook-pax-engine-active .nav-rail {
     background: var(--c-topbar-btn-bg-hover);
     border-color: var(--c-topbar-btn-border-hover);
 }
+
+/* Work-account profile control (experimental, native-driven). The whole block
+   is hidden until the native host posts a valid presentation envelope AND the
+   gate is open (work account selected + Unlocked); a stable build never mounts
+   it, so it occupies no space. */
+.wa-profile {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+.wa-profile[hidden] { display: none; }
+.wa-profile__button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 50%;
+}
+.wa-profile__button:focus-visible {
+    box-shadow: var(--focus-ring);
+}
+.wa-profile__avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: inherit;
+    font-size: var(--font-12, 12px);
+    font-weight: 600;
+    line-height: 1;
+    color: var(--c-profile-avatar-fg, var(--ux-button-primary-text));
+    background: var(--c-profile-avatar-bg, var(--ux-brand-700));
+    border: 1px solid var(--c-profile-avatar-border, var(--ux-brand-800));
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    text-transform: uppercase;
+    overflow: hidden;
+}
+.wa-profile__avatar--photo { color: transparent; }
+.wa-profile__button:hover .wa-profile__avatar,
+.wa-profile__button[aria-expanded="true"] .wa-profile__avatar {
+    border-color: var(--c-profile-avatar-border-hover, var(--c-accent));
+}
+.wa-profile__menu {
+    position: absolute;
+    top: calc(100% + var(--space-1));
+    right: 0;
+    z-index: 40;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-1);
+    border-radius: var(--radius-s);
+    background: var(--c-surface-elevated, #fff);
+    border: 1px solid var(--c-topbar-btn-border);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.wa-profile__menu[hidden] { display: none; }
+.wa-profile__menuitem {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    font: inherit;
+    font-size: var(--font-13);
+    color: var(--c-fg, inherit);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+}
+.wa-profile__menuitem:hover {
+    background: var(--c-topbar-btn-bg-hover);
+}
+.wa-profile__message {
+    position: absolute;
+    top: calc(100% + var(--space-1));
+    right: 0;
+    z-index: 40;
+    max-width: 260px;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-s);
+    font-size: var(--font-12, 12px);
+    color: var(--c-fg, inherit);
+    background: var(--c-surface-elevated, #fff);
+    border: 1px solid var(--c-topbar-btn-border);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.wa-profile__message[hidden] { display: none; }
 
 .topbar-icon {
     width: 14px;

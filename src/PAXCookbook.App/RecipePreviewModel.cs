@@ -15,9 +15,10 @@ internal static class RecipePreviewModel
     // emitted by the caller via Results.Json; error bodies that carry AJV
     // errors use Dictionary<string,object?> so their keys serialize verbatim.
     public static (int Status, object Body) Handle(
-        string workspacePath, string paxScriptPath, VersionInfo versionInfo, object? body)
+        string workspacePath, string paxScriptPath, VersionInfo versionInfo, object? body,
+        Func<RecipeReadModel.OrganizationCookPreparationContext>? organizationAuthority)
     {
-        ProjectionResult r = Project(workspacePath, paxScriptPath, versionInfo, body);
+        ProjectionResult r = Project(workspacePath, paxScriptPath, versionInfo, body, organizationAuthority);
         if (!r.Ok)
         {
             return (r.Status, r.ErrorBody!);
@@ -60,8 +61,15 @@ internal static class RecipePreviewModel
     // recipe file, creates a cook, invokes PAX, or reads the PAX bytes. The
     // only fills it performs are the server-managed draft fields, and those
     // live only in the request's in-memory value tree.
+    //
+    // Cycle 16 — `organizationAuthority` is the REAL production authority
+    // factory. It is required (never defaulted) so no production caller can
+    // silently project an organization-bound Recipe against nothing, it is
+    // invoked ONLY for an organization-bound Recipe so the personal path does no
+    // extra work, and a null factory fails closed.
     internal static ProjectionResult Project(
-        string workspacePath, string paxScriptPath, VersionInfo versionInfo, object? body)
+        string workspacePath, string paxScriptPath, VersionInfo versionInfo, object? body,
+        Func<RecipeReadModel.OrganizationCookPreparationContext>? organizationAuthority)
     {
         var result = new ProjectionResult();
 
@@ -115,18 +123,48 @@ internal static class RecipePreviewModel
         // metadata only -- the secret is never read here (constraint 14).
         string authMode = string.Empty;
         string chefKeyId = string.Empty;
+        string organizationKeyId = string.Empty;
         if (recipe.ContainsKey("auth") && recipe["auth"] is Dictionary<string, object?> auth)
         {
             if (auth.ContainsKey("mode")) { authMode = JsonModel.Str(auth["mode"]); }
             if (auth.ContainsKey("chefKeyId")) { chefKeyId = JsonModel.Str(auth["chefKeyId"]); }
+            if (auth.ContainsKey("organizationKeyId")) { organizationKeyId = JsonModel.Str(auth["organizationKeyId"]); }
         }
+
         string executionMode = recipe.ContainsKey("executionMode") ? JsonModel.Str(recipe["executionMode"]) : string.Empty;
 
         PaxAdapter.ChefKeyAuthRow? chefKeyRow = null;
         bool appMode =
             string.Equals(authMode, "AppRegistrationSecret", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(authMode, "AppRegistrationCertificate", StringComparison.OrdinalIgnoreCase);
-        if (appMode)
+
+        // Cycle 14s / Cycle 16 — ORGANIZATION-KEY PROJECTION.
+        //
+        // An organization-bound Recipe is refused here, before any personal
+        // Chef's Key resolution and before PaxAdapter.GetInvocationPlan, unless
+        // the REAL production authority (machine policy -> trusted inventory ->
+        // certificate catalog -> clock) reports the binding locally ready AND the
+        // ACQUIRED engine attests the sanctioned SHA-256 selector capability.
+        // The current production engine attests nothing, so this always refuses
+        // and NO command, argv, or spawn projection is produced. A null authority
+        // fails closed the same way. It never falls back to the personal key
+        // path, never derives a thumbprint, and never puts a certificate
+        // reference in the body.
+        //
+        // THIS RESULT GRANTS NO EXECUTION AUTHORITY: it is not stored or cached,
+        // and Cook re-evaluates its own fresh snapshot at the pre-Cook gate.
+        if (!string.IsNullOrWhiteSpace(organizationKeyId))
+        {
+            chefKeyRow = RecipeReadModel.TryPrepareOrganizationAuthRow(
+                recipe, organizationKeyId, organizationAuthority?.Invoke());
+            if (chefKeyRow is null)
+            {
+                result.Status = 400;
+                result.ErrorBody = OrganizationKeyNotYetRunnable();
+                return result;
+            }
+        }
+        else if (appMode)
         {
             if (string.IsNullOrWhiteSpace(chefKeyId))
             {
@@ -196,6 +234,29 @@ internal static class RecipePreviewModel
 
     private static object ValidationFailed(List<object> errors) =>
         new { error = "validation_failed", errors };
+
+    // Cycle 14s. The single bounded body for an organization-bound Recipe: an
+    // explicit, truthful, identifier-free refusal carrying the canonical
+    // `organization_key_not_yet_runnable` execution status. It never names the
+    // opaque identifier, a thumbprint, a certificate, a store, or any engine
+    // internal, and it never advises the customer to repair or reselect.
+    private static object OrganizationKeyNotYetRunnable() => new
+    {
+        error = "validation_failed",
+        executionStatus = OrganizationKeyRunnability.ExecutionStatus,
+        errors = new List<object>
+        {
+            AjvError(
+                OrganizationKeyRunnability.InstancePath,
+                OrganizationKeyRunnability.Keyword,
+                OrganizationKeyRunnability.Message,
+                new Dictionary<string, object?>
+                {
+                    ["executionStatus"] = OrganizationKeyRunnability.ExecutionStatus,
+                    ["detail"] = OrganizationKeyRunnability.Detail,
+                }),
+        },
+    };
 
     // AJV-shaped error dict (oracle: New-ValidationError). Built as a
     // Dictionary<string,object?> so the keys serialize verbatim.

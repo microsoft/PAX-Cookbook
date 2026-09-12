@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { SectionHeader } from './components/SectionHeader';
 import { ContextualHelpButton } from '../components/ContextualHelpButton';
 import { StatusCard } from './StatusCard';
+import { WorkAccountCard } from './WorkAccountCard';
 import { openShellHelp, requestPantryUserGuide, requestShellSection } from './shellNav';
 import { usePolling } from '../host/usePolling';
 import { CopyButton } from '../features/mini-kitchen/components/CopyButton';
@@ -39,6 +40,7 @@ import {
   type NotificationSaveRequest,
 } from '../host/notifications';
 import { getAutostartEnabled, setAutostartEnabled } from '../host/brokerBridge';
+import { channelDisplayLabel } from '../host/channelDisplay';
 
 type LoadPhase = 'loading' | 'ready' | 'error';
 
@@ -509,7 +511,9 @@ export function SettingsWorkspace() {
 
   const appVersion =
     version?.cookbookVersion ?? health?.appVersion ?? NOT_REPORTED;
-  const channel = version?.releaseChannel ?? NOT_REPORTED;
+  // Customer-visible channel label — the raw internal token ('experimental')
+  // is never shown; it maps to 'Test' ('stable' -> 'Stable') via channelDisplayLabel.
+  const channelLabel = channelDisplayLabel(version?.releaseChannel ?? null);
   const buildDate = formatBuildTimestamp(version?.buildTimestamp ?? null) ?? NOT_REPORTED;
 
   const approvedSha = engine?.approvedSha256 ?? version?.bundledPax.sha256 ?? null;
@@ -533,7 +537,7 @@ export function SettingsWorkspace() {
         : NOT_REPORTED;
 
   const channelDetail =
-    channel !== NOT_REPORTED ? `${channel} channel` : 'Local-first build';
+    channelLabel ? `${channelLabel} channel` : 'Local-first build';
   const engineReady = engineStatus === 'Ready';
   const workspaceReady = workspaceStatus === 'Ready';
   const workspaceAttention = workspaceStatus === 'Needs attention';
@@ -597,6 +601,8 @@ export function SettingsWorkspace() {
         <StartupCard />
 
         <NotificationsCard />
+
+        <WorkAccountCard />
 
         <details className="dvw-settings__section dvw-settings__collapse">
           <summary className="dvw-settings__head dvw-settings__collapse-summary">

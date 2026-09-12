@@ -149,6 +149,10 @@ internal sealed record ActivationRequest
     public string? ManifestId { get; init; }
     public string? ManifestHash { get; init; }
     public string? ManifestVersion { get; init; }
+    // Cycle 15. Validated capability tokens from the selected approved manifest
+    // entry. Null (the default) means the acquired engine declares none, which
+    // is what the bundled / legacy activation path produces.
+    public IReadOnlyList<string>? Capabilities { get; init; }
     public required string StatePath { get; init; }
 }
 
@@ -276,6 +280,7 @@ internal static class ScriptActivator
                 ManifestId = req.ManifestId,
                 ManifestHash = req.ManifestHash,
                 ManifestVersion = req.ManifestVersion,
+                Capabilities = req.Capabilities,
                 ValidatedAtUtc = nowUtc,
                 ActivatedAtUtc = nowUtc,
             });
@@ -334,6 +339,9 @@ internal sealed record SuccessFields
     public string? ManifestId { get; init; }
     public string? ManifestHash { get; init; }
     public string? ManifestVersion { get; init; }
+    // Cycle 15. Written in the SAME atomic merge as version + sha256, so a
+    // capability record can never exist without the bytes it is bound to.
+    public IReadOnlyList<string>? Capabilities { get; init; }
     public required string ValidatedAtUtc { get; init; }
     public required string ActivatedAtUtc { get; init; }
 }
@@ -363,6 +371,12 @@ internal static class InstallStateWriter
             ["manifestId"] = fields.ManifestId,
             ["manifestHash"] = fields.ManifestHash,
             ["manifestVersion"] = fields.ManifestVersion,
+            // ALWAYS written, null when the entry declares none: MergeAndWrite
+            // preserves unmentioned keys, so omitting it on a re-acquisition
+            // would let a STALE capability array survive alongside NEW bytes.
+            ["capabilities"] = fields.Capabilities is null
+                ? null
+                : new List<string>(fields.Capabilities),
             ["validatedAtUtc"] = fields.ValidatedAtUtc,
             ["activatedAtUtc"] = fields.ActivatedAtUtc,
             ["lastAttemptError"] = null,
