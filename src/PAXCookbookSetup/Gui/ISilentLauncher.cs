@@ -34,7 +34,7 @@ public sealed class RealSilentLauncher : ISilentLauncher
             };
             using var p = Process.Start(psi);
             if (p is null) return SilentLaunchResult.Fail("The installer process did not start.");
-            if (!p.WaitForExit(timeoutMs))
+            if (!PrerequisiteCoordinator.WaitForInstallerExit(p.WaitForExit, p.WaitForExit, timeoutMs))
                 return SilentLaunchResult.Fail("The installer did not finish in the allotted time.");
             return SilentLaunchResult.Ran(p.ExitCode);
         }

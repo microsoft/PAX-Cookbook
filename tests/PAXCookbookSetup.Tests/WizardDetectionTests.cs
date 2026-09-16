@@ -12,10 +12,14 @@ namespace PAXCookbookSetup.Tests;
 // behaviour in PrerequisiteDetector without touching the real machine.
 public class WizardDetectionTests
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+    public WizardDetectionTests(Xunit.Abstractions.ITestOutputHelper output) => _output = output;
+
     // -----------------------------------------------------------------
     // Configurable fake probe
     // -----------------------------------------------------------------
-    private sealed class FakeProbe : IPrerequisiteProbe
+    internal sealed class FakeProbe : IPrerequisiteProbe
     {
         public readonly Dictionary<string, string?> OnPath = new(StringComparer.OrdinalIgnoreCase);
         public readonly HashSet<string> Files = new(StringComparer.OrdinalIgnoreCase);
@@ -385,6 +389,94 @@ public class WizardDetectionTests
     // -----------------------------------------------------------------
     private const string DotNetArm64RegRoot =
         @"SOFTWARE\dotnet\Setup\InstalledVersions\arm64\sharedfx\Microsoft.WindowsDesktop.App";
+
+    [Theory]
+    [InlineData("Microsoft.WindowsDesktop.App")]
+    [InlineData("Microsoft.AspNetCore.App")]
+    public void ExplicitRuntimeArchitecture_X64OnArm64_RejectsNativeAndAcceptsTarget(string framework)
+    {
+        var probe = new FakeProbe();
+        probe.Env["ProgramFiles"] = @"C:\Program Files";
+        probe.Files.Add(@"C:\Program Files\dotnet\dotnet.exe");
+        probe.Versions[@"C:\Program Files\dotnet\dotnet.exe"] = $"{framework} 8.0.28";
+        probe.Versions["dotnet"] = $"{framework} 8.0.28";
+        probe.HklmSubKeys[$@"SOFTWARE\dotnet\Setup\InstalledVersions\arm64\sharedfx\{framework}"] = new[] { "8.0.28" };
+        probe.Dirs[($@"C:\Program Files\dotnet\shared\{framework}", "8.*")] = new[] { "8.0.28" };
+        var detector = new PrerequisiteDetector(probe, Architecture.Arm64)
+            .ForRuntimeArchitecture(Architecture.X64);
+        PrerequisiteStatus Detect() => framework == "Microsoft.WindowsDesktop.App"
+            ? detector.DetectDotNet8DesktopRuntime() : detector.DetectAspNetCoreRuntime();
+
+        bool wrongArchitecture = Detect().Satisfied;
+        probe.Files.Add(@"C:\Program Files\dotnet\x64\dotnet.exe");
+        probe.Versions[@"C:\Program Files\dotnet\x64\dotnet.exe"] = $"{framework} 8.0.28";
+        bool correctArchitecture = Detect().Satisfied;
+        _output.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+        {
+            universe = "Synthetic shared-framework probe on ARM64 host for x64 target", framework,
+            predicate = "PrerequisiteDetector shared-framework Satisfied", wrongArchitecture, correctArchitecture
+        }));
+        Assert.False(wrongArchitecture);
+        Assert.True(correctArchitecture);
+    }
+
+    [Theory]
+    [InlineData("Microsoft.WindowsDesktop.App", Architecture.X64, Architecture.Arm64, "x64")]
+    [InlineData("Microsoft.AspNetCore.App", Architecture.X64, Architecture.Arm64, "x64")]
+    [InlineData("Microsoft.WindowsDesktop.App", Architecture.X86, Architecture.Arm64, "x86")]
+    [InlineData("Microsoft.AspNetCore.App", Architecture.X86, Architecture.Arm64, "x86")]
+    [InlineData("Microsoft.WindowsDesktop.App", Architecture.Arm64, Architecture.X64, "arm64")]
+    [InlineData("Microsoft.AspNetCore.App", Architecture.Arm64, Architecture.X64, "arm64")]
+    public void ExplicitRuntimeArchitecture_UsesRegisteredRootWithoutWrongHostOrPathFallback(
+        string framework, Architecture target, Architecture host, string rid)
+    {
+        var probe = new FakeProbe();
+        probe.Env["ProgramFiles"] = @"C:\Program Files";
+        probe.Env["ProgramFiles(x86)"] = @"C:\Program Files (x86)";
+        probe.Files.Add(@"C:\Program Files\dotnet\dotnet.exe");
+        probe.Versions[@"C:\Program Files\dotnet\dotnet.exe"] = $"{framework} 8.0.28";
+        probe.Versions["dotnet"] = $"{framework} 8.0.28";
+        probe.Dirs[($@"C:\Program Files\dotnet\shared\{framework}", "8.*")] = new[] { "8.0.28" };
+        var detector = new PrerequisiteDetector(probe, host).ForRuntimeArchitecture(target);
+        PrerequisiteStatus Detect() => framework == "Microsoft.WindowsDesktop.App"
+            ? detector.DetectDotNet8DesktopRuntime() : detector.DetectAspNetCoreRuntime();
+        bool wrongHost = Detect().Satisfied;
+        probe.Env.Clear();
+        bool pathOnly = Detect().Satisfied;
+        string registeredRoot = $@"D:\registered-{rid}";
+        probe.Hklm[($@"SOFTWARE\dotnet\Setup\InstalledVersions\{rid}", "InstallLocation")] = registeredRoot;
+        probe.Files.Add(registeredRoot + @"\dotnet.exe");
+        probe.Versions[registeredRoot + @"\dotnet.exe"] = $"{framework} 8.0.28";
+        bool registeredHost = Detect().Satisfied;
+        probe.Files.Clear();
+        probe.Dirs[(registeredRoot + @"\shared\" + framework, "8.*")] = new[] { "8.0.28" };
+        bool registeredDisk = Detect().Satisfied;
+        _output.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+        {
+            universe = "Synthetic explicit-target shared-framework registry, host and disk roots", framework, target, host,
+            predicate = "PrerequisiteDetector shared-framework Satisfied", wrongHost, pathOnly, registeredHost, registeredDisk
+        }));
+        Assert.False(wrongHost);
+        Assert.False(pathOnly);
+        Assert.True(registeredHost);
+        Assert.True(registeredDisk);
+    }
+
+    [Theory]
+    [InlineData("Microsoft.WindowsDesktop.App")]
+    [InlineData("Microsoft.AspNetCore.App")]
+    public void ExplicitRuntimeArchitecture_X86_UsesProgramFilesX86(string framework)
+    {
+        var probe = new FakeProbe();
+        probe.Env["ProgramFiles"] = @"C:\Program Files";
+        probe.Env["ProgramFiles(x86)"] = @"C:\Program Files (x86)";
+        var detector = new PrerequisiteDetector(probe, Architecture.Arm64).ForRuntimeArchitecture(Architecture.X86);
+        PrerequisiteStatus Detect() => framework == "Microsoft.WindowsDesktop.App"
+            ? detector.DetectDotNet8DesktopRuntime() : detector.DetectAspNetCoreRuntime();
+        Assert.False(Detect().Satisfied);
+        probe.Dirs[($@"C:\Program Files (x86)\dotnet\shared\{framework}", "8.*")] = new[] { "8.0.28" };
+        Assert.True(Detect().Satisfied);
+    }
 
     [Fact]
     public void DotNet8_Arm64Host_FoundInArm64Registry_IsSatisfied()

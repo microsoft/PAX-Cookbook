@@ -148,6 +148,7 @@ function overlayText(): string {
 }
 
 beforeEach(() => {
+  vi.spyOn(window, 'addEventListener');
   document.body.innerHTML = '';
   providerBody = { selectedProvider: 'work_account', usable: true };
   wamInitBody = { requestId: 'req-1' };
@@ -161,6 +162,9 @@ afterEach(() => {
     api.dismiss();
   } catch {
     /* ignore */
+  }
+  for (const [type, listener, options] of vi.mocked(window.addEventListener).mock.calls) {
+    window.removeEventListener(type, listener, options);
   }
   vi.restoreAllMocks();
   document.body.innerHTML = '';
@@ -373,5 +377,112 @@ describe('recovery_required screen', () => {
     expect(body).toContain('needs repair');
     expect(body).toContain('PAX Cookbook Setup');
     expect(body.toLowerCase()).not.toContain('experimental');
+  });
+});
+
+describe('Bounded support display', () => {
+  const sentinel = 'SYNTHETIC_RAW_DIAGNOSTIC_SENTINEL';
+  const probeNames = [
+    'current_options', 'omit_authenticator_attachment', 'minimal_authenticator_selection',
+    'minimal_create_options', 'alternative_user_id',
+  ];
+
+  async function mountDiagnostics(credentialReturned: unknown): Promise<void> {
+    await mount({ selectedProvider: 'windows_hello' });
+    Object.assign(api.state(), {
+      attemptedMethod: sentinel, attemptedPath: sentinel,
+      lastFailureMessage: 'Sign-in did not finish.',
+      lastDiagnostics: Object.fromEntries([
+        'attemptId', 'startedUtc', 'phase', 'selectedPath', 'browserApi', 'endpoint',
+        'webauthnSupported', 'statusFetchOk', 'statusFetchStatus', 'registered',
+        'fallbackPolicy', 'willInvokeBrokerOwnedUnlock', 'resultDetail', 'errorName',
+        'errorMessage', 'errorStackFirstLine', 'errorOccurredBeforeCreate', 'locationOrigin',
+        'locationProtocol', 'locationHostname', 'isSecureContext', 'documentVisibilityState',
+        'documentHasFocus', 'userAgent', 'publicKeyCredentialExists', 'hasIsUVPAAFunction',
+        'isUVPAAResult', 'hasConditionalMediation', 'challengeByteLength', 'userIdByteLength',
+        'pubKeyCredParamsAlgs', 'authenticatorSelection', 'timeoutMs', 'rpId', 'rpName',
+        'attestation', 'excludeCredentialsCount',
+      ].map(key => [key, sentinel])),
+      lastProbeResult: {
+        probeName: sentinel, startedUtc: sentinel, outcome: sentinel, errorName: sentinel,
+        errorMessage: sentinel, errorStackFirstLine: sentinel, credentialType: sentinel,
+        optionsSummary: sentinel, credentialReturned,
+      },
+    });
+    window.dispatchEvent(new CustomEvent('cookbook:brokerLocked', {
+      detail: { code: 'brokerLocked', message: sentinel, attemptedMethod: sentinel, attemptedPath: sentinel },
+    }));
+    await flush();
+  }
+
+  it.each([false, null, sentinel, true])('bounds diagnostic values and preserves copy (%s)', async credentialReturned => {
+    await mountDiagnostics(credentialReturned);
+    const containsSentinel = (node: Element): boolean => (node.textContent || '').includes(sentinel);
+    const positive = document.createElement('p');
+    positive.textContent = sentinel;
+    const negative = document.createElement('p');
+    negative.textContent = 'Details available for your IT team';
+    const actual = document.querySelector(OVERLAY)!;
+    const positiveControl = containsSentinel(positive);
+    const negativeControl = containsSentinel(negative);
+    console.info(JSON.stringify({
+      universe: 'Entire mounted lock-overlay DOM text, including collapsed support disclosures',
+      predicate: 'DOM textContent contains the injected raw diagnostic sentinel',
+      positiveControl, negativeControl, actual: containsSentinel(actual), credentialReturned,
+    }));
+    expect(positiveControl).toBe(true);
+    expect(negativeControl).toBe(false);
+    expect(containsSentinel(actual)).toBe(false);
+    expect(actual.textContent).toContain('Support: Details available for your IT team');
+    expect(actual.textContent).toContain('Last sign-in check:');
+    expect(actual.textContent).toContain(credentialReturned === true
+      ? 'Check: Windows responded' : 'Check: Details available for your IT team');
+    expect(actual.textContent).toContain('Use the PAX Cookbook tray icon to exit the app.');
+    expect(actual.textContent).toContain('They do not unlock PAX Cookbook');
+    expect(actual.textContent).toContain('may leave additional sign-in details on the device');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+    Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+    try {
+      el('cookbook-lock-overlay-copy-diagnostics-main')!.click();
+      await flush();
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText.mock.calls[0][0]).toContain(sentinel);
+      expect(containsSentinel(actual)).toBe(false);
+    } finally {
+      if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard);
+      else Reflect.deleteProperty(window.navigator, 'clipboard');
+    }
+  });
+
+  it('keeps every probe control wired to its original key without invoking credentials', async () => {
+    await mountDiagnostics(null);
+    expect(window.PublicKeyCredential).toBeUndefined();
+    const buttons = (): HTMLButtonElement[] => Array.from(document.querySelectorAll('.lock-overlay-webauthn-probe'));
+    expect(buttons().map(button => button.textContent)).toEqual([
+      'Check 1 - Current settings', 'Check 2 - Other device options', 'Check 3 - Basic verification',
+      'Check 4 - Basic sign-in options', 'Check 5 - New local test identity',
+    ]);
+    for (const probeName of probeNames) {
+      el('cookbook-lock-overlay-probe-' + probeName)!.click();
+      expect(api.state().lastProbeResult).toMatchObject({
+        probeName, outcome: 'webauthn_unsupported', credentialReturned: false,
+      });
+      expect(buttons()).toHaveLength(probeNames.length);
+      expect(document.querySelector(OVERLAY)!.textContent).not.toContain(probeName);
+    }
+    expect(postMessageSpy).not.toHaveBeenCalled();
+    expect(document.querySelector(OVERLAY)!.classList.contains('visible')).toBe(true);
+  });
+
+  it.each(['windows_hello', 'work_account', 'recovery_required'])('bounds event copy for %s', async selectedProvider => {
+    await mount({ selectedProvider, usable: true });
+    window.dispatchEvent(new CustomEvent('cookbook:brokerLocked', {
+      detail: { code: 'brokerLocked', message: sentinel },
+    }));
+    await flush();
+    expect(api.state().message).toBe(sentinel);
+    expect(document.querySelector(OVERLAY)!.textContent).not.toContain(sentinel);
+    expect(document.querySelector(OVERLAY)!.classList.contains('visible')).toBe(true);
   });
 });

@@ -77,7 +77,7 @@ public class ExperimentalChannelTests
 
     private static string Release(string tag, bool prerelease, bool draft, string createdAt,
                                   bool withPayload = true, bool withManifest = true,
-                                  string? payloadHost = null)
+                                  string? payloadHost = null, bool withAdminToolkit = false)
     {
         string host = payloadHost ?? $"{ExpAsset}/{tag}";
         string payload = withPayload
@@ -86,13 +86,16 @@ public class ExperimentalChannelTests
         string manifest = withManifest
             ? $$""", { "name": "versions.json", "browser_download_url": "{{host}}/versions.json" }"""
             : "";
+        string adminToolkit = withAdminToolkit
+            ? $$""", { "name": "PAX_Cookbook_Setup.exe", "browser_download_url": "{{host}}/PAX_Cookbook_Setup.exe" }, { "name": "PAX_Cookbook_Admin_Setup.zip", "browser_download_url": "{{host}}/PAX_Cookbook_Admin_Setup.zip" }"""
+            : "";
         return $$"""
         {
           "tag_name": "{{tag}}",
           "prerelease": {{(prerelease ? "true" : "false")}},
           "draft": {{(draft ? "true" : "false")}},
           "created_at": "{{createdAt}}",
-          "assets": [ {{payload}}{{manifest}} ]
+          "assets": [ {{payload}}{{manifest}}{{adminToolkit}} ]
         }
         """;
     }
@@ -113,6 +116,29 @@ public class ExperimentalChannelTests
         Assert.NotNull(located);
         Assert.Contains("v2.0.0-exp.2/PAX_Cookbook_Payload.zip", located!.PayloadUrl);
         Assert.Contains("v2.0.0-exp.2/versions.json", located.ManifestUrl);
+    }
+
+    [Fact]
+    public void Parse_AdminToolkitAssets_PreservePayloadAndManifestSelection()
+    {
+        string newer = Release("v2.0.0-exp.6", prerelease: true, draft: false,
+            "2026-09-13T00:00:00Z", withAdminToolkit: true);
+        string older = Release("v2.0.0-exp.5", prerelease: true, draft: false,
+            "2026-09-12T00:00:00Z");
+        using var newerDocument = System.Text.Json.JsonDocument.Parse(newer);
+        Assert.Equal(4, newerDocument.RootElement.GetProperty("assets").GetArrayLength());
+
+        var located = ExperimentalReleaseLocator.Parse($$"""[ {{older}}, {{newer}} ]""");
+
+        Assert.NotNull(located);
+        Assert.Equal($"{ExpAsset}/v2.0.0-exp.6/PAX_Cookbook_Payload.zip", located!.PayloadUrl);
+        Assert.Equal($"{ExpAsset}/v2.0.0-exp.6/versions.json", located.ManifestUrl);
+
+        string missingPayload = Release("v2.0.0-exp.6", prerelease: true, draft: false,
+            "2026-09-13T00:00:00Z", withPayload: false, withAdminToolkit: true);
+        using var missingDocument = System.Text.Json.JsonDocument.Parse(missingPayload);
+        Assert.Equal(4, missingDocument.RootElement.GetProperty("assets").GetArrayLength());
+        Assert.Null(ExperimentalReleaseLocator.Parse($$"""[ {{missingPayload}} ]"""));
     }
 
     [Fact]

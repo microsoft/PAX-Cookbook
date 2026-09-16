@@ -31,6 +31,7 @@ internal sealed class UpdateForm : Form
     private Label _progressStatus = null!, _errorDetail = null!;
     private Button _btnOpen = null!, _btnCloseDone = null!, _btnCloseError = null!;
     private bool _running = true;
+    private WizardInstallRunner.PayloadCleanupLease? _cleanupPending;
 
     public UpdateForm(string installRoot, SetupLogger log)
     {
@@ -167,7 +168,11 @@ internal sealed class UpdateForm : Form
         {
             Text = "Close", Size = new Size(110, 34), Location = new Point(384, 196)
         };
-        _btnCloseError.Click += (_, _) => Close();
+        _btnCloseError.Click += async (_, _) =>
+        {
+            if (_cleanupPending?.HasPendingCleanup == true) await RetryCleanupAsync();
+            else Close();
+        };
         p.Controls.Add(heading);
         p.Controls.Add(_errorDetail);
         p.Controls.Add(_btnCloseError);
@@ -220,11 +225,19 @@ internal sealed class UpdateForm : Form
     private void OnFinished(WizardInstallResult result)
     {
         _running = false;
-        ExitCode = result.ExitCode;
+        _cleanupPending = result.Cleanup;
+        bool cleanupRequired = _cleanupPending?.HasPendingCleanup == true;
+        ExitCode = cleanupRequired ? SetupExitCodes.InstallFailed : result.ExitCode;
         _progressBar.Style = ProgressBarStyle.Continuous;
         _progressBar.Value = 100;
+        _btnOpen.Enabled = !cleanupRequired;
+        _btnCloseDone.Enabled = !cleanupRequired;
+        _btnCloseError.Enabled = true;
+        _btnCloseError.Text = cleanupRequired ? "Retry cleanup" : "Close";
+        _donePanel.Visible = false;
+        _errorPanel.Visible = false;
 
-        if (result.Success)
+        if (result.Success && !cleanupRequired)
         {
             _log.Write("update-gui-success");
             _progressPanel.Visible = false;
@@ -236,10 +249,9 @@ internal sealed class UpdateForm : Form
         {
             _log.Write("update-gui-failed", "error",
                 new Dictionary<string, object?> { ["detail"] = result.Error });
-            _errorDetail.Text = string.IsNullOrWhiteSpace(result.Error)
-                ? "Make sure you are online and try again. Your installed copy of PAX Cookbook was not changed."
-                : result.Error + "\n\nMake sure you are online and try again. Your installed copy of " +
-                  "PAX Cookbook was not changed.";
+            _errorDetail.Text = cleanupRequired
+                ? "Setup could not remove its temporary files. Setup will stay open. Choose Retry cleanup."
+                : "The update could not finish. Run PAX Cookbook Setup again. Contact your IT team if the problem continues.";
             _progressPanel.Visible = false;
             _errorPanel.Visible = true;
             _errorPanel.BringToFront();
@@ -247,10 +259,24 @@ internal sealed class UpdateForm : Form
         }
     }
 
+    private async Task RetryCleanupAsync()
+    {
+        if (_running || _cleanupPending is null) return;
+        _running = true;
+        _btnCloseError.Enabled = false;
+        var cleanup = _cleanupPending;
+        bool cleaned = await Task.Run(cleanup.TryCleanup);
+        OnFinished(new WizardInstallResult(false, SetupExitCodes.InstallFailed, null)
+        {
+            Cleanup = cleaned ? null : cleanup
+        });
+    }
+
     // Launch the updated app the same WDAC-safe way the installer's shell
     // integration does: the Microsoft-signed dotnet.exe host runs the app DLL.
     private void OpenAppAndClose()
     {
+        if (_running || _cleanupPending?.HasPendingCleanup == true) return;
         try
         {
             var dotnet = DotNetLaunch.DotNetExePath();
@@ -283,7 +309,7 @@ internal sealed class UpdateForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         // Do not allow closing while the download / file copy is in progress.
-        if (_running) { e.Cancel = true; return; }
+        if (_running || _cleanupPending?.HasPendingCleanup == true) { e.Cancel = true; return; }
         base.OnFormClosing(e);
     }
 }

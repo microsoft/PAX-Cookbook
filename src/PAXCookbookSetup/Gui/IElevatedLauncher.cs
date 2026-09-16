@@ -43,9 +43,8 @@ public sealed class RealElevatedLauncher : IElevatedLauncher
             };
             using var p = Process.Start(psi);
             if (p is null) return ElevatedLaunchResult.Fail("The installer process did not start.");
-            if (!p.WaitForExit(timeoutMs))
+            if (!PrerequisiteCoordinator.WaitForInstallerExit(p.WaitForExit, p.WaitForExit, timeoutMs))
             {
-                // Leave the elevated installer running; we just stop waiting.
                 return ElevatedLaunchResult.Fail("The installer did not finish in the allotted time.");
             }
             return ElevatedLaunchResult.Ran(p.ExitCode);

@@ -11,7 +11,54 @@ namespace PAXCookbookSetup.Tests;
 // All prerequisites are REQUIRED; IsCancelled=true aborts the install.
 public class PrerequisiteCoordinatorTests
 {
-    private sealed class FakeInstaller : IPrerequisiteInstaller
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+    public PrerequisiteCoordinatorTests(Xunit.Abstractions.ITestOutputHelper output) => _output = output;
+
+    [Fact]
+    public async System.Threading.Tasks.Task InstallerTimeout_WaitsForChildAcknowledgment()
+    {
+        var observations = new List<object>();
+        foreach (bool finishedInTime in new[] { true, false })
+        {
+            using var acknowledged = new System.Threading.ManualResetEventSlim();
+            var waiting = new System.Threading.Tasks.TaskCompletionSource<bool>(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+            int acknowledgmentWaits = 0;
+            var operation = System.Threading.Tasks.Task.Run(() => PrerequisiteCoordinator.WaitForInstallerExit(timeout =>
+            {
+                Assert.Equal(123, timeout);
+                return finishedInTime;
+            }, () =>
+            {
+                acknowledgmentWaits++;
+                waiting.SetResult(true);
+                Assert.True(acknowledged.Wait(TimeSpan.FromSeconds(10)));
+            }, 123));
+            bool retainedBeforeAcknowledgment = false;
+            try
+            {
+                if (!finishedInTime)
+                {
+                    await waiting.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                    retainedBeforeAcknowledgment = !operation.IsCompleted;
+                    Assert.True(retainedBeforeAcknowledgment);
+                }
+            }
+            finally { acknowledged.Set(); }
+            bool result = await operation.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(finishedInTime, result);
+            Assert.Equal(finishedInTime ? 0 : 1, acknowledgmentWaits);
+            observations.Add(new { finishedInTime, result, retainedBeforeAcknowledgment, acknowledgmentWaits });
+        }
+        _output.WriteLine("INSTALLER_ACK_EVIDENCE=" + System.Text.Json.JsonSerializer.Serialize(new
+        {
+            universe = "The shared production prerequisite wait boundary with fake timed and acknowledgment waits",
+            predicate = "WaitForInstallerExit returns the timed wait outcome only after required acknowledgment",
+            observations
+        }));
+    }
+
+    internal sealed class FakeInstaller : IPrerequisiteInstaller
     {
         public PrerequisiteKind Kind { get; }
         public int Calls;

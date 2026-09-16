@@ -48,12 +48,12 @@ internal static class WizardLauncher
             });
             return form.ExitCode;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             try
             {
                 MessageBox.Show(
-                    "PAX Cookbook Setup could not start:\n\n" + ex.Message,
+                    "PAX Cookbook Setup could not start. Run Setup again. Contact your IT team if the problem continues.",
                     "PAX Cookbook Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch { /* headless / no display — fall through to the exit code */ }

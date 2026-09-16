@@ -35,7 +35,11 @@ public sealed class PayloadDownloader
         _tempPath = tempPath ?? Path.GetTempPath();
     }
     
-    public sealed record DownloadResult(bool Success, string? ZipPath, string? Error);
+    public sealed record DownloadResult(bool Success, string? ZipPath, string? Error)
+    {
+        public ManifestVerifier.PayloadExpectation? Expectation { get; init; }
+        public string? SourceUrl { get; init; }
+    }
 
     public static DownloadRoute ResolveDownloadRoute(string? channel)
         => SetupChannel.Normalize(channel) switch
@@ -98,7 +102,7 @@ public sealed class PayloadDownloader
             expectation = ManifestVerifier.Parse(manifestJson ?? string.Empty);
             if (expectation is null)
             {
-                _progress("Version manifest unavailable — verifying download integrity only.");
+                _progress("Version information is unavailable. Checking the download.");
                 _log.Write("payload-sha-skipped-no-manifest", "warning");
             }
         }
@@ -110,7 +114,7 @@ public sealed class PayloadDownloader
             expectation = await new ManifestVerifier(_log).TryFetchAsync(cancel);
             if (expectation is null)
             {
-                _progress("Version manifest unavailable — verifying download integrity only.");
+                _progress("Version information is unavailable. Checking the download.");
                 _log.Write("payload-sha-skipped-no-manifest", "warning");
             }
         }
@@ -296,7 +300,7 @@ public sealed class PayloadDownloader
 
         if (!string.IsNullOrEmpty(expectation?.Sha256))
         {
-            _progress("Verifying download integrity (SHA-256)...");
+            _progress("Checking the download...");
             var actualSha = ManifestVerifier.ComputeSha256(destPath);
             if (!string.Equals(actualSha, expectation!.Sha256, StringComparison.OrdinalIgnoreCase))
             {
@@ -359,7 +363,11 @@ public sealed class PayloadDownloader
         // depth (see InstallVerb).
         MarkOfTheWeb.StripFile(destPath);
 
-        return new DownloadResult(true, destPath, null);
+        return new DownloadResult(true, destPath, null)
+        {
+            Expectation = expectation,
+            SourceUrl = payloadUrl
+        };
     }
 
     private static void TryDelete(string path)

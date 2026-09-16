@@ -104,7 +104,7 @@ public sealed class UninstallOperations
         string? workspacePath = state?.WorkspaceFolderPath;
 
         // ---- 3. Shell removal (shortcuts + protocol + ARP) ----------
-        progress?.Invoke("Removing shortcuts and registry entries\u2026");
+        progress?.Invoke("Removing PAX Cookbook shortcuts and settings...");
         var shell = _shellRemover.Remove(installRoot);
         steps.Add($"shell: shortcutsRemoved={shell.ShortcutsRemoved.Count} " +
                   $"shortcutsSkipped={shell.ShortcutsSkipped.Count} " +

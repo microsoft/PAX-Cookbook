@@ -19,9 +19,11 @@ public sealed class DotNet8DesktopRuntimeInstaller : IPrerequisiteInstaller
     // match the OS: an x64 runtime on an ARM64 machine installs under
     // Program Files (x86)\dotnet, and the native ARM64 dotnet.exe host at
     // Program Files\dotnet then reports "No frameworks were found".
-    public static string BuildDownloadUrl(Architecture arch) =>
+    public static string BuildDownloadUrl(Architecture arch) => BuildDownloadUrl(ArchToken(arch));
+
+    private static string BuildDownloadUrl(string archToken) =>
         $"https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/{RuntimeVersion}/" +
-        $"windowsdesktop-runtime-{RuntimeVersion}-win-{ArchToken(arch)}.exe";
+        $"windowsdesktop-runtime-{RuntimeVersion}-win-{archToken}.exe";
 
     // The .NET 8 Desktop Runtime ships win-x64, win-x86 and win-arm64 installers;
     // we install arm64 on ARM64 machines and x64 everywhere else.
@@ -36,13 +38,17 @@ public sealed class DotNet8DesktopRuntimeInstaller : IPrerequisiteInstaller
     private readonly IPrereqDownloader _downloader;
     private readonly IElevatedLauncher _elevated;
     private readonly PrerequisiteDetector _detector;
+    private readonly Architecture _architecture;
+    private readonly string _archToken;
 
     public DotNet8DesktopRuntimeInstaller(IPrereqDownloader downloader, IElevatedLauncher elevated,
-                                           PrerequisiteDetector detector)
+                                           PrerequisiteDetector detector, Architecture? architecture = null)
     {
         _downloader = downloader;
         _elevated = elevated;
-        _detector = detector;
+        _architecture = architecture ?? PrereqArch.Os;
+        _archToken = architecture == Architecture.X86 ? "x86" : ArchToken(_architecture);
+        _detector = architecture.HasValue ? detector.ForRuntimeArchitecture(_architecture) : detector;
     }
 
     // -----------------------------------------------------------------
@@ -54,9 +60,9 @@ public sealed class DotNet8DesktopRuntimeInstaller : IPrerequisiteInstaller
         if (_detector.DetectDotNet8DesktopRuntime().Satisfied)
             return PrerequisiteInstallResult.AlreadyPresent(".NET 8 Desktop Runtime is already installed.");
 
-        var arch = PrereqArch.Os;
-        var archToken = ArchToken(arch);
-        var url = BuildDownloadUrl(arch);
+        var arch = _architecture;
+        var archToken = _archToken;
+        var url = BuildDownloadUrl(archToken);
         PrereqLog.Write($"[PREREQ] .NET 8 install: arch={arch} rid={archToken}");
         PrereqLog.Write($"[PREREQ] .NET 8 download URL = {url}");
 

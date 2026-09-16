@@ -292,7 +292,7 @@
         } else if (prov === 'recovery_required') {
             title.textContent = 'Sign-in needs repair';
             var rp1 = document.createElement('p');
-            rp1.textContent = state.message ||
+            rp1.textContent =
                 'Your saved sign-in method needs repair. Open PAX Cookbook Setup ' +
                 'to reconfigure it.';
             body.appendChild(rp1);
@@ -307,7 +307,7 @@
             // Windows Hello is the selected provider: the existing Hello copy.
             title.textContent = firstRunView ? 'Set up quick verification' : 'Verify it\'s you';
             var p1 = document.createElement('p');
-            p1.textContent = state.message || (firstRunView
+            p1.textContent = (firstRunView
                 ? 'Set up a quick way to confirm it\'s you when you open PAX ' +
                   'Cookbook. You\'ll use your fingerprint, face, or PIN \u2014 the ' +
                   'same way you unlock this computer.'
@@ -345,8 +345,7 @@
                 var pPasskey = document.createElement('p');
                 pPasskey.className = 'lock-overlay-fine';
                 pPasskey.textContent =
-                    'This is a one-time setup and takes about 10 seconds. What ' +
-                    'you set up stays on this device and is never sent to the cloud.';
+                    'This is a one-time setup. What you set up stays on this device.';
                 body.appendChild(pPasskey);
 
                 var pChromeHint = document.createElement('p');
@@ -414,8 +413,7 @@
             copyHint.className = 'lock-overlay-fine';
             copyHint.style.marginTop = '0.75em';
             copyHint.textContent =
-                'Unlock did not complete. Click "Copy diagnostics" below and ' +
-                'paste the result so the failure can be analyzed.';
+                'Sign-in did not finish. Choose Copy diagnostics to share the results with your IT team.';
             body.appendChild(copyHint);
 
             var copyBtnMain = document.createElement('button');
@@ -458,20 +456,18 @@
                 var dp3 = document.createElement('p');
                 dp3.className = 'lock-overlay-fine';
                 dp3.textContent =
-                    'Closing this browser tab does not shut down Cookbook. To ' +
-                    'fully stop Cookbook, close the Cookbook terminal window.';
+                    'Use the PAX Cookbook tray icon to exit the app.';
                 details.appendChild(dp3);
 
                 var dp4 = document.createElement('p');
                 dp4.className = 'lock-overlay-fine';
                 dp4.textContent =
-                    'The last thing Cookbook tried to load before showing this ' +
-                    'screen was:';
+                    'Sign in to return to your recipes and settings.';
                 details.appendChild(dp4);
 
                 var dp5 = document.createElement('p');
                 dp5.className = 'lock-overlay-fine lock-overlay-endpoint';
-                dp5.textContent = state.attemptedMethod + ' ' + state.attemptedPath;
+                dp5.textContent = 'Your work stays on this computer.';
                 details.appendChild(dp5);
 
                 var dp6 = document.createElement('p');
@@ -489,8 +485,6 @@
             // invoke the broker-owned terminal Hello path: the
             // primary button never routes here silently.
             if (hasDiagnostics) {
-                var diag = state.lastDiagnostics || {};
-
                 var hd = document.createElement('h3');
                 hd.className = 'lock-overlay-fine';
                 hd.textContent = 'Last unlock attempt';
@@ -498,44 +492,7 @@
                 details.appendChild(hd);
 
                 var rows = [
-                    ['Attempt id',                diag.attemptId || state.lastUnlockAttemptId || '\u2014'],
-                    ['Started (UTC)',             diag.startedUtc || '\u2014'],
-                    ['Phase reached',             diag.phase || '\u2014'],
-                    ['Selected path',             diag.selectedPath || '\u2014'],
-                    ['Browser API',               diag.browserApi || '\u2014'],
-                    ['Endpoint',                  diag.endpoint || '\u2014'],
-                    ['WebAuthn supported',        (diag.webauthnSupported === null || typeof diag.webauthnSupported === 'undefined') ? '\u2014' : String(diag.webauthnSupported)],
-                    ['Status fetch ok',           (diag.statusFetchOk === null || typeof diag.statusFetchOk === 'undefined') ? '\u2014' : String(diag.statusFetchOk)],
-                    ['Status HTTP code',          (diag.statusFetchStatus === null || typeof diag.statusFetchStatus === 'undefined') ? '\u2014' : String(diag.statusFetchStatus)],
-                    ['Credential registered',     (diag.registered === null || typeof diag.registered === 'undefined') ? '\u2014' : String(diag.registered)],
-                    ['Fallback policy',           diag.fallbackPolicy || 'no_silent_fallback'],
-                    ['Invoked broker-owned path', (diag.willInvokeBrokerOwnedUnlock === null || typeof diag.willInvokeBrokerOwnedUnlock === 'undefined') ? '\u2014' : String(diag.willInvokeBrokerOwnedUnlock)],
-                    ['Failure detail',            diag.resultDetail || '\u2014'],
-                    ['Error name',                diag.errorName || '\u2014'],
-                    ['Error message',             diag.errorMessage || '\u2014'],
-                    ['Error stack (first line)',  diag.errorStackFirstLine || '\u2014'],
-                    ['Error before create()',     (diag.errorOccurredBeforeCreate === null || typeof diag.errorOccurredBeforeCreate === 'undefined') ? '\u2014' : String(diag.errorOccurredBeforeCreate)],
-                    // UX-1H4 -- browser ceremony runtime context.
-                    ['Origin',                    diag.locationOrigin   || '\u2014'],
-                    ['Protocol',                  diag.locationProtocol || '\u2014'],
-                    ['Hostname',                  diag.locationHostname || '\u2014'],
-                    ['Secure context',            (diag.isSecureContext === null || typeof diag.isSecureContext === 'undefined') ? '\u2014' : String(diag.isSecureContext)],
-                    ['Document visibility',       diag.documentVisibilityState || '\u2014'],
-                    ['Document hasFocus',         (diag.documentHasFocus === null || typeof diag.documentHasFocus === 'undefined') ? '\u2014' : String(diag.documentHasFocus)],
-                    ['User agent',                diag.userAgent || '\u2014'],
-                    ['PublicKeyCredential',       (diag.publicKeyCredentialExists === null || typeof diag.publicKeyCredentialExists === 'undefined') ? '\u2014' : String(diag.publicKeyCredentialExists)],
-                    ['has isUVPAA fn',            (diag.hasIsUVPAAFunction === null || typeof diag.hasIsUVPAAFunction === 'undefined') ? '\u2014' : String(diag.hasIsUVPAAFunction)],
-                    ['isUVPAA result',            (diag.isUVPAAResult === null || typeof diag.isUVPAAResult === 'undefined') ? '\u2014' : String(diag.isUVPAAResult)],
-                    ['has cond. mediation fn',    (diag.hasConditionalMediation === null || typeof diag.hasConditionalMediation === 'undefined') ? '\u2014' : String(diag.hasConditionalMediation)],
-                    ['Challenge bytes',           (diag.challengeByteLength === null || typeof diag.challengeByteLength === 'undefined') ? '\u2014' : String(diag.challengeByteLength)],
-                    ['user.id bytes',             (diag.userIdByteLength    === null || typeof diag.userIdByteLength    === 'undefined') ? '\u2014' : String(diag.userIdByteLength)],
-                    ['pubKeyCredParams algs',     diag.pubKeyCredParamsAlgs ? JSON.stringify(diag.pubKeyCredParamsAlgs) : '\u2014'],
-                    ['authenticatorSelection',    diag.authenticatorSelection ? JSON.stringify(diag.authenticatorSelection) : '\u2014'],
-                    ['timeout (ms)',              (diag.timeoutMs === null || typeof diag.timeoutMs === 'undefined') ? '\u2014' : String(diag.timeoutMs)],
-                    ['rp.id (sent)',              diag.rpId  || '(omitted -- uses effective domain)'],
-                    ['rp.name',                   diag.rpName || '\u2014'],
-                    ['attestation',               diag.attestation || '\u2014'],
-                    ['excludeCredentials count',  (diag.excludeCredentialsCount === null || typeof diag.excludeCredentialsCount === 'undefined') ? '\u2014' : String(diag.excludeCredentialsCount)]
+                    ['Support', 'Details available for your IT team']
                 ];
                 for (var ri = 0; ri < rows.length; ri++) {
                     var rp = document.createElement('p');
@@ -556,27 +513,23 @@
                 probeDetails.className = 'lock-overlay-details lock-overlay-probe-details';
                 probeDetails.id = OVERLAY_ID + '-probe-disclosure';
                 var probeSummary = document.createElement('summary');
-                probeSummary.textContent = 'Advanced browser WebAuthn probes';
+                probeSummary.textContent = 'Advanced sign-in checks';
                 probeDetails.appendChild(probeSummary);
 
                 var probeIntro = document.createElement('p');
                 probeIntro.className = 'lock-overlay-fine';
                 probeIntro.textContent =
-                    'These probes each ask Windows Hello to create a credential with ' +
-                    'progressively fewer constraints. They are click-triggered and request ' +
-                    'a fresh challenge from the broker. A successful probe creates an ' +
-                    'authenticator credential on this device that is NOT redeemed for ' +
-                    'unlock; this may leave orphaned authenticator state. Use sparingly. ' +
-                    'After running a probe, click "Copy diagnostics" and paste the result ' +
-                    'so the option set can be adopted as the primary path.';
+                    'These checks ask Windows to set up sign-in on this device. They do not ' +
+                    'unlock PAX Cookbook and may leave additional sign-in details on the device. ' +
+                    'Use them only with your IT team. Choose Copy diagnostics afterward to share the results.';
                 probeDetails.appendChild(probeIntro);
 
                 var probeDefs = [
-                    { name: 'current_options',                 label: 'Probe 1 \u2014 Current Cookbook options (platform / UV required / residentKey discouraged)' },
-                    { name: 'omit_authenticator_attachment',   label: 'Probe 2 \u2014 Omit authenticatorAttachment' },
-                    { name: 'minimal_authenticator_selection', label: 'Probe 3 \u2014 Minimal authenticatorSelection (UV only)' },
-                    { name: 'minimal_create_options',          label: 'Probe 4 \u2014 Minimal create options (no authenticatorSelection field)' },
-                    { name: 'alternative_user_id',             label: 'Probe 5 \u2014 Alternative user.id (locally randomized)' }
+                    { name: 'current_options',                 label: 'Check 1 - Current settings' },
+                    { name: 'omit_authenticator_attachment',   label: 'Check 2 - Other device options' },
+                    { name: 'minimal_authenticator_selection', label: 'Check 3 - Basic verification' },
+                    { name: 'minimal_create_options',          label: 'Check 4 - Basic sign-in options' },
+                    { name: 'alternative_user_id',             label: 'Check 5 - New local test identity' }
                 ];
                 for (var pi = 0; pi < probeDefs.length; pi++) {
                     (function (def) {
@@ -599,25 +552,11 @@
                     var lpr = state.lastProbeResult;
                     var lprHd = document.createElement('p');
                     lprHd.className = 'lock-overlay-fine';
-                    lprHd.textContent = 'Last probe result:';
+                    lprHd.textContent = 'Last sign-in check:';
                     lprHd.style.marginTop = '0.5em';
                     probeDetails.appendChild(lprHd);
                     var lprFields = [
-                        ['Probe',                       lpr.probeName  || '\u2014'],
-                        ['Started (UTC)',               lpr.startedUtc || '\u2014'],
-                        ['Outcome',                     lpr.outcome    || '\u2014'],
-                        ['Elapsed (ms)',                (typeof lpr.elapsedMs === 'number') ? String(lpr.elapsedMs) : '\u2014'],
-                        ['Error name',                  lpr.errorName    || '\u2014'],
-                        ['Error message',               lpr.errorMessage || '\u2014'],
-                        ['Error stack 1st line',        lpr.errorStackFirstLine || '\u2014'],
-                        ['UI opened (best-effort)',     (lpr.uiOpened === null || typeof lpr.uiOpened === 'undefined') ? '\u2014' : String(lpr.uiOpened)],
-                        ['Credential returned',         (lpr.credentialReturned === null || typeof lpr.credentialReturned === 'undefined') ? '\u2014' : String(lpr.credentialReturned)],
-                        ['Credential type',             lpr.credentialType || '\u2014'],
-                        ['attestationObject bytes',     (typeof lpr.attestationObjectBytes === 'number') ? String(lpr.attestationObjectBytes) : '\u2014'],
-                        ['clientDataJSON bytes',        (typeof lpr.clientDataJsonBytes  === 'number') ? String(lpr.clientDataJsonBytes)  : '\u2014'],
-                        ['userActivation isActive',     (lpr.userActivationIsActive === null || typeof lpr.userActivationIsActive === 'undefined') ? '\u2014' : String(lpr.userActivationIsActive)],
-                        ['userActivation hasBeenActive',(lpr.userActivationHasBeenActive === null || typeof lpr.userActivationHasBeenActive === 'undefined') ? '\u2014' : String(lpr.userActivationHasBeenActive)],
-                        ['Options summary',             lpr.optionsSummary || '\u2014']
+                        ['Check', lpr.credentialReturned === true ? 'Windows responded' : 'Details available for your IT team']
                     ];
                     for (var lpi = 0; lpi < lprFields.length; lpi++) {
                         var lprP = document.createElement('p');
@@ -1053,13 +992,7 @@
         // legacy paths. Mirrors the V1.S18 / pre-UX-1H behavior:
         // keep the overlay up, surface the verdict, re-enable the
         // button so the operator can retry.
-        var verdict = (resp && resp.body && resp.body.verificationResult)
-            ? resp.body.verificationResult
-            : 'Unknown';
-        var msg = (resp && resp.body && resp.body.message)
-            ? resp.body.message
-            : 'Verification did not succeed.';
-        setUnlockUi(msg + ' (verdict: ' + verdict + ')', false, 'Try again');
+        setUnlockUi('Sign-in did not finish. Try again. Contact your IT team if the problem continues.', false, 'Try again');
     }
 
     // ----------------------------------------------------------------
@@ -2103,9 +2036,7 @@
                 primary.textContent = 'Retry';
             }
             if (status) {
-                status.textContent = 'Setup could not be prepared (' +
-                                     (state.preparedBootstrapError || 'unknown') +
-                                     '). Select "Retry".';
+                status.textContent = 'Sign-in could not be prepared. Select "Retry". Contact your IT team if the problem continues.';
             }
         }
     }
@@ -2402,9 +2333,7 @@
                 state.preparedBootstrap        = null;
                 state.preparedBootstrapStatus  = 'idle';
                 state.unlockInFlight           = false;
-                state.lastFailureMessage       = 'We couldn\'t start the check (' +
-                                                 (result.errName || 'unknown') +
-                                                 '). Select "Copy diagnostics" below, then "Retry".';
+                state.lastFailureMessage       = 'We couldn\'t start the check. Select "Copy diagnostics" below, then "Retry".';
                 renderLockedView();
                 setUnlockUi(state.lastFailureMessage, false, 'Retry');
                 return;
@@ -2423,14 +2352,13 @@
 
             // create() rejected: operator cancel/dismiss or a platform error.
             if (reason === 'user_cancelled' || reason.indexOf('navigator_create_failed:') === 0) {
-                var name = result.errName || 'unknown';
                 state.preparedBootstrap       = null;
                 state.preparedBootstrapStatus = 'idle';
                 state.unlockInFlight          = false;
                 if (reason === 'user_cancelled') {
                     state.lastFailureMessage = 'The check was cancelled. Select "Retry".';
                 } else {
-                    state.lastFailureMessage = 'We couldn\'t confirm it\'s you (' + name + '). ' +
+                    state.lastFailureMessage = 'We couldn\'t confirm it\'s you. ' +
                                                'Select "Copy diagnostics" below, then "Retry".';
                 }
                 renderLockedView();
@@ -2532,7 +2460,7 @@
         // this is a broker-side bug, not a Hello/passkey problem.
         if (isInternalException) {
             state.lastFailureMessage =
-                'Cookbook hit an internal error while confirming it\'s you. ' +
+                'Sign-in did not finish. Contact your IT team if the problem continues. ' +
                 'Select "Copy diagnostics" below, then "Retry".';
         } else {
             state.lastFailureMessage =
@@ -2589,13 +2517,12 @@
                 finishUnlockSuccess();
             } else {
                 var verdict = (bResult.resp && bResult.resp.body && bResult.resp.body.verificationResult) || 'Unknown';
-                var brokerMsg = (bResult.resp && bResult.resp.body && bResult.resp.body.message) || 'Verification did not succeed.';
                 recordDiag({
                     phase:        'broker_owned_failed',
                     resultOk:     false,
                     resultDetail: ('verdict=' + verdict)
                 });
-                state.lastFailureMessage = brokerMsg + ' (verdict: ' + verdict + ')';
+                state.lastFailureMessage = 'Sign-in did not finish. Try again. Contact your IT team if the problem continues.';
                 logUnlock(state.lastDiagnostics);
                 renderLockedView();
                 setUnlockUi(state.lastFailureMessage, false, 'Unlock');
@@ -2679,7 +2606,7 @@
                 });
                 logUnlock(state.lastDiagnostics);
                 state.unlockInFlight     = false;
-                state.lastFailureMessage = 'Couldn\'t reach PAX Cookbook to check your setup. Select "Copy diagnostics" below, or open Support details for another way to continue.';
+                    state.lastFailureMessage = 'Couldn\'t reach PAX Cookbook to check your setup. Try again. Contact your IT team if the problem continues.';
                 renderLockedView();
                 setUnlockUi(state.lastFailureMessage, false, 'Unlock');
                 return;
@@ -2697,7 +2624,7 @@
                 });
                 logUnlock(state.lastDiagnostics);
                 state.unlockInFlight     = false;
-                state.lastFailureMessage = 'This browser can\'t confirm it\'s you directly. Open Support details for another way to continue.';
+                    state.lastFailureMessage = 'Sign-in is unavailable here. Open PAX Cookbook Setup to repair it. Contact your IT team if the problem continues.';
                 renderLockedView();
                 setUnlockUi(state.lastFailureMessage, false, 'Unlock');
                 return;
@@ -2783,7 +2710,7 @@
                 });
                 logUnlock(state.lastDiagnostics);
                 state.unlockInFlight     = false;
-                state.lastFailureMessage = 'We couldn\'t confirm it\'s you. Select "Copy diagnostics" below, or open Support details for another way to continue.';
+                state.lastFailureMessage = 'We couldn\'t confirm it\'s you. Try again. Contact your IT team if the problem continues.';
                 renderLockedView();
                 setUnlockUi(state.lastFailureMessage, false, 'Unlock');
             });
@@ -2797,7 +2724,7 @@
             });
             logUnlock(state.lastDiagnostics);
             state.unlockInFlight     = false;
-            state.lastFailureMessage = 'Couldn\'t reach PAX Cookbook. Select "Copy diagnostics" below, or open Support details for another way to continue.';
+            state.lastFailureMessage = 'Couldn\'t reach PAX Cookbook. Try again. Contact your IT team if the problem continues.';
             renderLockedView();
             setUnlockUi(state.lastFailureMessage, false, 'Unlock');
         });
@@ -3015,7 +2942,7 @@
             document.body.removeChild(ta);
             setBtnText('Copied (fallback)');
         } catch (e) {
-            setBtnText('Copy failed - see console');
+            setBtnText('Could not copy. Try again.');
             try { /* eslint-disable-next-line no-console */ console.log('[PAX Cookbook Diagnostics]\n' + text); } catch (e2) {}
         }
     }
@@ -3113,7 +3040,7 @@
         var attemptParam   = '?attempt=' + encodeURIComponent(probeAttemptId);
 
         state.unlockInFlight = true;
-        setUnlockUi('Running diagnostic probe: ' + probeName + '\u2026', true, 'Probe running\u2026');
+        setUnlockUi('Running sign-in check\u2026', true, 'Checking\u2026');
 
         window.cookbookApi.post(
             '/api/v1/broker/webauthn/bootstrap-register-challenge' + attemptParam, {}

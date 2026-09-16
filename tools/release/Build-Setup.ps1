@@ -3,7 +3,7 @@
 # =====================================================================
 # Build-Setup.ps1  Build the distributable bootstrapper installer
 # PAX_Cookbook_Setup.exe (lightweight, downloads payload at runtime)
-# and the separate PAX_Cookbook_Payload.zip.
+# with PAX_Cookbook_Payload.zip, versions.json, and PAX_Cookbook_Admin_Setup.zip.
 #
 # WHAT THIS SCRIPT DOES
 #
@@ -21,13 +21,17 @@
 #   7. Updates the channel-authoritative versions.json with the payload
 #      SHA-256 + size so Setup verifies the payload at runtime.
 #   8. Verifies artifact sizes are within expected bounds.
+#   Also packages the separate IT administrator helper and README only.
 #
-# OUTPUTS (all under gitignored folders)
+# OUTPUTS
 #
 #   artifacts\setup\<channel>\payload\             staged payload + manifest
 #   artifacts\setup\<channel>\PAXCookbookSetup.exe built single-file installer
 #   dist\<channel>\PAX_Cookbook_Setup.exe           distributable Setup
 #   dist\<channel>\PAX_Cookbook_Payload.zip         distributable payload
+#   dist\<channel>\PAX_Cookbook_Admin_Setup.zip     separate administrator toolkit
+#   dist\experimental\versions.json              experimental release manifest
+#   versions.json                                stable manifest (promotion only)
 #   artifacts\setup\<channel>\build.log             full build log
 #
 # HARD RULES
@@ -158,7 +162,15 @@ function Log([string]$m) {
                 '-SourcePath', $sourcePath,
                 '-ExpectedSourceSha256', '7B5257D14BC4D590AEC60BC08A9FB21A72721B93A3B8739AF9CDD77BAFEE5D57'
             )
-            & ([Environment]::ProcessPath) @p1Arguments *> $null
+            $p1Output = @(& ([Environment]::ProcessPath) @p1Arguments 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error -Message ("P1 build log persistence: exitCode={0}`nDestinationPath={1}`nSourcePath={2}`nGuard output (stdout and stderr):`n{3}" -f $LASTEXITCODE, [System.IO.Path]::GetFullPath($logFile), [System.IO.Path]::GetFullPath($sourcePath), ($p1Output -join [Environment]::NewLine)) -ErrorAction Continue
+                foreach ($p1Record in $p1Output) {
+                    if ($p1Record -is [System.Management.Automation.ErrorRecord]) {
+                        Write-Error -Message ("Captured native boundary error: {0}`nScriptStackTrace (receiving boundary): {1}" -f $p1Record.Exception.ToString(), $p1Record.ScriptStackTrace) -ErrorAction Continue
+                    }
+                }
+            }
             if ($LASTEXITCODE -ne 0) { throw 'Build log persistence failed.' }
         } else {
             [System.IO.File]::Copy($sourcePath, $logFile, $true)
@@ -807,6 +819,9 @@ Assert-PaxSetupReleaseWritePath -Contract $release -Path $distExe -Purpose distr
 Assert-PaxSetupReleaseWritePath -Contract $release -Path $distPayload -Purpose distribution | Out-Null
 Copy-Item $finalSrc $distExe -Force
 Copy-Item $payloadZip $distPayload -Force
+$distAdminSetup = Join-Path $distDir 'PAX_Cookbook_Admin_Setup.zip'
+Assert-PaxSetupReleaseWritePath -Contract $release -Path $distAdminSetup -Purpose distribution | Out-Null
+$adminSetupArtifact = New-PaxAdminSetupArchive -RepositoryRoot $root -DestinationPath $distAdminSetup
 
 $finalSize = (Get-Item $distExe).Length
 $finalHash = HashOf $distExe
@@ -821,6 +836,10 @@ Log ''
 Log "ARTIFACT (Payload) : $distPayload"
 Log ("  size  : {0:N1} MiB ({1} bytes)" -f ($payloadSize/1MB), $payloadSize)
 Log "  sha256: $payloadHash"
+Log ''
+Log "ARTIFACT (Admin)   : $distAdminSetup"
+Log ("  size  : {0} bytes" -f $adminSetupArtifact.SizeBytes)
+Log ("  sha256: {0}" -f $adminSetupArtifact.Sha256)
 
 # ---------------------------------------------------------------------
 # Update the resolved channel manifest.
@@ -918,9 +937,11 @@ Invoke-Step '[8/8] verify artifact sizes' {
 }
 
 Log ''
-Log 'Build complete. TWO artifacts produced:'
+Log 'Build complete. FOUR release assets produced:'
 Log "  1. $distExe (bootstrapper, downloads payload at runtime)"
 Log "  2. $distPayload (uploaded to GitHub Release)"
+Log "  3. $versionsPath (channel release manifest)"
+Log "  4. $distAdminSetup (separate IT download; never installed or detected by Setup)"
 
 Write-Host ''
 Write-Host "DISTRIBUTABLE (Setup)  : $distExe"
@@ -930,3 +951,9 @@ Write-Host ''
 Write-Host "DISTRIBUTABLE (Payload): $distPayload"
 Write-Host ("  SIZE: {0:N1} MiB" -f ($payloadSize/1MB))
 Write-Host "  SHA256: $payloadHash"
+Write-Host ''
+Write-Host "DISTRIBUTABLE (Manifest): $versionsPath"
+Write-Host ''
+Write-Host "DISTRIBUTABLE (Admin)  : $distAdminSetup"
+Write-Host ("  SIZE: {0} bytes" -f $adminSetupArtifact.SizeBytes)
+Write-Host ("  SHA256: {0}" -f $adminSetupArtifact.Sha256)

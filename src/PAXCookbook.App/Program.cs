@@ -194,8 +194,7 @@ internal static class Program
         {
             if (!_interactiveLaunch) return;
             System.Windows.Forms.MessageBox.Show(
-                "PAX Cookbook failed to start.\n\n" + detail +
-                "\n\nDetails have been saved to:\n" + StartupLog.LogPath,
+                "PAX Cookbook could not start. Run PAX Cookbook Setup to repair it. Contact your IT team if the problem continues.",
                 AppName,
                 System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Error);

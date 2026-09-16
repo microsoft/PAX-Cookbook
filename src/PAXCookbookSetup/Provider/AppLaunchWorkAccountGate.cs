@@ -35,6 +35,60 @@ public sealed class AppLaunchWorkAccountGate : IWorkAccountSetupGate
     private readonly string _resultFilePath;
     private readonly TimeSpan _timeout;
 
+    private readonly object _childSync = new();
+    private INativeChildProcess? _child;
+    private Task? _cleanupAttempt;
+    private bool _running;
+    private static readonly TimeSpan CleanupWait = TimeSpan.FromSeconds(1);
+
+    internal bool HasOutstandingNativeChild { get { lock (_childSync) return _child is not null; } }
+
+    internal async Task<bool> RetryNativeCleanupAsync()
+    {
+        lock (_childSync)
+        {
+            if (_running) return false;
+        }
+        return await CleanupNativeChildAsync().ConfigureAwait(false);
+    }
+
+    private async Task<bool> CleanupNativeChildAsync()
+    {
+        Task attempt;
+        lock (_childSync)
+        {
+            if (_child is null) return true;
+            if (_cleanupAttempt is null || _cleanupAttempt.IsCompleted)
+            {
+                var child = _child;
+                _cleanupAttempt = Task.Run(async () =>
+                {
+                    if (!child.HasExited)
+                    {
+                        try { child.Kill(); } catch { }
+                        await child.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                });
+            }
+            attempt = _cleanupAttempt;
+        }
+        try { await attempt.WaitAsync(CleanupWait).ConfigureAwait(false); }
+        catch { return false; }
+        lock (_childSync)
+        {
+            if (_child is null) return true;
+            try
+            {
+                if (!_child.HasExited || !TryDeleteResult()) return false;
+                _child.Dispose();
+                _child = null;
+                _cleanupAttempt = null;
+                return true;
+            }
+            catch { return false; }
+        }
+    }
+
     public AppLaunchWorkAccountGate(
         string localAppDataBase,
         string appExePath,
@@ -74,38 +128,52 @@ public sealed class AppLaunchWorkAccountGate : IWorkAccountSetupGate
     }
 
     public bool RunNativeWamAuthTest()
+        => RunNativeWamAuthTestAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+    public async Task<bool> RunNativeWamAuthTestAsync(CancellationToken cancel)
     {
-        // Clear any stale result before launching so a previous run cannot be
-        // mistaken for this one.
-        TryDeleteResult();
-
-        string configPath = Path.Combine(ConfigDir, WamConfigFileName);
-        var process = _launcher.Start(_appExePath, new[]
+        lock (_childSync)
         {
-            NativeTestFlag,
-            ConfigFlag, configPath,
-            ResultFlag, _resultFilePath,
-        });
-
-        // A real launch returns a process to await; a recording/test launcher
-        // returns null and the result file is expected to be pre-seeded.
-        if (process is not null)
+            if (_running || _child is not null) return false;
+            _running = true;
+        }
+        try
         {
-            try
+            if (cancel.IsCancellationRequested || !TryDeleteResult()) return false;
+            string configPath = Path.Combine(ConfigDir, WamConfigFileName);
+            var arguments = new[]
             {
-                if (!process.WaitForExit((int)_timeout.TotalMilliseconds))
+                NativeTestFlag,
+                ConfigFlag, configPath,
+                ResultFlag, _resultFilePath,
+            };
+            var process = _launcher is INativeChildLauncher nativeLauncher
+                ? nativeLauncher.StartNativeChild(_appExePath, arguments)
+                : _launcher.Start(_appExePath, arguments) is { } started ? new NativeChildProcess(started) : null;
+            lock (_childSync) _child = process;
+            if (process is not null)
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+                timeout.CancelAfter(_timeout);
+                try
                 {
-                    try { process.Kill(entireProcessTree: true); } catch { /* best-effort */ }
+                    await process.WaitForExitAsync(timeout.Token).WaitAsync(timeout.Token).ConfigureAwait(false);
+                    if (!process.HasExited) throw new InvalidOperationException();
+                }
+                catch
+                {
+                    await CleanupNativeChildAsync().ConfigureAwait(false);
                     return false;
                 }
+                lock (_childSync)
+                {
+                    process.Dispose();
+                    _child = null;
+                }
             }
-            catch
-            {
-                return false;
-            }
+            return !cancel.IsCancellationRequested && ReadApprovedResult();
         }
-
-        return ReadApprovedResult();
+        finally { lock (_childSync) _running = false; }
     }
 
     private bool ReadApprovedResult()
@@ -127,7 +195,7 @@ public sealed class AppLaunchWorkAccountGate : IWorkAccountSetupGate
         }
     }
 
-    private void TryDeleteResult()
+    private bool TryDeleteResult()
     {
         try
         {
@@ -135,10 +203,11 @@ public sealed class AppLaunchWorkAccountGate : IWorkAccountSetupGate
             {
                 File.Delete(_resultFilePath);
             }
+            return !File.Exists(_resultFilePath);
         }
         catch
         {
-            // Best-effort.
+            return false;
         }
     }
 }

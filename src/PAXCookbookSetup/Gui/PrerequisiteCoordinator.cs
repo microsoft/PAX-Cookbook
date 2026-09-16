@@ -20,16 +20,47 @@ public sealed class PrerequisiteCoordinator
         _installers = installers;
     }
 
+    internal static bool WaitForInstallerExit(Func<int, bool> waitWithTimeout, Action waitForExit, int timeoutMs)
+    {
+        bool finishedInTime = waitWithTimeout(timeoutMs);
+        if (!finishedInTime) waitForExit();
+        return finishedInTime;
+    }
+
+    public PrerequisiteCoordinatorResult RunDetected(
+        PrerequisiteDetector detector, bool runtimesOnly, string downloadDir,
+        Action<string> progress, Func<PrerequisiteKind, string, RetryExitDecision> onError,
+        CancellationToken cancel = default)
+    {
+        cancel.ThrowIfCancellationRequested();
+        var needed = new Dictionary<PrerequisiteKind, bool>
+        {
+            [PrerequisiteKind.DotNet8DesktopRuntime] = !detector.DetectDotNet8DesktopRuntime().Satisfied,
+            [PrerequisiteKind.AspNetCoreRuntime] = !detector.DetectAspNetCoreRuntime().Satisfied,
+            [PrerequisiteKind.PowerShell7] = !runtimesOnly && !detector.DetectPowerShell7().Satisfied,
+            [PrerequisiteKind.Python] = !runtimesOnly && !detector.DetectPython().Satisfied
+        };
+        var result = Run(needed, downloadDir, progress, onError, cancel);
+        if (result.IsCancelled) return result;
+        cancel.ThrowIfCancellationRequested();
+        bool ready = detector.DetectDotNet8DesktopRuntime().Satisfied &&
+            detector.DetectAspNetCoreRuntime().Satisfied &&
+            (runtimesOnly || (detector.DetectPowerShell7().Satisfied && detector.DetectPython().Satisfied));
+        return ready ? result : result with { IsCancelled = true };
+    }
+
     public PrerequisiteCoordinatorResult Run(
         IReadOnlyDictionary<PrerequisiteKind, bool> needed,
         string downloadDir,
         Action<string> progress,
-        Func<PrerequisiteKind, string, RetryExitDecision> onError)
+        Func<PrerequisiteKind, string, RetryExitDecision> onError,
+        CancellationToken cancel = default)
     {
         var results = new List<NamedPrerequisiteResult>();
 
         foreach (var installer in _installers)
         {
+            cancel.ThrowIfCancellationRequested();
             var kind = installer.Kind;
             var name = DisplayName(kind);
 
@@ -46,7 +77,15 @@ public sealed class PrerequisiteCoordinator
             // loop; there is no artificial retry cap.
             while (true)
             {
+                cancel.ThrowIfCancellationRequested();
                 var result = installer.Install(downloadDir, progress);
+                cancel.ThrowIfCancellationRequested();
+
+                if (result.Outcome == PrerequisiteInstallOutcome.Cancelled)
+                {
+                    results.Add(new NamedPrerequisiteResult(kind, name, result));
+                    return new PrerequisiteCoordinatorResult(results, IsCancelled: true);
+                }
 
                 if (result.Outcome is PrerequisiteInstallOutcome.Failed
                                     or PrerequisiteInstallOutcome.UserDeclined)

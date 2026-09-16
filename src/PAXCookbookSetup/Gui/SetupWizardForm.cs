@@ -61,9 +61,12 @@ internal sealed class SetupWizardForm : Form
     private Panel? _signInWorkPanel;
     private Label _helloAvailabilityLabel = null!;
     private Label? _workStatusLabel;
-    private Button? _btnWorkConfigure, _btnWorkImport, _btnWorkVerify, _btnWorkTest;
+    private Button? _btnWorkImport, _btnWorkTest;
     private SignInMethodController? _signIn;
     private string? _signInStagingDir;
+    private WizardSignInPreparation? _signInPreparation;
+    private bool _signInClosing;
+    private bool _signInCloseReady;
 
     // Prerequisites screen
     private Label _prereqHeading = null!, _dotnet8Line = null!, _aspnetLine = null!, _ps7Line = null!, _pyLine = null!, _prereqIntro = null!, _prereqNote = null!;
@@ -111,7 +114,7 @@ internal sealed class SetupWizardForm : Form
         MaximizeBox = false;
         MinimizeBox = true;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(680, 560);
+        ClientSize = new Size(680, 600);
         BackColor = Color.White;
         Font = new Font("Segoe UI", 9F);
         try { Icon = WizardAssets.LoadAppIcon(); } catch { /* default icon */ }
@@ -268,7 +271,7 @@ internal sealed class SetupWizardForm : Form
 
         AppendRun(rtb, "\u2022  What it does\u2003", 10.5F, true, navy);
         AppendRun(rtb,
-            "Connects to your Microsoft 365 tenant, pulls Copilot usage and adoption data " +
+            "Connects to your Microsoft 365 organization, pulls Copilot usage and adoption data " +
             "from Purview, and outputs it ready for Power BI dashboards.\n",
             10.5F, false, body);
 
@@ -388,31 +391,19 @@ internal sealed class SetupWizardForm : Form
             _radioWork.CheckedChanged += (_, _) => OnProviderRadioChanged();
             p.Controls.Add(_radioWork);
 
-            _signInWorkPanel = new Panel { Location = new Point(50, 208), Size = new Size(605, 224) };
+            _signInWorkPanel = new Panel { Location = new Point(50, 208), Size = new Size(605, 160) };
             _signInWorkPanel.Controls.Add(Body(
-                "Native Microsoft work-account sign-in using a customer-owned registration that shows the native " +
-                "Windows account picker. It requests delegated Microsoft Graph User.Read only; a tenant administrator " +
-                "approves it and no secret or certificate is created. PAX Cookbook " +
-                "uses your work-account permission only to sign you in and show your profile picture; it " +
-                "does not use this sign-in to read audit or directory data. Because the registration shows the " +
-                "standard picker, other accounts (including personal or external accounts) may appear, but only " +
-                "your configured organization can unlock PAX Cookbook.",
-                0, 0, 600, 96, 9.5F));
+                "Sign in with your organization's Microsoft work account using the setup file your IT team gives you.",
+                0, 0, 600, 48, 9.5F));
 
-            _btnWorkConfigure = new Button { Text = "Configure", Location = new Point(0, 102), Size = new Size(120, 30) };
-            _btnWorkImport = new Button { Text = "Import setup result", Location = new Point(128, 102), Size = new Size(150, 30) };
-            _btnWorkVerify = new Button { Text = "Verify", Location = new Point(286, 102), Size = new Size(100, 30) };
-            _btnWorkTest = new Button { Text = "Test sign-in", Location = new Point(394, 102), Size = new Size(130, 30) };
-            _btnWorkConfigure.Click += (_, _) => OnWorkConfigure();
+            _btnWorkImport = new Button { Text = "Import setup file", Location = new Point(0, 56), Size = new Size(150, 30) };
+            _btnWorkTest = new Button { Text = "Test sign-in", Location = new Point(162, 56), Size = new Size(130, 30) };
             _btnWorkImport.Click += (_, _) => OnWorkImport();
-            _btnWorkVerify.Click += (_, _) => OnWorkVerify();
-            _btnWorkTest.Click += (_, _) => OnWorkTest();
-            _signInWorkPanel.Controls.Add(_btnWorkConfigure);
+            _btnWorkTest.Click += async (_, _) => await OnWorkTestAsync();
             _signInWorkPanel.Controls.Add(_btnWorkImport);
-            _signInWorkPanel.Controls.Add(_btnWorkVerify);
             _signInWorkPanel.Controls.Add(_btnWorkTest);
 
-            _workStatusLabel = Body("", 0, 144, 600, 72, 9.5F);
+            _workStatusLabel = Body("", 0, 98, 600, 56, 9.5F);
             _workStatusLabel.ForeColor = Color.FromArgb(0x60, 0x60, 0x60);
             _signInWorkPanel.Controls.Add(_workStatusLabel);
             p.Controls.Add(_signInWorkPanel);
@@ -437,9 +428,20 @@ internal sealed class SetupWizardForm : Form
             _isExperimental,
             localAppDataBase,
             _signInStagingDir,
-            ResolveTestAppExe(),
+            () => _signInPreparation!.ResolveNativeAppPath(),
             new RealProcessLauncher(),
             new WindowsHelloSupportProbe());
+
+        if (_signInPreparation is null)
+        {
+            _signInPreparation = new WizardSignInPreparation(_signIn,
+                (early, cancel) => WizardInstallRunner.PrepareAsync(_installRoot, null,
+                    ReportPreparationProgress, _log, cancel, early),
+                PreparePrerequisitesAsync,
+                (payload, cancel) => Task.FromResult(WizardInstallRunner.InstallPrepared(
+                    payload, _installRoot, ReportPreparationProgress, _log, _shellOps, cancel)));
+            _signInPreparation.StateChanged += OnPreparationStateChanged;
+        }
 
         if (_radioHello is { Checked: false } && (_radioWork is null || !_radioWork.Checked))
         {
@@ -449,23 +451,26 @@ internal sealed class SetupWizardForm : Form
     }
 
     // Writes the selected provider record last (after install). Cleans staging.
-    private void CommitProviderSelection()
+    private bool CommitProviderSelection()
     {
-        if (_signIn is null) { return; }
+        if (_signIn is null) { return false; }
         try
         {
-            ProviderSetupResult r = _signIn.Commit();
+            string localAppDataBase = Path.GetDirectoryName(_installRoot.TrimEnd(Path.DirectorySeparatorChar)) ?? _installRoot;
+            ProviderSetupResult r = _signIn.Commit(localAppDataBase);
             _log.Write("wizard-provider-commit", r.Succeeded ? "info" : "warn",
                 new Dictionary<string, object?>
                 {
                     ["provider"] = r.Selected?.ToString() ?? "none",
                     ["status"] = r.Status.ToString(),
                 });
+            return r.Succeeded;
         }
         catch (Exception ex)
         {
             _log.Write("wizard-provider-commit", "error",
                 new Dictionary<string, object?> { ["detail"] = ex.Message });
+            return false;
         }
         finally
         {
@@ -473,45 +478,28 @@ internal sealed class SetupWizardForm : Form
         }
     }
 
-    // Resolves the app EXE used for the native provider test. Prefers an explicit
-    // Setup test seam (isolated pilot), then the payload sibling, then the final
-    // install path. Never a product override.
-    private string ResolveTestAppExe()
+    private void OnPreparationStateChanged()
     {
-        string? seam = Environment.GetEnvironmentVariable("PAXCOOKBOOK_SETUP_PROVIDER_TEST_EXE");
-        if (!string.IsNullOrWhiteSpace(seam))
+        if (_signInClosing)
         {
-            return seam;
+            if (IsDisposed) CleanupSignInStaging();
+            return;
         }
-        try
-        {
-            string? setupDir = Path.GetDirectoryName(Environment.ProcessPath ?? string.Empty);
-            if (!string.IsNullOrEmpty(setupDir))
-            {
-                string sibling = Path.Combine(setupDir, "App", "bin", ProductConstants.AppExeName);
-                if (File.Exists(sibling))
-                {
-                    return sibling;
-                }
-            }
-        }
-        catch { /* fall through */ }
-        return Path.Combine(AppPaths.BinRoot(Path.GetDirectoryName(_installRoot.TrimEnd(Path.DirectorySeparatorChar))), ProductConstants.AppExeName);
+        BeginInvokeSafe(RenderSignInPreparation);
+    }
+
+    private void RenderSignInPreparation()
+    {
+        if (_signInClosing || IsDisposed || Disposing || _step != Step.SignInMethod || _signInPreparation is null) return;
+        SetWorkStatus(_signInPreparation.Status);
+        UpdateSignInContinue();
     }
 
     private void OnProviderRadioChanged()
     {
         if (_signIn is null) { return; }
         bool work = _radioWork is { Checked: true };
-        if (work) { _signIn.ChooseWorkAccount(); } else { _signIn.ChooseWindowsHello(); }
-
-        bool helloAvail = _signIn.HelloAvailable;
-        _helloAvailabilityLabel.Text = helloAvail
-            ? "Windows Hello is available on this device."
-            : "Windows Hello does not appear to be available on this device.";
-        _helloAvailabilityLabel.ForeColor = helloAvail
-            ? Color.FromArgb(0x1E, 0x7E, 0x34)
-            : Color.FromArgb(0xB0, 0x2A, 0x37);
+        if (work) { _signIn.ChooseWorkAccount(); } else { _signInPreparation!.ChooseWindowsHello(); }
 
         if (_signInWorkPanel is not null)
         {
@@ -522,116 +510,77 @@ internal sealed class SetupWizardForm : Form
 
     private void UpdateSignInContinue()
     {
-        if (_signIn is null) { return; }
-        _btnNext.Enabled = _signIn.CanContinue();
-
-        if (_btnWorkImport is not null) { _btnWorkImport.Enabled = _radioWork is { Checked: true }; }
-        if (_btnWorkConfigure is not null) { _btnWorkConfigure.Enabled = _radioWork is { Checked: true }; }
-        if (_btnWorkVerify is not null) { _btnWorkVerify.Enabled = _radioWork is { Checked: true } && _signIn.WorkConfigStaged; }
-        if (_btnWorkTest is not null) { _btnWorkTest.Enabled = _radioWork is { Checked: true } && _signIn.WorkConfigStaged && _signIn.WorkVerified; }
+        if (_signInPreparation is null) { return; }
+        _btnNext.Enabled = _signInPreparation.CanContinue;
+        _btnBack.Enabled = _signInPreparation.CanReleaseStaging;
+        _radioHello.Enabled = true;
+        if (_radioWork is not null) { _radioWork.Enabled = _signInPreparation.CanReleaseStaging; }
+        if (_btnWorkImport is not null) { _btnWorkImport.Enabled = _signInPreparation.CanImport; }
+        if (_btnWorkTest is not null)
+        {
+            _btnWorkTest.Text = _signInPreparation.CanRetryCleanup ? "Retry" : "Test sign-in";
+            _btnWorkTest.Enabled = _signInPreparation.CanTest || _signInPreparation.CanRetryCleanup;
+        }
+        _btnCancel.Text = _signInPreparation.CanRetryCleanup ? "Retry" : "Cancel";
+        _btnCancel.Enabled = true;
+        bool helloRetry = _radioHello.Checked
+            && (_signInPreparation.RequiresFreshPreparation || _signInPreparation.CanRetryCleanup);
+        _helloAvailabilityLabel.Text = helloRetry
+            ? (_signInPreparation.CanReleaseStaging
+                ? "Setup files changed. Choose Retry, then Install."
+                : "Setup could not finish stopping. Choose Retry.")
+            : (_signIn?.HelloAvailable == true
+                ? "Windows Hello is available on this device."
+                : "Windows Hello does not appear to be available on this device.");
+        _helloAvailabilityLabel.ForeColor = !helloRetry && _signIn?.HelloAvailable == true
+            ? Color.FromArgb(0x1E, 0x7E, 0x34)
+            : Color.FromArgb(0xB0, 0x2A, 0x37);
     }
 
-    private void SetWorkStatus(string text) { if (_workStatusLabel is not null) { _workStatusLabel.Text = text; } }
-
-    // Launches the fixed helper (Provision) so a tenant admin signs in with
-    // Azure CLI; imports its result. The user never types identifiers.
-    private void OnWorkConfigure()
+    private void SetWorkStatus(string text)
     {
-        if (_signIn is null) { return; }
-        string resultPath = Path.Combine(_signInStagingDir!, "provision_result.json");
-        SetWorkStatus("Running the guided setup helper. Complete the administrator sign-in in the console window…");
-        int exit = RunHelper("Provision", resultPath, confirmed: true);
-        if (exit == 0 && _signIn.ImportSetupResult(resultPath))
+        if (_workStatusLabel is not null) { _workStatusLabel.Text = text; }
+        if (_radioHello.Checked && _signInClosing)
         {
-            SetWorkStatus("Configuration created and imported. Next: Verify, then Test sign-in.");
+            _helloAvailabilityLabel.Text = _btnCancel.Enabled
+                ? "Setup could not finish stopping. Choose Retry."
+                : "Stopping...";
         }
-        else
-        {
-            SetWorkStatus("Setup was not completed. You can retry, Import an existing result, or choose Windows Hello.");
-        }
-        UpdateSignInContinue();
     }
 
     private void OnWorkImport()
     {
-        if (_signIn is null) { return; }
-        using var dlg = new OpenFileDialog { Filter = "Setup result (*.json)|*.json|All files (*.*)|*.*" };
+        if (_signIn is null || _signInPreparation?.CanImport != true) { return; }
+        using var dlg = new OpenFileDialog { Filter = "Setup file (*.json)|*.json|All files (*.*)|*.*" };
         if (dlg.ShowDialog(this) != DialogResult.OK) { return; }
         if (_signIn.ImportSetupResult(dlg.FileName))
         {
-            SetWorkStatus("Setup result imported. Next: Verify, then Test sign-in.");
+            SetWorkStatus(_signIn.WorkVerified ? "Setup file imported. Next: Test sign-in." : "Ask your IT team for a checked setup file.");
         }
         else
         {
-            SetWorkStatus("That file is not a valid setup result.");
+            SetWorkStatus("That setup file could not be used. Ask your IT team for a checked setup file.");
         }
         UpdateSignInContinue();
     }
 
-    private void OnWorkVerify()
+    private async Task OnWorkTestAsync()
     {
-        if (_signIn is null) { return; }
-        string resultPath = Path.Combine(_signInStagingDir!, "verify_result.json");
-        SetWorkStatus("Verifying the tenant setup with the administrator's Azure CLI session…");
-        int exit = RunHelper("Verify", resultPath, confirmed: false);
-        bool ok = exit == 0 && _signIn.MarkVerified(true);
-        SetWorkStatus(ok
-            ? "Tenant setup verified. Next: Test sign-in."
-            : "Verification did not succeed. Re-run Configure or Verify with a tenant administrator.");
-        UpdateSignInContinue();
-    }
-
-    private void OnWorkTest()
-    {
-        if (_signIn is null) { return; }
+        if (_signInClosing || IsDisposed || Disposing) return;
+        if (_signInPreparation?.CanRetryCleanup == true)
+        {
+            await _signInPreparation.RetryCleanupAsync();
+            if (!IsDisposed && !Disposing) RenderSignInPreparation();
+            return;
+        }
+        if (_signInPreparation?.CanTest != true) { return; }
         string resultPath = Path.Combine(_signInStagingDir!, "provider_test_result.json");
-        SetWorkStatus("Complete the Windows work-account sign-in in the window that appears…");
-        bool ok = _signIn.RunNativeTest(resultPath);
-        SetWorkStatus(ok
-            ? "Work-account sign-in test succeeded. Click Install to finish."
-            : "The sign-in test did not succeed. You can retry or choose Windows Hello.");
-        UpdateSignInContinue();
-    }
-
-    // Launches the fixed guarded helper for Provision/Verify. Returns its exit
-    // code; a missing helper/pwsh yields a non-zero code and a bounded message.
-    private int RunHelper(string action, string resultPath, bool confirmed)
-    {
-        try
+        try { await _signInPreparation.TestAsync(resultPath); }
+        catch { if (!_signInClosing && !IsDisposed && !Disposing) SetWorkStatus(WizardSignInPreparation.NativeFailureMessage); }
+        if (!_signInClosing && !IsDisposed && !Disposing)
         {
-            string helper = ResolveHelperPath();
-            if (!File.Exists(helper)) { return 1; }
-            var psi = new ProcessStartInfo
-            {
-                FileName = "pwsh",
-                UseShellExecute = false,
-            };
-            psi.ArgumentList.Add("-NoProfile");
-            psi.ArgumentList.Add("-File");
-            psi.ArgumentList.Add(helper);
-            psi.ArgumentList.Add("-Action");
-            psi.ArgumentList.Add(action);
-            psi.ArgumentList.Add("-SetupResultPath");
-            psi.ArgumentList.Add(resultPath);
-            if (confirmed) { psi.ArgumentList.Add("-Confirmed"); }
-            using var helperLease = string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PAXCOOKBOOK_SETUP_PROVIDER_HELPER"))
-                ? SetupProviderHelper.AcquireLease(helper) : null;
-            using var proc = Process.Start(psi);
-            if (proc is null) { return 1; }
-            proc.WaitForExit();
-            return proc.ExitCode;
+            RenderSignInPreparation();
         }
-        catch
-        {
-            return 1;
-        }
-    }
-
-    private static string ResolveHelperPath()
-    {
-        string? seam = Environment.GetEnvironmentVariable("PAXCOOKBOOK_SETUP_PROVIDER_HELPER");
-        if (!string.IsNullOrWhiteSpace(seam)) { return seam; }
-        return SetupProviderHelper.ResolveHelperPath();
     }
 
     private Panel BuildProgressPanel()
@@ -660,7 +609,7 @@ internal sealed class SetupWizardForm : Form
         _prereqWarning = Body("", 28, 104, 612, 56, 9F);
         _prereqWarning.ForeColor = Color.FromArgb(0x9A, 0x6A, 0x00);
         _chkLaunch = new CheckBox { Text = "Launch PAX Cookbook now", Location = new Point(30, 172), Size = new Size(600, 24), Checked = true };
-        _chkAutoStart = new CheckBox { Text = "Start PAX Cookbook at login (recommended for scheduled bakes)", Location = new Point(30, 202), Size = new Size(620, 24), Checked = true };
+        _chkAutoStart = new CheckBox { Text = "Start PAX Cookbook when I sign in (recommended for scheduled Bakes)", Location = new Point(30, 202), Size = new Size(620, 24), Checked = true };
         p.Controls.Add(_completeMsg);
         p.Controls.Add(_prereqWarning);
         p.Controls.Add(_chkLaunch);
@@ -749,7 +698,7 @@ internal sealed class SetupWizardForm : Form
             case Step.Prerequisites: ShowStep(Step.Location); break;
             case Step.Location: ShowStep(Step.SignInMethod); break;
             case Step.SignInMethod:
-                if (_signIn is null || !_signIn.CanContinue())
+                if (_signInPreparation?.CanContinue != true)
                 {
                     return; // the Install button is only enabled once the choice is valid
                 }
@@ -761,6 +710,7 @@ internal sealed class SetupWizardForm : Form
 
     private void OnBack()
     {
+        if (_signInClosing || _signInPreparation?.CanReleaseStaging == false) return;
         switch (_step)
         {
             case Step.Prerequisites: ShowStep(Step.Welcome); break;
@@ -772,6 +722,19 @@ internal sealed class SetupWizardForm : Form
     private void OnCancel()
     {
         if (_installRunning) return;
+        if (_signInClosing)
+        {
+            if (!_btnCancel.Enabled) return;
+            _btnCancel.Enabled = false;
+            SetWorkStatus("Stopping...");
+            _ = StopSignInAndCloseAsync();
+            return;
+        }
+        if (_signInPreparation?.CanRetryCleanup == true)
+        {
+            _ = OnWorkTestAsync();
+            return;
+        }
         // After a failed install the Cancel button is relabelled "Close":
         // close directly, preserving the failure exit code already set in
         // OnInstallFinished (no "Cancel Setup?" prompt — there is nothing
@@ -878,8 +841,9 @@ internal sealed class SetupWizardForm : Form
     // -----------------------------------------------------------------
     // Install
     // -----------------------------------------------------------------
-    private void BeginInstall()
+    private async void BeginInstall()
     {
+        if (_signInPreparation?.CanContinue != true) return;
         var chosen = _txtPath.Text?.Trim();
         if (string.IsNullOrWhiteSpace(chosen))
         {
@@ -910,82 +874,69 @@ internal sealed class SetupWizardForm : Form
         AppendLog("Installing PAX Cookbook to:");
         AppendLog("  " + _installRoot);
 
-        // All three prerequisites are REQUIRED. Install any that are missing.
-        bool needDotNet8 = _dotnet8Status is { Satisfied: false };
-        bool needAspNet = _aspnetStatus is { Satisfied: false };
-        bool needPs7 = _ps7Status is { Satisfied: false };
-        bool needPy = _pyStatus is { Satisfied: false };
-
-        Task.Run(() =>
+        try
         {
-            // Fresh, randomly-named per-user download folder, deleted wholesale
-            // when done (TOCTOU hardening: a download dir not shared/predictable).
-            string tempDir = Path.Combine(Path.GetTempPath(),
-                "PAXSetup_" + Guid.NewGuid().ToString("N"));
-            var prereq = Array.Empty<NamedPrerequisiteResult>() as IReadOnlyList<NamedPrerequisiteResult>;
-            try
+            var result = await _signInPreparation.InstallAsync();
+            if (_signInPreparation.RequiresFreshPreparation)
             {
-                Action<string> progress = msg =>
-                    BeginInvokeSafe(() => { _progressStatus.Text = msg; AppendLog(msg); });
-
-                if (needDotNet8 || needAspNet || needPs7 || needPy)
-                {
-                    BeginInvokeSafe(() => AppendLog("Installing required prerequisites…"));
-
-                    using var downloader = new HttpPrereqDownloader();
-                    var coordinator = new PrerequisiteCoordinator(new IPrerequisiteInstaller[]
-                    {
-                        new DotNet8DesktopRuntimeInstaller(downloader, new RealElevatedLauncher(), _detector),
-                        new AspNetCoreRuntimeInstaller(downloader, new RealElevatedLauncher(), _detector),
-                        new PowerShell7Installer(downloader, new RealElevatedLauncher(), _detector),
-                        new PythonInstaller(downloader, new RealSilentLauncher(), _detector)
-                    });
-                    var needed = new Dictionary<PrerequisiteKind, bool>
-                    {
-                        [PrerequisiteKind.DotNet8DesktopRuntime] = needDotNet8,
-                        [PrerequisiteKind.AspNetCoreRuntime] = needAspNet,
-                        [PrerequisiteKind.PowerShell7] = needPs7,
-                        [PrerequisiteKind.Python] = needPy
-                    };
-                    var coordResult = coordinator.Run(needed, tempDir, progress, OnPrereqError);
-                    prereq = coordResult.Results;
-                    foreach (var r in prereq)
-                        BeginInvokeSafe(() => AppendLog($"  {r.DisplayName}: {Describe(r.Result.Outcome)}"));
-
-                    // If any required prerequisite was cancelled, abort the install.
-                    if (coordResult.IsCancelled)
-                    {
-                        BeginInvokeSafe(() => OnInstallFinished(
-                            new WizardInstallResult(false, SetupExitCodes.GenericError,
-                                "Setup was cancelled because a required prerequisite could not be installed."),
-                            prereq));
-                        return;
-                    }
-                }
-
-                var result = WizardInstallRunner.Run(
-                    _installRoot, payloadRootOverride: null,
-                    progress: progress, log: _log, shellOps: _shellOps);
-                BeginInvokeSafe(() => OnInstallFinished(result, prereq));
+                _installRunning = false;
+                ShowStep(Step.SignInMethod);
+                SetWorkStatus(_signInPreparation.Status);
+                return;
             }
-            catch (Exception ex)
-            {
-                // Defence in depth: the installers + runner are designed never
-                // to throw, but if a contract is ever violated we must still
-                // reach OnInstallFinished — otherwise _installRunning stays true
-                // and the window can never close. Degrade to a graceful failure.
-                _log.Write("wizard-install-unhandled", "error",
-                    new Dictionary<string, object?> { ["detail"] = ex.Message });
-                BeginInvokeSafe(() => OnInstallFinished(
-                    new WizardInstallResult(false, SetupExitCodes.GenericError,
-                        "Unexpected error during installation: " + ex.Message),
-                    prereq));
-            }
-            finally
-            {
-                TryDeleteDir(tempDir);
-            }
+            OnInstallFinished(result, _signInPreparation.PrerequisiteResults);
+        }
+        catch
+        {
+            OnInstallFinished(new WizardInstallResult(false, SetupExitCodes.GenericError,
+                "Setup could not finish. Run Setup again. Contact your IT team if the problem continues."),
+                _signInPreparation.PrerequisiteResults);
+        }
+    }
+
+    private void ReportPreparationProgress(string message)
+    {
+        BeginInvokeSafe(() =>
+        {
+            if (_step == Step.Progress) { _progressStatus.Text = message; AppendLog(message); }
         });
+    }
+
+    private Task<PrerequisiteCoordinatorResult> PreparePrerequisitesAsync(
+        WizardInstallRunner.PreparedPayload? payload, bool early, CancellationToken cancel)
+    {
+        cancel.ThrowIfCancellationRequested();
+        System.Runtime.InteropServices.Architecture? target = null;
+        if (early)
+        {
+            _ = payload!.GetValidatedAppExePath();
+            target = payload.TargetArch switch
+            {
+                "x64" => System.Runtime.InteropServices.Architecture.X64,
+                "x86" => System.Runtime.InteropServices.Architecture.X86,
+                "arm64" => System.Runtime.InteropServices.Architecture.Arm64,
+                _ => throw new InvalidDataException("Unsupported sign-in runtime.")
+            };
+        }
+        var detector = target.HasValue ? _detector.ForRuntimeArchitecture(target.Value) : _detector;
+        return Task.FromResult(_signInPreparation!.RunPrerequisites(tempDir =>
+        {
+            using var downloader = new HttpPrereqDownloader();
+            var installers = new List<IPrerequisiteInstaller>
+            {
+                new DotNet8DesktopRuntimeInstaller(downloader, new RealElevatedLauncher(), detector, target),
+                new AspNetCoreRuntimeInstaller(downloader, new RealElevatedLauncher(), detector, target)
+            };
+            if (!early)
+            {
+                installers.Add(new PowerShell7Installer(downloader, new RealElevatedLauncher(), detector));
+                installers.Add(new PythonInstaller(downloader, new RealSilentLauncher(), detector));
+            }
+            var result = new PrerequisiteCoordinator(installers).RunDetected(detector, early, tempDir,
+                ReportPreparationProgress, (kind, message) => cancel.IsCancellationRequested
+                    ? RetryExitDecision.ExitSetup : OnPrereqError(kind, message), cancel);
+            return result;
+        }));
     }
 
     // Invoked on a background thread by the coordinator when a required
@@ -1001,9 +952,11 @@ internal sealed class SetupWizardForm : Form
             PrerequisiteKind.Python => "Python",
             _ => kind.ToString()
         };
+        _log.Write("wizard-prerequisite-failed", "warn",
+            new Dictionary<string, object?> { ["detail"] = message });
         return InvokeSafeSync(
             () => RetryExitDialog.Show(this, "PAX Cookbook Setup",
-                $"{name} is required for PAX Cookbook and could not be installed:\n\n{message}\n\n" +
+                $"{name} could not be installed.\n\nCheck your internet connection and try again, or contact your IT team.\n\n" +
                 "Click Retry to try again, or Exit Setup to cancel."),
             RetryExitDecision.ExitSetup);
     }
@@ -1030,10 +983,14 @@ internal sealed class SetupWizardForm : Form
             // files are in place (work-account config/verification are copied
             // into the final Config folder inside Commit). A commit failure is
             // surfaced but does not undo the file install.
-            CommitProviderSelection();
-            _prereqWarning.Text = BuildPrereqWarning();
-            ShowStep(Step.Complete);
-            return;
+            if (CommitProviderSelection())
+            {
+                _prereqWarning.Text = BuildPrereqWarning();
+                ShowStep(Step.Complete);
+                return;
+            }
+            result = new WizardInstallResult(false, SetupExitCodes.InstallFailed,
+                "PAX Cookbook files were installed, but your sign-in choice could not be saved. Run Setup again to finish.");
         }
 
         ExitCode = result.ExitCode;
@@ -1126,7 +1083,8 @@ internal sealed class SetupWizardForm : Form
     {
         try
         {
-            if (IsHandleCreated && !IsDisposed) BeginInvoke(action);
+            if (IsHandleCreated && !IsDisposed && !Disposing)
+                BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) action(); }));
         }
         catch { /* form closing */ }
     }
@@ -1160,6 +1118,63 @@ internal sealed class SetupWizardForm : Form
             return;
         }
         base.OnFormClosing(e);
+        if (e.Cancel || _signInCloseReady) return;
+        e.Cancel = true;
+        if (_signInClosing) return;
+        _signInClosing = true;
+        _btnBack.Enabled = false;
+        _btnNext.Enabled = false;
+        _radioHello.Enabled = false;
+        if (_radioWork is not null) _radioWork.Enabled = false;
+        if (_btnWorkImport is not null) _btnWorkImport.Enabled = false;
+        if (_btnWorkTest is not null) _btnWorkTest.Enabled = false;
+        _btnCancel.Enabled = false;
+        SetWorkStatus("Stopping...");
+        BeginInvokeSafe(() => _ = StopSignInAndCloseAsync());
+    }
+
+    private async Task StopSignInAndCloseAsync()
+    {
+        try
+        {
+            if (_signInPreparation is not null) await _signInPreparation.StopAsync();
+            CleanupSignInStaging();
+            if (IsDisposed || Disposing) return;
+            _signInCloseReady = true;
+            BeginInvokeSafe(Close);
+        }
+        catch
+        {
+            if (!IsDisposed && !Disposing)
+            {
+                _btnCancel.Text = "Retry";
+                _btnCancel.Visible = true;
+                _btnCancel.Enabled = true;
+                SetWorkStatus(_signInPreparation?.HasOutstandingNativeChild == true
+                    ? "Close the sign-in window, then choose Retry."
+                    : "Setup could not finish stopping. Setup will stay open. Choose Retry.");
+            }
+        }
+    }
+
+    private void CleanupSignInStaging()
+    {
+        if (_signInPreparation?.CanReleaseStaging != false && _signInStagingDir is not null)
+        {
+            try { Directory.Delete(_signInStagingDir, recursive: true); }
+            catch (DirectoryNotFoundException) { }
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _signInClosing = true;
+            _signInPreparation?.Dispose();
+            CleanupSignInStaging();
+        }
+        base.Dispose(disposing);
     }
 
     private static string DisplayVersion()

@@ -168,7 +168,7 @@ internal sealed class UninstallForm : Form
         }
         else
         {
-            _progressStatus.Text = "Uninstall did not complete. See the Setup log for details.";
+            _progressStatus.Text = "PAX Cookbook could not be removed. Contact your IT team.";
             _progressStatus.ForeColor = Color.FromArgb(0xB0, 0x20, 0x20);
         }
         _btnClose.Visible = true;

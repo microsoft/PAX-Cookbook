@@ -250,10 +250,75 @@ function Test-PaxManagedAssemblyMetadata {
     return $observed
 }
 
+function New-PaxAdminSetupArchive {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+
+    $sourceRoot = Join-Path $RepositoryRoot 'tools/entra'
+    $memberNames = @('New-PaxCookbookEntraWamSetup.ps1', 'README.md')
+    $sources = foreach ($memberName in $memberNames) {
+        $sourcePath = Join-Path $sourceRoot $memberName
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw "Administrator toolkit source missing: $sourcePath"
+        }
+        (Get-Item -LiteralPath $sourcePath -ErrorAction Stop).FullName
+    }
+
+    $destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DestinationPath)
+    $stagingPath = Join-Path ([IO.Path]::GetDirectoryName($destination)) ([guid]::NewGuid().ToString('N') + '.tmp')
+    $ownsStaging = $false
+    try {
+        $archiveStream = [IO.File]::Open($stagingPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $ownsStaging = $true
+        try {
+            $archive = [IO.Compression.ZipArchive]::new($archiveStream, [IO.Compression.ZipArchiveMode]::Create, $true)
+            try {
+                for ($memberIndex = 0; $memberIndex -lt $memberNames.Count; $memberIndex++) {
+                    $sourceStream = [IO.File]::OpenRead($sources[$memberIndex])
+                    try {
+                        $entryStream = $archive.CreateEntry($memberNames[$memberIndex]).Open()
+                        try {
+                            $sourceStream.CopyTo($entryStream)
+                        }
+                        finally {
+                            $entryStream.Dispose()
+                        }
+                    }
+                    finally {
+                        $sourceStream.Dispose()
+                    }
+                }
+            }
+            finally {
+                $archive.Dispose()
+            }
+        }
+        finally {
+            $archiveStream.Dispose()
+        }
+        [IO.File]::Move($stagingPath, $destination, $true)
+    }
+    finally {
+        if ($ownsStaging -and [IO.File]::Exists($stagingPath)) {
+            [IO.File]::Delete($stagingPath)
+        }
+    }
+
+    [pscustomobject]@{
+        Path = $destination
+        Sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
+        SizeBytes = (Get-Item -LiteralPath $destination -ErrorAction Stop).Length
+    }
+}
+
 Export-ModuleMember -Function @(
     'Resolve-PaxSetupReleaseContract',
     'Assert-PaxSetupReleaseWritePath',
     'Test-PaxFileVersionArtifact',
     'Get-PaxManagedAssemblyMetadata',
-    'Test-PaxManagedAssemblyMetadata'
+    'Test-PaxManagedAssemblyMetadata',
+    'New-PaxAdminSetupArchive'
 )

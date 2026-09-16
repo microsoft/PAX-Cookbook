@@ -21,9 +21,11 @@ public sealed class AspNetCoreRuntimeInstaller : IPrerequisiteInstaller
     // match the OS so the native dotnet.exe host can load the framework — an x64
     // runtime on an ARM64 machine installs under Program Files (x86)\dotnet and
     // the native ARM64 host then reports "No frameworks were found".
-    public static string BuildDownloadUrl(Architecture arch) =>
+    public static string BuildDownloadUrl(Architecture arch) => BuildDownloadUrl(ArchToken(arch));
+
+    private static string BuildDownloadUrl(string archToken) =>
         $"https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/{RuntimeVersion}/" +
-        $"aspnetcore-runtime-{RuntimeVersion}-win-{ArchToken(arch)}.exe";
+        $"aspnetcore-runtime-{RuntimeVersion}-win-{archToken}.exe";
 
     // The ASP.NET Core Runtime ships win-x64, win-x86 and win-arm64 installers;
     // we install arm64 on ARM64 machines and x64 everywhere else.
@@ -38,13 +40,17 @@ public sealed class AspNetCoreRuntimeInstaller : IPrerequisiteInstaller
     private readonly IPrereqDownloader _downloader;
     private readonly IElevatedLauncher _elevated;
     private readonly PrerequisiteDetector _detector;
+    private readonly Architecture _architecture;
+    private readonly string _archToken;
 
     public AspNetCoreRuntimeInstaller(IPrereqDownloader downloader, IElevatedLauncher elevated,
-                                      PrerequisiteDetector detector)
+                                      PrerequisiteDetector detector, Architecture? architecture = null)
     {
         _downloader = downloader;
         _elevated = elevated;
-        _detector = detector;
+        _architecture = architecture ?? PrereqArch.Os;
+        _archToken = architecture == Architecture.X86 ? "x86" : ArchToken(_architecture);
+        _detector = architecture.HasValue ? detector.ForRuntimeArchitecture(_architecture) : detector;
     }
 
     // -----------------------------------------------------------------
@@ -59,9 +65,9 @@ public sealed class AspNetCoreRuntimeInstaller : IPrerequisiteInstaller
             return PrerequisiteInstallResult.AlreadyPresent("ASP.NET Core 8 Runtime is already installed.");
         }
 
-        var arch = PrereqArch.Os;
-        var archToken = ArchToken(arch);
-        var url = BuildDownloadUrl(arch);
+        var arch = _architecture;
+        var archToken = _archToken;
+        var url = BuildDownloadUrl(archToken);
         PrereqLog.Write($"[PREREQ] ASP.NET Core install: arch={arch} rid={archToken}");
         PrereqLog.Write($"[PREREQ] ASP.NET Core download URL = {url}");
 

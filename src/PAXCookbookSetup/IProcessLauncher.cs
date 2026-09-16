@@ -15,6 +15,26 @@ public interface IProcessLauncher
 
 public sealed record LaunchRecord(string FileName, IReadOnlyList<string> Arguments);
 
+internal interface INativeChildProcess : IDisposable
+{
+    bool HasExited { get; }
+    Task WaitForExitAsync(CancellationToken cancel);
+    void Kill();
+}
+
+internal interface INativeChildLauncher
+{
+    INativeChildProcess? StartNativeChild(string fileName, IList<string> arguments);
+}
+
+internal sealed class NativeChildProcess(Process process) : INativeChildProcess
+{
+    public bool HasExited => process.HasExited;
+    public Task WaitForExitAsync(CancellationToken cancel) => process.WaitForExitAsync(cancel);
+    public void Kill() => process.Kill(entireProcessTree: true);
+    public void Dispose() => process.Dispose();
+}
+
 public sealed class RealProcessLauncher : IProcessLauncher
 {
     public LaunchRecord? Last { get; private set; }

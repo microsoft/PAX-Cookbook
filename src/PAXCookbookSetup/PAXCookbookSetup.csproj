@@ -104,7 +104,6 @@
     <EmbeddedResource Include="Assets\logo-horizontal.png" LogicalName="PAXCookbookSetup.Assets.logo-horizontal.png" />
     <EmbeddedResource Include="Assets\app-icon.png" LogicalName="PAXCookbookSetup.Assets.app-icon.png" />
     <EmbeddedResource Include="Assets\microsoft-open-source-logo.png" LogicalName="PAXCookbookSetup.Assets.microsoft-open-source-logo.png" />
-    <EmbeddedResource Include="..\..\tools\entra\New-PaxCookbookEntraWamSetup.ps1" LogicalName="PAXCookbookSetup.Entra.New-PaxCookbookEntraWamSetup.ps1" />
   </ItemGroup>
   <!--
     Phase 11 single-EXE payload bundle.

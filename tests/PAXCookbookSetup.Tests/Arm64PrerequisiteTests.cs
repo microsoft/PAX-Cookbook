@@ -12,6 +12,52 @@ namespace PAXCookbookSetup.Tests;
 // detection behaviour so each prerequisite is fetched for the right machine.
 public class Arm64PrerequisiteTests
 {
+    private sealed class RuntimeDownloader : IPrereqDownloader
+    {
+        public string? Url;
+        public string? GetText(string url, string? accept = null) => throw new System.InvalidOperationException();
+        public bool DownloadFile(string url, string destPath) { Url = url; return true; }
+    }
+
+    private sealed class RuntimeLauncher : IElevatedLauncher
+    {
+        public int Calls;
+        public ElevatedLaunchResult RunElevatedAndWait(string fileName, string arguments, int timeoutMs)
+        {
+            Calls++;
+            return ElevatedLaunchResult.Ran(0);
+        }
+    }
+
+    [Theory]
+    [InlineData(Architecture.X64, "x64", false)]
+    [InlineData(Architecture.X64, "x64", true)]
+    [InlineData(Architecture.X86, "x86", false)]
+    [InlineData(Architecture.X86, "x86", true)]
+    public void ExplicitRuntimeInstaller_DetectsAndDownloadsSameTarget(Architecture target, string rid, bool aspNet)
+    {
+        var probe = new WizardDetectionTests.FakeProbe();
+        string framework = aspNet ? "Microsoft.AspNetCore.App" : "Microsoft.WindowsDesktop.App";
+        probe.HklmSubKeys[$@"SOFTWARE\dotnet\Setup\InstalledVersions\arm64\sharedfx\{framework}"] = new[] { "8.0.28" };
+        var detector = new PrerequisiteDetector(probe, Architecture.Arm64);
+        var downloader = new RuntimeDownloader();
+        var launcher = new RuntimeLauncher();
+        IPrerequisiteInstaller installer = aspNet
+            ? new AspNetCoreRuntimeInstaller(downloader, launcher, detector, target)
+            : new DotNet8DesktopRuntimeInstaller(downloader, launcher, detector, target);
+        string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pax-runtime-test-" + System.Guid.NewGuid().ToString("N"));
+        try
+        {
+            Assert.True(installer.Install(tempDir, _ => { }).Satisfied);
+            Assert.EndsWith($"-win-{rid}.exe", downloader.Url);
+            Assert.Equal(1, launcher.Calls);
+            probe.HklmSubKeys[$@"SOFTWARE\dotnet\Setup\InstalledVersions\{rid}\sharedfx\{framework}"] = new[] { "8.0.28" };
+            Assert.Equal(PrerequisiteInstallOutcome.AlreadyPresent, installer.Install(tempDir, _ => { }).Outcome);
+            Assert.Equal(1, launcher.Calls);
+        }
+        finally { if (System.IO.Directory.Exists(tempDir)) System.IO.Directory.Delete(tempDir, true); }
+    }
+
     // -----------------------------------------------------------------
     // PrereqArch RID mapping
     // -----------------------------------------------------------------
@@ -83,6 +129,15 @@ public class Arm64PrerequisiteTests
         var url = AspNetCoreRuntimeInstaller.BuildDownloadUrl(Architecture.X64);
         Assert.EndsWith("aspnetcore-runtime-8.0.28-win-x64.exe", url);
         Assert.True(PrereqDownloadHosts.IsAllowed(url));
+    }
+
+    [Fact]
+    public void RuntimeDownloadUrls_DefaultPublicX86BehaviorIsPreserved()
+    {
+        Assert.Equal(DotNet8DesktopRuntimeInstaller.BuildDownloadUrl(Architecture.X64),
+            DotNet8DesktopRuntimeInstaller.BuildDownloadUrl(Architecture.X86));
+        Assert.Equal(AspNetCoreRuntimeInstaller.BuildDownloadUrl(Architecture.X64),
+            AspNetCoreRuntimeInstaller.BuildDownloadUrl(Architecture.X86));
     }
 
     // -----------------------------------------------------------------

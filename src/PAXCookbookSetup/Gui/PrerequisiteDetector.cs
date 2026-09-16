@@ -17,8 +17,10 @@ public sealed class PrerequisiteDetector
 
     private readonly IPrerequisiteProbe _probe;
     private readonly Architecture _hostArch;
+    private readonly Architecture? _runtimeArch;
 
-    public PrerequisiteDetector(IPrerequisiteProbe probe, Architecture? hostArchitecture = null)
+    public PrerequisiteDetector(IPrerequisiteProbe probe, Architecture? hostArchitecture = null,
+        Architecture? runtimeArchitecture = null)
     {
         _probe = probe;
         // Default to the REAL machine architecture (PrereqArch.Os reads the
@@ -27,6 +29,31 @@ public sealed class PrerequisiteDetector
         // and the app launches via the native host, so the runtime we look for
         // must match the machine, not this (possibly emulated) process.
         _hostArch = hostArchitecture ?? PrereqArch.Os;
+        if (runtimeArchitecture is not null and not Architecture.X64 and not Architecture.Arm64 and not Architecture.X86)
+            throw new ArgumentOutOfRangeException(nameof(runtimeArchitecture));
+        _runtimeArch = runtimeArchitecture;
+    }
+
+    public PrerequisiteDetector ForRuntimeArchitecture(Architecture architecture)
+        => new(_probe, _hostArch, architecture);
+
+    private string? RuntimeRoot()
+    {
+        if (_runtimeArch is { } target)
+        {
+            var registered = _probe.ReadHklmString(
+                $@"SOFTWARE\dotnet\Setup\InstalledVersions\{PrereqArch.Rid(target)}", "InstallLocation");
+            if (!string.IsNullOrWhiteSpace(registered) && Path.IsPathFullyQualified(registered))
+                return registered;
+        }
+        if ((_runtimeArch == Architecture.Arm64 && _hostArch != Architecture.Arm64) ||
+            (_runtimeArch == Architecture.X64 && _hostArch == Architecture.X86)) return null;
+        var programFiles = _probe.GetEnvPath(_runtimeArch == Architecture.X86 && _hostArch != Architecture.X86
+            ? "ProgramFiles(x86)" : "ProgramFiles");
+        if (string.IsNullOrEmpty(programFiles)) return null;
+        return _runtimeArch == Architecture.X64 && _hostArch == Architecture.Arm64
+            ? Path.Combine(programFiles, "dotnet", "x64")
+            : Path.Combine(programFiles, "dotnet");
     }
 
     private readonly record struct Candidate(bool Located, string? Path, Version? Version, string Source);
@@ -76,8 +103,8 @@ public sealed class PrerequisiteDetector
         // falsely report "satisfied" when only an unusable x64 runtime is present
         // on an ARM64 machine, so the wizard would skip installing the arm64
         // runtime the app actually needs.
-        string archRid = PrereqArch.Rid(_hostArch);
-        PrereqLog.Write($"[PREREQ] {logTag} detection: arch={_hostArch} rid={archRid}");
+        string archRid = PrereqArch.Rid(_runtimeArch ?? _hostArch);
+        PrereqLog.Write($"[PREREQ] {logTag} detection: arch={_runtimeArch ?? _hostArch} rid={archRid}");
         string root = $@"SOFTWARE\dotnet\Setup\InstalledVersions\{archRid}\sharedfx\{frameworkId}";
         var registrySubkeys = _probe.EnumerateHklmSubKeyNames(root).ToList();
         PrereqLog.Write($"[PREREQ] {logTag} detection: registry key checked = HKLM\\{root}");
@@ -95,15 +122,15 @@ public sealed class PrerequisiteDetector
         // native ARM64 host cannot load. When ProgramFiles gives no signal
         // (unit tests), fall back to PATH resolution of "dotnet".
         string listHost;
-        var programFilesForHost = _probe.GetEnvPath("ProgramFiles");
-        if (!string.IsNullOrEmpty(programFilesForHost))
+        var runtimeRoot = RuntimeRoot();
+        if (!string.IsNullOrEmpty(runtimeRoot))
         {
-            var nativeDotnet = Path.Combine(programFilesForHost, "dotnet", "dotnet.exe");
+            var nativeDotnet = Path.Combine(runtimeRoot, "dotnet.exe");
             listHost = _probe.FileExists(nativeDotnet) ? nativeDotnet : "";
         }
         else
         {
-            listHost = "dotnet";
+            listHost = _runtimeArch is null ? "dotnet" : "";
         }
         PrereqLog.Write($"[PREREQ] {logTag} detection: list-runtimes host = {(listHost.Length > 0 ? listHost : "(skipped)")}");
         if (listHost.Length > 0)
@@ -128,10 +155,9 @@ public sealed class PrerequisiteDetector
         }
 
         // Strategy 3: well-known shared-framework folder (dotnet not on PATH).
-        var programFiles = _probe.GetEnvPath("ProgramFiles");
-        if (!string.IsNullOrEmpty(programFiles))
+        if (!string.IsNullOrEmpty(runtimeRoot))
         {
-            var sharedRoot = Path.Combine(programFiles, "dotnet", "shared", frameworkId);
+            var sharedRoot = Path.Combine(runtimeRoot, "shared", frameworkId);
             var fromDisk = HighestDotNet8(
                 _probe.EnumerateDirectories(sharedRoot, "8.*").Select(d => Path.GetFileName(d)));
             if (fromDisk is not null)
