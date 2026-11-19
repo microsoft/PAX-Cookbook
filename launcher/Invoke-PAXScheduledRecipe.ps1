@@ -530,10 +530,6 @@ WHERE auth_profile_id = $apid;
 function Read-RecipeFromDisk {
     # Loads a recipe by reading <WorkspacePath>\Recipes\<recipeId>\recipe.json.
     # Returns @{ ok=<bool>; recipe=<hashtable or $null>; reason=<string or $null> }.
-    # The wrapper does NOT run Test-RecipeAll: the projection-hash
-    # comparison is the authoritative gate. A drifted recipe will
-    # fail the hash check; a malformed recipe will fail JSON parse;
-    # an absent recipe will fail Test-Path.
     param([Parameter(Mandatory)][string]$RecipeIdArg)
     $recipePath = Join-Path (Join-Path $WorkspacePath 'Recipes') (Join-Path $RecipeIdArg 'recipe.json')
     if (-not (Test-Path -LiteralPath $recipePath -PathType Leaf)) {
@@ -548,10 +544,10 @@ function Read-RecipeFromDisk {
         # projection hash than the broker stored at registration time
         # (= every fire becomes a spurious stale refusal). -Depth 12
         # matches the broker's parse depth.
-        $hash = $raw | ConvertFrom-Json -AsHashtable -Depth 12 -DateKind String -ErrorAction Stop
+        $hash = ConvertFrom-PaxRecipeJson -Json $raw
         return @{ ok = $true; recipe = $hash; reason = $null }
     } catch {
-        return @{ ok = $false; recipe = $null; reason = 'recipe_file_malformed: ' + $_.Exception.Message }
+        return @{ ok = $false; recipe = $null; reason = 'recipe_file_malformed' }
     }
 }
 
@@ -586,6 +582,17 @@ function Get-BundledPaxScriptVersion {
 # ---------------------------------------------------------------------
 
 $Script:CurrentCookId = $null
+$psi = $null
+$proc = $null
+$clientSecretSecure = $null
+$secretBSTR = [IntPtr]::Zero
+$knownSecret = $null
+$plaintextSecret = $null
+$outFs = $null
+$errFs = $null
+$outTask = $null
+$errTask = $null
+$startedSuccessfully = $false
 
 try {
     # ---- 1. Argument validation -------------------------------------
@@ -669,16 +676,27 @@ try {
         }
     } catch {
         if ($conn) { try { $conn.Close() } catch { } }
-        Write-WrapperInternalError -CookFolder $cookFolder -Reason ('database_read_failed: ' + $_.Exception.Message)
+        Write-WrapperInternalError -CookFolder $cookFolder -Reason 'database_read_failed'
     }
 
     # ---- 4. Recipe + auth profile ------------------------------------
+    if (-not (Test-Path -LiteralPath $Script:AdapterPath -PathType Leaf)) {
+        Write-WrapperInternalError -CookFolder $cookFolder -Reason 'adapter_module_missing'
+    }
+    Import-Module -Name $Script:AdapterPath -Force -ErrorAction Stop
     $loaded = Read-RecipeFromDisk -RecipeIdArg $RecipeId
     if (-not $loaded.ok) {
         try { $conn.Close() } catch { }
         Write-WrapperRefusal -CookFolder $cookFolder -Reason 'recipe_unreadable' -Detail @{ recipeId = $RecipeId; reason = $loaded.reason }
     }
     $recipe = $loaded.recipe
+
+    . (Join-Path $Script:AppRoot 'broker/Routes/RecipeValidator.ps1')
+    $recipeValidation = Test-RecipeAll -Recipe $recipe
+    if (-not $recipeValidation.ok) {
+        try { $conn.Close() } catch { }
+        Write-WrapperRefusal -CookFolder $cookFolder -Reason 'recipe_invalid' -Detail @{recipeId=$RecipeId}
+    }
 
     if (-not $recipe.ContainsKey('auth') -or -not $recipe.auth.ContainsKey('authProfileId') -or [string]::IsNullOrWhiteSpace([string]$recipe.auth.authProfileId)) {
         try { $conn.Close() } catch { }
@@ -690,7 +708,7 @@ try {
         $authProfile = Get-AuthProfileRow -Connection $conn -AuthProfileId $apid
     } catch {
         try { $conn.Close() } catch { }
-        Write-WrapperInternalError -CookFolder $cookFolder -Reason ('auth_profile_read_failed: ' + $_.Exception.Message)
+        Write-WrapperInternalError -CookFolder $cookFolder -Reason 'auth_profile_read_failed'
     } finally {
         try { $conn.Close() } catch { }
     }
@@ -709,10 +727,6 @@ try {
     # divergence between the two paths would surface as a stale
     # refusal even when nothing actually changed; importing the same
     # source is the only correct way to keep them in lockstep.
-    if (-not (Test-Path -LiteralPath $Script:AdapterPath -PathType Leaf)) {
-        Write-WrapperInternalError -CookFolder $cookFolder -Reason ('adapter_module_missing: ' + $Script:AdapterPath)
-    }
-    Import-Module -Name $Script:AdapterPath -Force -ErrorAction Stop
     $paxScriptVersion = Get-BundledPaxScriptVersion
     if ([string]::IsNullOrWhiteSpace($paxScriptVersion)) {
         Write-WrapperInternalError -CookFolder $cookFolder -Reason 'pax_script_version_unreadable'
@@ -727,7 +741,7 @@ try {
                             -ExecutionMode $Script:ScheduledTaskExecutionMode `
                             -PaxScriptVersion $paxScriptVersion
     } catch {
-        Write-WrapperInternalError -CookFolder $cookFolder -Reason ('projection_hash_failed: ' + $_.Exception.Message)
+        Write-WrapperInternalError -CookFolder $cookFolder -Reason 'projection_hash_failed'
     }
     if ($currentHash -ne $taskRow.recipeProjectionHash) {
         Write-WrapperRefusal -CookFolder $cookFolder -Reason 'refused_stale_projection' -Detail @{
@@ -755,7 +769,7 @@ try {
         } catch {
             Write-WrapperRefusal -CookFolder $cookFolder -Reason 'auth_profile_secret_missing' -Detail @{
                 authProfileId = $apid
-                detail        = $_.Exception.Message
+                detail        = 'credential_unavailable'
             }
         }
         if ($null -eq $clientSecretSecure -or $clientSecretSecure -isnot [System.Security.SecureString]) {
@@ -772,7 +786,7 @@ try {
                     -AuthProfile $authProfile `
                     -ExecutionMode $Script:ScheduledTaskExecutionMode
     } catch {
-        Write-WrapperInternalError -CookFolder $cookFolder -Reason ('projection_plan_failed: ' + $_.Exception.Message)
+        Write-WrapperInternalError -CookFolder $cookFolder -Reason 'projection_plan_failed'
     }
 
     # ---- 8. wrapper-started envelope (BEFORE spawn) ------------------
@@ -815,9 +829,17 @@ try {
     $psi.UseShellExecute        = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError  = $true
+    $psi.RedirectStandardInput  = $true
+    $psi.StandardInputEncoding  = [Text.UTF8Encoding]::new($false)
+    $psi.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $psi.StandardErrorEncoding  = [Text.UTF8Encoding]::new($false)
     $psi.CreateNoWindow         = $true
     $psi.WorkingDirectory       = $cookFolder
     foreach ($a in $plan.spawnArgv) { [void]$psi.ArgumentList.Add([string]$a) }
+    foreach ($name in @($psi.Environment.Keys)) {
+        if ($name.StartsWith('GRAPH_', [StringComparison]::OrdinalIgnoreCase)) { [void]$psi.Environment.Remove($name) }
+    }
+    Add-Type -Path (Join-Path $Script:AppRoot 'broker/Cook/CookOutputRedactor.cs') -ErrorAction Stop
 
     # Phase AG -- secret-isolation invariants (same as broker
     # supervisor):
@@ -831,17 +853,22 @@ try {
     $secretBSTR   = [IntPtr]::Zero
     $secretEnvSet = $false
     $spawnErr     = $null
+    $knownSecret  = $null
     if ($clientSecretSecure -is [System.Security.SecureString]) {
         try {
             $secretBSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($clientSecretSecure)
             $plaintextSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretBSTR)
+            $knownSecret = $plaintextSecret
             $psi.EnvironmentVariables['GRAPH_CLIENT_SECRET'] = $plaintextSecret
             $secretEnvSet = $true
             $plaintextSecret = $null
         } catch {
-            $spawnErr = 'client_secret_marshal_failed: ' + $_.Exception.Message
+            $spawnErr = 'client_secret_marshal_failed'
+        } finally {
+            $plaintextSecret = $null
         }
     }
+    [PAXCookbook.Output.CookOutputRedactor]::ValidateKnownSecret($knownSecret)
 
     $proc = [System.Diagnostics.Process]::new()
     $proc.StartInfo = $psi
@@ -854,18 +881,14 @@ try {
     $startedSuccessfully = $false
     if (-not $spawnErr) {
         try {
-            [void]$proc.Start()
-            $startedSuccessfully = $true
             $outFs = [System.IO.File]::Create((Join-Path $cookFolder 'cook.log'))
             $errFs = [System.IO.File]::Create((Join-Path $cookFolder 'cook.err.log'))
-            # CopyToAsync runs both stream pumps concurrently without
-            # PowerShell event-handler indirection. Both tasks
-            # complete when the child closes its end of the pipe,
-            # which happens at process exit.
-            $outTask = $proc.StandardOutput.BaseStream.CopyToAsync($outFs)
-            $errTask = $proc.StandardError.BaseStream.CopyToAsync($errFs)
+            [void]$proc.Start()
+            $startedSuccessfully = $true
+            $outTask = [PAXCookbook.Output.CookOutputRedactor]::PumpAsync($proc.StandardOutput, $outFs, $knownSecret)
+            $errTask = [PAXCookbook.Output.CookOutputRedactor]::PumpAsync($proc.StandardError, $errFs, $knownSecret)
         } catch {
-            $spawnErr = $_.Exception.Message
+            $spawnErr = 'child_start_or_output_setup_failed'
         }
     }
 
@@ -880,7 +903,7 @@ try {
             if ($psi.EnvironmentVariables.ContainsKey('GRAPH_CLIENT_SECRET')) {
                 [void]$psi.EnvironmentVariables.Remove('GRAPH_CLIENT_SECRET')
             }
-        } catch { }
+        } catch { $spawnErr = 'credential_cleanup_failed' }
         $secretEnvSet = $false
     }
     if ($clientSecretSecure) {
@@ -888,12 +911,24 @@ try {
         $clientSecretSecure = $null
     }
 
+    if (-not $spawnErr) {
+        try { $proc.StandardInput.WriteLine($plan.parameterJson) }
+        catch { $spawnErr = 'child_input_failed' }
+    }
+
     if ($spawnErr) {
         # Spawn failed. Dispose any open streams, write the
         # wrapper-finished envelope with outcome=spawn_failed, and
         # exit 31.
+        if ($startedSuccessfully) {
+            try { if (-not $proc.HasExited) { $proc.Kill($true) }; $proc.WaitForExit() } catch { }
+        }
+        foreach ($pumpTask in @($outTask, $errTask)) {
+            if ($pumpTask) { try { [void]$pumpTask.GetAwaiter().GetResult() } catch { } }
+        }
         if ($outFs) { try { $outFs.Dispose() } catch { } }
         if ($errFs) { try { $errFs.Dispose() } catch { } }
+        $knownSecret = $null
         Write-WrapperJson -CookFolder $cookFolder -FileName 'wrapper-finished.json' -Body ([ordered]@{
             kind             = 'wrapper-finished'
             recipeId         = $RecipeId
@@ -915,18 +950,18 @@ try {
     $childPid = $proc.Id
     $proc.WaitForExit()
     $paxExitCode = [int]$proc.ExitCode
-    # Allow pending async stream reads to flush. Each task completes
-    # when the child closes its end of the pipe; an upper bound of
-    # 30 seconds is generous (the OS closes pipes essentially
-    # synchronously when the process exits).
+    # Drain both redacted streams before closing either persistence sink.
+    $captureFailed = $false
     foreach ($t in @($outTask, $errTask)) {
         if ($null -ne $t) {
-            try { [void]$t.Wait(30000) } catch { }
+            try { [void]$t.GetAwaiter().GetResult() } catch { $captureFailed = $true }
         }
     }
     if ($outFs) { try { $outFs.Flush(); $outFs.Dispose() } catch { } }
     if ($errFs) { try { $errFs.Flush(); $errFs.Dispose() } catch { } }
     try { $proc.Dispose() } catch { }
+    $knownSecret = $null
+    if ($captureFailed) { Write-WrapperInternalError -CookFolder $cookFolder -Reason 'output_capture_failed' }
 
     # ---- 11. wrapper-finished envelope -------------------------------
     $finishedAt = Get-UtcNowIso
@@ -964,7 +999,31 @@ try {
         $candidate = Join-Path (Join-Path $WorkspacePath 'Cooks') $Script:CurrentCookId
         if (Test-Path -LiteralPath $candidate -PathType Container) { $candidate } else { $null }
     } else { $null }
-    Write-WrapperInternalError -CookFolder $cf -Reason ('unhandled_exception: ' + $_.Exception.Message) -Detail @{
-        stackTrace = [string]$_.ScriptStackTrace
+    Write-WrapperInternalError -CookFolder $cf -Reason 'unhandled_exception'
+} finally {
+    if ($psi) {
+        try {
+            foreach ($name in @($psi.Environment.Keys)) {
+                if ($name.StartsWith('GRAPH_', [StringComparison]::OrdinalIgnoreCase)) { [void]$psi.Environment.Remove($name) }
+            }
+        } catch { }
     }
+    if ($secretBSTR -ne [IntPtr]::Zero) {
+        try { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretBSTR) } catch { }
+        $secretBSTR = [IntPtr]::Zero
+    }
+    if ($clientSecretSecure) { try { $clientSecretSecure.Dispose() } catch { } }
+    $clientSecretSecure = $null
+    $plaintextSecret = $null
+    if ($startedSuccessfully -and $proc) {
+        try { if (-not $proc.HasExited) { $proc.Kill($true) }; $proc.WaitForExit() } catch { }
+    }
+    foreach ($pumpTask in @($outTask, $errTask)) {
+        if ($pumpTask) { try { [void]$pumpTask.GetAwaiter().GetResult() } catch { } }
+    }
+    if ($outFs) { try { $outFs.Dispose() } catch { } }
+    if ($errFs) { try { $errFs.Dispose() } catch { } }
+    if ($proc) { try { $proc.Dispose() } catch { } }
+    $knownSecret = $null
+    $psi = $null
 }

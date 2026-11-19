@@ -27,7 +27,7 @@ internal static class RecipeReadinessModel
 
         RecipePreviewModel.ProjectionResult proj =
             RecipePreviewModel.Project(
-                workspacePath, paxScriptPath, versionInfo, body,
+                workspacePath, engine.IsAcquired ? engine.ManagedEnginePath : paxScriptPath, versionInfo, body,
                 () => ProductionOrganizationAuthority.CreateSnapshot(versionInfo, engine));
 
         bool engineReady = engine.IsAcquired;

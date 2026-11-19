@@ -221,6 +221,10 @@ internal static partial class RecipeReadModel
         try
         {
             using var doc = JsonDocument.Parse(raw);
+            if (JsonModel.HasAmbiguousProperties(doc.RootElement))
+            {
+                return new RecipeFileResult("malformed", null, "duplicate_json_property");
+            }
             parsed = doc.RootElement.Clone();
         }
         catch (JsonException ex)

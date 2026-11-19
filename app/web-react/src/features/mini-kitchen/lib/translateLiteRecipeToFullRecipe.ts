@@ -35,7 +35,7 @@ import type {
   PromptFilter,
   StorageTier,
 } from '../types';
-import { analyzeAdvancedArgs } from './advancedArgs';
+import { analyzeAdvancedArgs, parseAdvancedArguments } from './advancedArgs';
 import { normalizeRecipe } from './normalizeRecipe';
 import { containsLikelySecret } from './secretScanner';
 
@@ -256,6 +256,20 @@ export function translateLiteRecipeToFullRecipe(
   const createdAt = options.createdAt ?? DEFAULT_TIMESTAMP;
   const updatedAt = options.updatedAt ?? DEFAULT_TIMESTAMP;
   const createdBy = options.createdBy ?? DEFAULT_CREATED_BY;
+
+  const advancedError = parseAdvancedArguments(state.advanced.extraArguments ?? '').error;
+  if (advancedError) {
+    return {
+      ok: false,
+      fullRecipeCandidate: null,
+      metadata: { recipeId, paxAdapterVersion },
+      warnings: [{ id: 'advanced-invalid', severity: 'warning', message: advancedError, field: 'advanced.extraArguments' }],
+      needsPrep: true,
+      needsPrepReasons: [advancedError],
+      unsupportedOrLossyFields: [{ field: 'advanced.extraArguments', reason: advancedError }],
+      notesForUi: [],
+    };
+  }
 
   if (!RECIPE_ID_PATTERN.test(recipeId)) {
     warnings.push({
@@ -671,7 +685,7 @@ export function translateLiteRecipeToFullRecipe(
 
   // ---- Advanced ----
   let advanced: { extraArguments: string } | undefined;
-  const extraArguments = (state.advanced.extraArguments ?? '').trim();
+  const extraArguments = state.advanced.extraArguments ?? '';
   if (extraArguments) {
     const advancedResult = translateAdvancedArgs(extraArguments);
     for (const note of advancedResult.warnings) {
@@ -886,7 +900,7 @@ function translateAdvancedArgs(extraArguments: string): AdvancedTranslateResult 
     id: 'advanced-args-present',
     severity: 'info',
     message:
-      'Advanced arguments are carried verbatim into the candidate. PAX Cookbook cannot fully validate advanced switches.',
+      'Advanced arguments were validated as literal options and are preserved verbatim.',
     field: 'advanced.extraArguments',
   });
   return { passThrough: true, warnings, unsupported, needsPrep };

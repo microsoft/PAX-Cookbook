@@ -357,15 +357,25 @@ public sealed class ProductionOrganizationWiringTests
             invocations++;
             return Authority(EngineCapabilityState.NotDeclared)();
         };
+        int personalLookups = 0;
+        Func<string?, ChefKeyModel.ChefKeyResolved?> resolveChefKey = keyId =>
+        {
+            personalLookups++;
+            Assert.Equal("no-such-personal-key", keyId);
+            return null;
+        };
 
-        RecipePreviewModel.Project(Workspace, EnginePath, Version(), OrganizationRecipe(), counting);
+        RecipePreviewModel.Project(Workspace, EnginePath, Version(), OrganizationRecipe(), counting, resolveChefKey);
         Assert.Equal(1, invocations);
-        RecipePreviewModel.Project(Workspace, EnginePath, Version(), OrganizationRecipe(), counting);
+        Assert.Equal(0, personalLookups);
+        RecipePreviewModel.Project(Workspace, EnginePath, Version(), OrganizationRecipe(), counting, resolveChefKey);
         Assert.Equal(2, invocations);
+        Assert.Equal(0, personalLookups);
 
         // A PERSONAL Recipe never touches the organization authority at all.
-        RecipePreviewModel.Project(Workspace, EnginePath, Version(), PersonalRecipe(), counting);
+        RecipePreviewModel.Project(Workspace, EnginePath, Version(), PersonalRecipe(), counting, resolveChefKey);
         Assert.Equal(2, invocations);
+        Assert.Equal(1, personalLookups);
     }
 
     // =========================================================================
@@ -593,9 +603,16 @@ public sealed class ProductionOrganizationWiringTests
     public void W20_PersonalPath_IsUnchanged()
     {
         // Personal preview keeps its pre-existing bounded error.
+        int personalLookups = 0;
         RecipePreviewModel.ProjectionResult projection = RecipePreviewModel.Project(
             Workspace, EnginePath, Version(), PersonalRecipe(),
-            Authority(EngineCapabilityState.Available));
+            Authority(EngineCapabilityState.Available), keyId =>
+            {
+                personalLookups++;
+                Assert.Equal("no-such-personal-key", keyId);
+                return null;
+            });
+        Assert.Equal(1, personalLookups);
         Assert.False(projection.Ok);
         string json = JsonSerializer.Serialize(projection.ErrorBody);
         Assert.Contains("chefKeyNotFound", json, StringComparison.Ordinal);

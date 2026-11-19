@@ -70,7 +70,15 @@ internal static class RecipePreviewModel
     internal static ProjectionResult Project(
         string workspacePath, string paxScriptPath, VersionInfo versionInfo, object? body,
         Func<RecipeReadModel.OrganizationCookPreparationContext>? organizationAuthority)
+        => Project(workspacePath, paxScriptPath, versionInfo, body, organizationAuthority,
+            ChefKeyModel.ResolveForRecipe);
+
+    internal static ProjectionResult Project(
+        string workspacePath, string paxScriptPath, VersionInfo versionInfo, object? body,
+        Func<RecipeReadModel.OrganizationCookPreparationContext>? organizationAuthority,
+        Func<string?, ChefKeyModel.ChefKeyResolved?> resolveChefKey)
     {
+        ArgumentNullException.ThrowIfNull(resolveChefKey);
         var result = new ProjectionResult();
 
         // Oracle: $body = Read-RequestJson; $null -> 400 invalid_json.
@@ -106,14 +114,14 @@ internal static class RecipePreviewModel
             if (!recipe.ContainsKey("recipeSchemaVersion")) { recipe["recipeSchemaVersion"] = 1L; }
             if (!recipe.ContainsKey("paxAdapterVersion")) { recipe["paxAdapterVersion"] = versionInfo.PaxVersion; }
             if (!recipe.ContainsKey("createdBy")) { recipe["createdBy"] = CreatedByBlock(versionInfo); }
+        }
 
-            (bool ok, List<object> errors) = RecipeValidationModel.ValidateAll(recipe);
-            if (!ok)
-            {
-                result.Status = 400;
-                result.ErrorBody = ValidationFailed(errors);
-                return result;
-            }
+        (bool ok, List<object> errors) = RecipeValidationModel.ValidateAll(recipe);
+        if (!ok)
+        {
+            result.Status = 400;
+            result.ErrorBody = ValidationFailed(errors);
+            return result;
         }
 
         // Resolve auth + executionMode for the projection. App-registration
@@ -177,7 +185,7 @@ internal static class RecipePreviewModel
                 });
                 return result;
             }
-            ChefKeyModel.ChefKeyResolved? resolved = ChefKeyModel.ResolveForRecipe(chefKeyId);
+            ChefKeyModel.ChefKeyResolved? resolved = resolveChefKey(chefKeyId);
             if (resolved is null)
             {
                 result.Status = 400;
@@ -207,7 +215,7 @@ internal static class RecipePreviewModel
         PaxAdapter.InvocationPlan plan;
         try
         {
-            plan = PaxAdapter.GetInvocationPlan(recipe, paxScriptPath, chefKeyRow, executionMode);
+            plan = PaxAdapter.GetInvocationPlan(recipe, paxScriptPath, chefKeyRow, executionMode, versionInfo.AppRoot);
         }
         catch (Exception ex)
         {

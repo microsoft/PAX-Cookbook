@@ -16,6 +16,8 @@ import { translateLiteRecipeToFullRecipe } from './translateLiteRecipeToFullReci
 import { fullRecipeToState } from './fullRecipeToState';
 import { scrubSavedRecipeState } from './recipeScrub';
 import { createDefaultMiniKitchenRecipe } from './defaultRecipe';
+import { parsePaxCommand } from './paxCommandImporter';
+import { renderPaxCommand } from './commandRenderer';
 import type { LiteRecipeAuth, MiniKitchenRecipeState } from '../types';
 
 const ORG_ID = 'contoso.managed_key-1';
@@ -126,5 +128,96 @@ describe('organization binding: translate / round-trip / scrub', () => {
     const { state, warnings } = scrubSavedRecipeState(organizationState());
     expect(state.auth.organizationKeyId).toBe(ORG_ID);
     expect(warnings.map(w => w.path)).not.toContain('state.auth.organizationKeyId');
+  });
+});
+
+describe('recipe command fields: pure import / export round-trip', () => {
+  function commandState(): MiniKitchenRecipeState {
+    const state = createDefaultMiniKitchenRecipe();
+    state.identity.name = 'Field round-trip';
+    state.query.dateMode = 'previous-day';
+    state.destinations.fact.path = 'C:\\PAX\\audit.csv';
+    return state;
+  }
+
+  it.each(['Self', 'RepeatManager', 'Fixed'] as const)('round-trips the %s filler label', mode => {
+    const state = commandState();
+    state.query.includeUserInfo = true;
+    state.processing.rollup = 'rollup';
+    state.processing.fillerLabel = mode;
+    if (mode === 'Fixed') state.processing.fillerLabelText = "Team's default label";
+
+    const rendered = renderPaxCommand(state);
+    expect(rendered.blocked).toEqual([]);
+    expect(rendered.parameters).toContainEqual({ name: 'FillerLabel', type: 'string', value: mode });
+    const imported = parsePaxCommand(rendered.singleLine);
+    expect(imported.ok).toBe(true);
+    expect(imported.state?.processing.fillerLabel).toBe(mode);
+
+    const candidate = translateLiteRecipeToFullRecipe(imported.state!).fullRecipeCandidate;
+    expect(candidate).not.toBeNull();
+    const restored = fullRecipeToState(JSON.parse(JSON.stringify(candidate)));
+    expect(restored.ok).toBe(true);
+    expect(restored.state?.processing.fillerLabel).toBe(mode);
+    if (mode === 'Fixed') {
+      expect(imported.state?.processing.fillerLabelText).toBe("Team's default label");
+      expect(restored.state?.processing.fillerLabelText).toBe("Team's default label");
+    }
+    expect(renderPaxCommand(restored.state!).parameters).toEqual(rendered.parameters);
+  });
+
+  it.each(['Blank', 'Filler', 'Custom', 'Unknown', 'self'])('refuses unsupported filler mode %s', mode => {
+    const imported = parsePaxCommand(`-Rollup -FillerLabel '${mode}'`);
+    expect(imported.ok).toBe(false);
+    expect(imported.state).toBeUndefined();
+  });
+
+  it.each([true, false])('preserves explicit CombineOutput %s through full-recipe save and reload', value => {
+    const state = commandState();
+    state.processing.activityTypes = ['CopilotInteraction', 'AIInteraction'];
+    state.advanced.extraArguments = `-CombineOutput:$${value}`;
+    const candidate = translateLiteRecipeToFullRecipe(state).fullRecipeCandidate;
+    expect(candidate?.advanced?.extraArguments).toBe(state.advanced.extraArguments);
+    const restored = fullRecipeToState(JSON.parse(JSON.stringify(candidate)));
+    expect(restored.ok).toBe(true);
+    expect(restored.state?.advanced.extraArguments).toBe(state.advanced.extraArguments);
+
+    const rendered = renderPaxCommand(restored.state!);
+    expect(rendered.blocked).toEqual([]);
+    expect(rendered.parameters.filter(parameter => parameter.name === 'CombineOutput')).toEqual([
+      { name: 'CombineOutput', type: 'bool', value },
+    ]);
+    const saved = translateLiteRecipeToFullRecipe(restored.state!).fullRecipeCandidate;
+    expect(saved?.advanced?.extraArguments).toBe(state.advanced.extraArguments);
+    const reloaded = fullRecipeToState(JSON.parse(JSON.stringify(saved)));
+    expect(reloaded.ok).toBe(true);
+    expect(renderPaxCommand(reloaded.state!).parameters).toEqual(rendered.parameters);
+  });
+
+  it('emits guided combined output when no advanced CombineOutput is supplied', () => {
+    const state = commandState();
+    state.processing.activityTypes = ['CopilotInteraction', 'AIInteraction'];
+    const rendered = renderPaxCommand(state);
+    expect(rendered.blocked).toEqual([]);
+    expect(rendered.parameters.filter(parameter => parameter.name === 'CombineOutput')).toEqual([
+      { name: 'CombineOutput', type: 'bool', value: true },
+    ]);
+  });
+
+  it.each([
+    '-CombineOutput:unknown',
+    '-CombineOutput:$true -CombineOutput:$false',
+    '-CombineOutput:$false -combineoutput:$false',
+  ])('refuses malformed or duplicate advanced CombineOutput: %s', extraArguments => {
+    const state = commandState();
+    state.processing.activityTypes = ['CopilotInteraction', 'AIInteraction'];
+    state.advanced.extraArguments = extraArguments;
+    const rendered = renderPaxCommand(state);
+    expect(rendered.blocked).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'advanced-invalid' })]));
+    expect(rendered.parameters).toEqual([]);
+    expect(rendered.singleLine).toBe('');
+    expect(translateLiteRecipeToFullRecipe(state).fullRecipeCandidate).toBeNull();
+    const candidate = translateLiteRecipeToFullRecipe(commandState()).fullRecipeCandidate!;
+    expect(fullRecipeToState({ ...candidate, advanced: { extraArguments } }).ok).toBe(false);
   });
 });

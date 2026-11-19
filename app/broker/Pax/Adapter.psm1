@@ -12,18 +12,12 @@
 # Exported functions:
 #
 #     Get-PaxArgvArray       -Recipe <hashtable>
-#         -> [string[]]   canonical ordered PAX argv tokens (UNQUOTED
-#                         values; one element per logical argument).
-#                         If `advanced.extraArguments` is present and
-#                         non-empty its trimmed value is the FINAL
-#                         element as a single opaque token (user owns
-#                         its internal quoting).
+#         -> [string[]]   display-only logical tokens. Never reparse
+#                         these tokens to reconstruct execution authority.
 #
 #     Convert-RecipeToPaxArgv -Recipe <hashtable>
-#         -> [string]     single-line rendered PAX command (shell-safe
-#                         quoting applied to the -OutputPath VALUE
-#                         only; see "Quoting rule" below). This is the
-#                         canonical preview / command.txt rendering.
+#         -> [string]     literal rendering of the typed parameter plan
+#                         for preview and command.txt.
 #
 #     Get-PaxInvocationPlan  -Recipe <hashtable> -PaxScriptPath <string>
 #         -> [hashtable] {
@@ -37,9 +31,9 @@
 #                                           # the full pwsh invocation
 #             paxScriptPath  = [string]     # echo of the bundled PAX path
 #           }
-#         The cook dispatch path consumes this. The supervisor consumes
-#         spawnArgv[3] (the -Command expression) verbatim and must NOT
-#         rebuild it. The preview API surfaces paxCommand + paxArgv.
+#         The cook dispatch and supervisor consume the complete spawnArgv
+#         verbatim. Typed named parameters are constructed before display
+#         tokens. The preview API surfaces paxCommand + paxArgv.
 #         command.txt mirrors paxCommand; command-argv.json mirrors
 #         paxArgv. The cooks-row command_argv_json column mirrors
 #         spawnArgv. All four sinks therefore derive from the same
@@ -80,7 +74,7 @@
 #                                       AppRegistrationCertificate mode;
 #                                       from the resolved AuthProfile row)
 #     -OutputPath "<path>"       (always; from destinations.fact.path)
-#     <advanced.extraArguments>  (verbatim trailing append, optional)
+#     <advanced.extraArguments>  (bounded literal options, optional)
 #
 # Phase AF auth-token emission (added under explicit milestone gate):
 #
@@ -120,22 +114,10 @@
 # paxArgv, paxCommand, spawnArgv, and spawnCommand. The probe in
 # _temp/phase_e_verification/ enforces this stability.
 #
-# Quoting rule (paxCommand rendering):
-#     - -OutputPath VALUE is always wrapped via ConvertTo-QuotedArg
-#       because filesystem paths may contain spaces, double quotes,
-#       backticks, and dollar signs (all of which need PowerShell
-#       in-string escaping).
-#     - Other VALUE tokens (-StartDate, -EndDate, -TenantId, -Auth) are
-#       emitted bare because the recipe schema (L1 validator) restricts
-#       them to whitespace-free, shell-safe shapes:
-#         startDate / endDate : ISO yyyy-MM-dd
-#         tenantId            : RFC 4122 UUID
-#         mode                : enum (WebLogin | AppRegistration | ...)
-#       If a future milestone adds a value-bearing switch whose value
-#       can contain shell-special chars, that switch MUST also use
-#       ConvertTo-QuotedArg.
-#     - extraArguments is appended verbatim AFTER trimming. The user
-#       owns its quoting; the adapter does not rewrite it.
+# Quoting rule: every string uses ConvertTo-PaxLiteralString. Arrays stay
+# explicitly typed string[] values. Unicode smart quotes use numeric char
+# fragments so PowerShell cannot treat them as string delimiters. Advanced
+# text is parsed as bounded literal data; it is never appended as code.
 #
 #     Removed-switch enforcement (no migration, no auto-repair):
 #     The switches listed in $Script:RemovedSwitches were removed
@@ -360,7 +342,182 @@ function Test-RecipeExecutionModeForLocalAdapter {
 # other rendering (paxCommand, spawnArgv, spawnCommand) derives from.
 # Emission order is fixed procedurally; hashtable iteration order is
 # never relied on. Empty / missing fields skip their tokens cleanly.
+function ConvertTo-PaxLiteralString {
+    param([AllowEmptyString()][string]$Value)
+    if ($Value.Contains([char]0)) { throw 'A parameter contains an unsupported null character.' }
+    $parts = [Collections.Generic.List[string]]::new()
+    $text = [Text.StringBuilder]::new()
+    foreach ($character in $Value.ToCharArray()) {
+        if ([int]$character -ge 0x2018 -and [int]$character -le 0x201f) {
+            $parts.Add("'" + $text.ToString().Replace("'", "''") + "'")
+            $parts.Add('[char]' + ([int]$character).ToString([Globalization.CultureInfo]::InvariantCulture))
+            [void]$text.Clear()
+        } else { [void]$text.Append($character) }
+    }
+    $parts.Add("'" + $text.ToString().Replace("'", "''") + "'")
+    if ($parts.Count -eq 1) { return $parts[0] }
+    return '(' + ($parts -join '+') + ')'
+}
+
+function ConvertTo-PaxLiteralValue {
+    param([AllowEmptyString()][AllowEmptyCollection()]$Value)
+    if ($Value -is [string]) { return (ConvertTo-PaxLiteralString $Value) }
+    if ($Value -is [string[]]) {
+        return '[string[]]@(' + ((@($Value | ForEach-Object { ConvertTo-PaxLiteralString $_ })) -join ',') + ')'
+    }
+    if ($Value -is [bool]) { if ($Value) { return '$true' } else { return '$false' } }
+    if ($Value -is [int]) { return '[int]' + $Value.ToString([Globalization.CultureInfo]::InvariantCulture) }
+    if ($Value -is [double] -and [double]::IsFinite($Value)) { return '[double]' + $Value.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
+    throw 'Unsupported parameter type.'
+}
+
+$Script:AdvancedOptions = @(
+    @('BlockHours',[double],0.016667,24), @('PartitionHours',[int],1,72),
+    @('MaxPartitions',[int],1,1000), @('ResultSize',[int],1,10000), @('PacingMs',[int],0,10000),
+    @('FlatDepth',[int]), @('MaxConcurrency',[int]), @('EnableParallel',[bool]),
+    @('MaxParallelGroups',[int],0,50), @('ParallelMode',[string]), @('ExplosionThreads',[int],0,32),
+    @('DisableAdaptive',[bool]), @('ProgressSmoothingAlpha',[double],0,1),
+    @('HighLatencyMs',[int],1000,600000), @('MemoryPressureMB',[int],256,32768),
+    @('MaxMemoryMB',[int],-1,65536), @('StatusIntervalSeconds',[int],30,600),
+    @('LowLatencyMs',[int],100,600000), @('LowLatencyConsecutive',[int],1,10),
+    @('ThroughputDropPct',[int],1,100), @('ThroughputSmoothingAlpha',[double],0,1),
+    @('AdaptiveConcurrencyCeiling',[int],1,50), @('ExportProgressInterval',[int],1,10000),
+    @('StreamingSchemaSample',[int],100,50000), @('StreamingChunkSize',[int],100,50000),
+    @('CircuitBreakerThreshold',[int],1,50), @('CircuitBreakerCooldownSeconds',[int],5,3600),
+    @('BackoffBaseSeconds',[double],0.1,120), @('BackoffMaxSeconds',[int],1,600),
+    @('EmitMetricsJson',[bool]), @('AutoCompleteness',[bool]), @('CombineOutput',[bool]),
+    @('Force',[bool]), @('SkipDiagnostics',[bool]), @('SkipVersionCheck',[bool]),
+    @('MaxNetworkOutageMinutes',[int]), @('IncludeTelemetry',[bool])) | ForEach-Object {
+        [pscustomobject]@{Name=$_[0];Type=$_[1];Minimum=$(if ($_.Count -gt 2) { [double]$_[2] } else { [double][int]::MinValue });Maximum=$(if ($_.Count -gt 3) { [double]$_[3] } else { [double][int]::MaxValue })}
+    }
+$Script:AdvancedArgumentsError = 'advanced.extraArguments requires exact supported option names and literal values. Use single or double quotes for literal strings, invariant numbers, and $true/$false for switches; expressions, duplicates, and structured/auth/output overrides are not allowed.'
+
+function ConvertFrom-PaxAdvancedArguments {
+    param([AllowEmptyString()][string]$Text)
+    $parsed = [ordered]@{}
+    if ($Text.Length -gt 16384 -or $Text.Contains([char]0)) { throw $Script:AdvancedArgumentsError }
+    $position = 0
+    while ($position -lt $Text.Length) {
+        while ($position -lt $Text.Length -and [char]::IsWhiteSpace($Text[$position])) { $position++ }
+        if ($position -eq $Text.Length) { break }
+        if ($parsed.Count -ge 64 -or $Text[$position++] -cne '-') { throw $Script:AdvancedArgumentsError }
+        $nameStart = $position
+        while ($position -lt $Text.Length -and [char]::IsAsciiLetterOrDigit($Text[$position])) { $position++ }
+        $name = $Text.Substring($nameStart, $position - $nameStart)
+        $option = $Script:AdvancedOptions | Where-Object { [string]::Equals($_.Name, $name, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+        if ($null -eq $option -or $parsed.Contains($option.Name)) { throw $Script:AdvancedArgumentsError }
+        $colon = $position -lt $Text.Length -and $Text[$position] -ceq ':'
+        if ($colon) { $position++ }
+        elseif ($position -lt $Text.Length -and -not [char]::IsWhiteSpace($Text[$position])) { throw $Script:AdvancedArgumentsError }
+        while ($position -lt $Text.Length -and [char]::IsWhiteSpace($Text[$position])) { $position++ }
+        if ($option.Type -eq [bool] -and -not $colon -and ($position -eq $Text.Length -or $Text[$position] -ceq '-')) {
+            $parsed.Add($option.Name, $true)
+            continue
+        }
+        if ($position -eq $Text.Length) { throw $Script:AdvancedArgumentsError }
+        $quote = $Text[$position]
+        $literal = ''
+        if ($quote -ceq "'" -or $quote -ceq '"') {
+            $position++
+            $content = [Text.StringBuilder]::new()
+            $closed = $false
+            while ($position -lt $Text.Length) {
+                $character = $Text[$position++]
+                if ($character -ceq $quote) {
+                    if ($position -lt $Text.Length -and $Text[$position] -ceq $quote) { [void]$content.Append($quote); $position++ }
+                    else { $closed = $true; break }
+                } else { [void]$content.Append($character) }
+                if ($content.Length -gt 4096) { throw $Script:AdvancedArgumentsError }
+            }
+            if (-not $closed -or ($position -lt $Text.Length -and -not [char]::IsWhiteSpace($Text[$position]))) { throw $Script:AdvancedArgumentsError }
+            $literal = $content.ToString()
+        } else {
+            $start = $position
+            while ($position -lt $Text.Length -and -not [char]::IsWhiteSpace($Text[$position])) {
+                $character = $Text[$position++]
+                if (-not ([char]::IsAsciiLetterOrDigit($character) -or $character -cin @('_','-','+','.','$')) -or $position - $start -gt 4096) { throw $Script:AdvancedArgumentsError }
+            }
+            $literal = $Text.Substring($start, $position - $start)
+            if ($literal.Length -eq 0) { throw $Script:AdvancedArgumentsError }
+        }
+        $value = $null
+        if ($option.Type -eq [bool]) {
+            if ($literal -ieq '$true' -or $literal -ieq 'true') { $value = $true }
+            elseif ($literal -ieq '$false' -or $literal -ieq 'false') { $value = $false }
+            else { throw $Script:AdvancedArgumentsError }
+        } elseif ($option.Type -eq [int]) {
+            $number = 0
+            if (-not [int]::TryParse($literal, [Globalization.NumberStyles]::AllowLeadingSign, [Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or $number -lt $option.Minimum -or $number -gt $option.Maximum) { throw $Script:AdvancedArgumentsError }
+            $value = $number
+        } elseif ($option.Type -eq [double]) {
+            $number = [double]0
+            $style = [Globalization.NumberStyles]::AllowLeadingSign -bor [Globalization.NumberStyles]::AllowDecimalPoint -bor [Globalization.NumberStyles]::AllowExponent
+            if (-not [double]::TryParse($literal, $style, [Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or -not [double]::IsFinite($number) -or $number -lt $option.Minimum -or $number -gt $option.Maximum) { throw $Script:AdvancedArgumentsError }
+            $value = $number
+        } else {
+            if (@('Off','On','Auto') -inotcontains $literal) { throw $Script:AdvancedArgumentsError }
+            $value = $literal
+        }
+        $parsed.Add($option.Name, $value)
+    }
+    return $parsed
+}
+
+function Test-RecipeAdvancedArguments {
+    param([Parameter(Mandatory)]$Recipe)
+    if ($Recipe -isnot [System.Collections.IDictionary] -or -not $Recipe.Contains('advanced')) { return }
+    $advanced = $Recipe.advanced
+    if ($advanced -isnot [System.Collections.IDictionary] -or -not $advanced.Contains('extraArguments')) { return }
+    try { $null = ConvertFrom-PaxAdvancedArguments -Text ([string]$advanced.extraArguments) }
+    catch {
+        return @{instancePath='/advanced/extraArguments';keyword='advancedArguments';message=$Script:AdvancedArgumentsError;params=@{}}
+    }
+}
+
+function Get-PaxDisplayArguments {
+    param([System.Collections.IDictionary]$Parameters)
+    $tokens = [Collections.Generic.List[string]]::new()
+    foreach ($entry in $Parameters.GetEnumerator()) {
+        if ($entry.Key -ne 'RemainingArgs') { $tokens.Add('-' + $entry.Key) }
+        if ($entry.Value -is [string[]]) { $tokens.AddRange($entry.Value) }
+        elseif ($entry.Value -isnot [bool] -or -not $entry.Value) {
+            if ($entry.Value -is [string]) { $tokens.Add($entry.Value) }
+            else { $tokens.Add((ConvertTo-PaxLiteralValue $entry.Value)) }
+        }
+    }
+    return ,$tokens.ToArray()
+}
+
 function Get-PaxArgvArray {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Recipe, $AuthProfile=$null, [string]$ExecutionMode='')
+    return ,(Get-PaxDisplayArguments (Get-PaxParameters @PSBoundParameters))
+}
+
+function New-PaxInvocationPlan {
+    param([System.Collections.IDictionary]$Parameters, [string]$PaxScriptPath, [string]$ExtraArguments='')
+    $types = @{}
+    foreach ($name in @('OnlyUserInfo','IncludeUserInfo','IncludeM365Usage','Rollup','RollupPlusRaw','AgentsOnly','ExcludeAgents','ExcludeCopilotInteraction','Force')) { $types[$name] = [bool] }
+    foreach ($name in @('StartDate','EndDate','TenantId','Auth','ClientId','ClientCertificateThumbprint','PromptFilter','OutputPath','AppendFile','OutputPathUserInfo','AppendUserInfo')) { $types[$name] = [string] }
+    foreach ($name in @('UserIds','ActivityTypes','GroupNames','AgentId','RemainingArgs')) { $types[$name] = [string[]] }
+    foreach ($option in $Script:AdvancedOptions) { $types[$option.Name] = $option.Type }
+    foreach ($entry in $Parameters.GetEnumerator()) {
+        if (-not $types.ContainsKey($entry.Key) -or $null -eq $entry.Value -or $entry.Value.GetType() -ne $types[$entry.Key]) { throw 'Unsupported invocation parameter name or type.' }
+    }
+    $launcherPath = Join-Path $PSScriptRoot 'Invoke-PaxParameters.ps1'
+    return @{
+        parameters=$Parameters
+        parameterJson=(ConvertTo-Json -InputObject $Parameters -Compress -Depth 4)
+        paxArgv=(Get-PaxDisplayArguments $Parameters)
+        paxCommand=(ConvertTo-PaxCommandString -Parameters $Parameters)
+        extraArguments=$ExtraArguments
+        spawnArgv=[string[]]@('-NoProfile','-NoLogo','-File',$launcherPath,'-EnginePath',$PaxScriptPath)
+        spawnCommand=('pwsh -NoProfile -NoLogo -File ' + (ConvertTo-PaxLiteralString $launcherPath) + ' -EnginePath ' + (ConvertTo-PaxLiteralString $PaxScriptPath))
+        paxScriptPath=$PaxScriptPath
+    }
+}
+
+function Get-PaxParameters {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -389,7 +546,7 @@ function Get-PaxArgvArray {
     }
     Test-RecipeExecutionModeForLocalAdapter -ExecutionMode $execMode
 
-    $tokens = New-Object System.Collections.Generic.List[string]
+    $parameters = [ordered]@{}
 
     # ---- V1.S26 -- read run-shape early ------------------------------
     # The recipe's run shape (audit vs userInfoOnly) drives which
@@ -452,16 +609,16 @@ function Get-PaxArgvArray {
         # Shape 3 -- spec emission order: -OnlyUserInfo, -IncludeUserInfo,
         # then the auth/dest sequence below. PAX requires -IncludeUserInfo
         # alongside -OnlyUserInfo to bring the user-info channel in scope.
-        [void]$tokens.Add('-OnlyUserInfo')
-        [void]$tokens.Add('-IncludeUserInfo')
+        $parameters.Add('OnlyUserInfo', $true)
+        $parameters.Add('IncludeUserInfo', $true)
     }
     else {
         # Shape 1/2 -- byte-identical legacy emission order for recipes
         # that do not carry any S26 fields.
-        if ($includeM365)     { [void]$tokens.Add('-IncludeM365Usage') }
-        if ($rollupTok)       { [void]$tokens.Add($rollupTok) }
+        if ($includeM365)     { $parameters.Add('IncludeM365Usage', $true) }
+        if ($rollupTok)       { $parameters.Add($rollupTok.Substring(1), $true) }
         if ($includeUserInfo -or $projectingUserInfoDest) {
-            [void]$tokens.Add('-IncludeUserInfo')
+            $parameters.Add('IncludeUserInfo', $true)
         }
     }
 
@@ -477,8 +634,8 @@ function Get-PaxArgvArray {
         if ($Recipe.query.ContainsKey('endDate'))   { $endDate   = [string]$Recipe.query.endDate }
     }
     if (-not $isUserInfoOnly) {
-        if ($startDate) { [void]$tokens.Add('-StartDate'); [void]$tokens.Add($startDate) }
-        if ($endDate)   { [void]$tokens.Add('-EndDate');   [void]$tokens.Add($endDate)   }
+        if ($startDate) { $parameters.Add('StartDate', $startDate) }
+        if ($endDate)   { $parameters.Add('EndDate', $endDate) }
     }
 
     $tenantId     = ''
@@ -489,7 +646,7 @@ function Get-PaxArgvArray {
         if ($Recipe.auth.ContainsKey('mode'))           { $authMode      = [string]$Recipe.auth.mode }
         if ($Recipe.auth.ContainsKey('authProfileId'))  { $authProfileId = [string]$Recipe.auth.authProfileId }
     }
-    if ($tenantId) { [void]$tokens.Add('-TenantId'); [void]$tokens.Add($tenantId) }
+    if ($tenantId) { $parameters.Add('TenantId', $tenantId) }
 
     # Phase AF -- auth-mode projection. The recipe-level enum
     # (AppRegistrationSecret / AppRegistrationCertificate /
@@ -508,7 +665,7 @@ function Get-PaxArgvArray {
         ''                           { $paxAuthValue = '' }
         default                      { $paxAuthValue = $authMode }
     }
-    if ($paxAuthValue) { [void]$tokens.Add('-Auth'); [void]$tokens.Add($paxAuthValue) }
+    if ($paxAuthValue) { $parameters.Add('Auth', $paxAuthValue) }
 
     if ($authMode -eq 'AppRegistrationSecret' -or $authMode -eq 'AppRegistrationCertificate') {
         if ($null -eq $AuthProfile) {
@@ -519,15 +676,13 @@ function Get-PaxArgvArray {
         if ([string]::IsNullOrWhiteSpace($profileClientId)) {
             throw "Get-PaxArgvArray: AuthProfile '$authProfileId' has no clientId. The profile row is malformed."
         }
-        [void]$tokens.Add('-ClientId')
-        [void]$tokens.Add($profileClientId)
+        $parameters.Add('ClientId', $profileClientId)
         if ($authMode -eq 'AppRegistrationCertificate') {
             $profileThumb = [string]$AuthProfile.certThumbprint
             if ([string]::IsNullOrWhiteSpace($profileThumb)) {
                 throw "Get-PaxArgvArray: AuthProfile '$authProfileId' is mode AppRegistrationCertificate but has no certThumbprint."
             }
-            [void]$tokens.Add('-ClientCertificateThumbprint')
-            [void]$tokens.Add($profileThumb)
+            $parameters.Add('ClientCertificateThumbprint', $profileThumb)
         }
     }
 
@@ -546,24 +701,21 @@ function Get-PaxArgvArray {
         if ($Recipe.query.ContainsKey('activityTypes')) {
             $atArr = @($Recipe.query.activityTypes)
             if ($atArr.Count -gt 0) {
-                [void]$tokens.Add('-ActivityTypes')
-                foreach ($at in $atArr) { [void]$tokens.Add([string]$at) }
+                $parameters.Add('ActivityTypes', [string[]]$atArr)
             }
         }
 
         if ($Recipe.query.ContainsKey('userIds')) {
             $uidArr = @($Recipe.query.userIds)
             if ($uidArr.Count -gt 0) {
-                [void]$tokens.Add('-UserIds')
-                foreach ($uid in $uidArr) { [void]$tokens.Add([string]$uid) }
+                $parameters.Add('UserIds', [string[]]$uidArr)
             }
         }
 
         if ($Recipe.query.ContainsKey('groupNames')) {
             $gnArr = @($Recipe.query.groupNames)
             if ($gnArr.Count -gt 0) {
-                [void]$tokens.Add('-GroupNames')
-                foreach ($gn in $gnArr) { [void]$tokens.Add([string]$gn) }
+                $parameters.Add('GroupNames', [string[]]$gnArr)
             }
         }
 
@@ -582,13 +734,12 @@ function Get-PaxArgvArray {
                     if ($afHash.ContainsKey('agentIds')) {
                         $aidArr = @($afHash.agentIds)
                         if ($aidArr.Count -gt 0) {
-                            [void]$tokens.Add('-AgentId')
-                            foreach ($aid in $aidArr) { [void]$tokens.Add([string]$aid) }
+                            $parameters.Add('AgentId', [string[]]$aidArr)
                         }
                     }
                 }
-                'agentsOnly'    { [void]$tokens.Add('-AgentsOnly') }
-                'excludeAgents' { [void]$tokens.Add('-ExcludeAgents') }
+                'agentsOnly'    { $parameters.Add('AgentsOnly', $true) }
+                'excludeAgents' { $parameters.Add('ExcludeAgents', $true) }
                 default         { }   # 'none' or absent -- emit nothing
             }
         }
@@ -596,8 +747,7 @@ function Get-PaxArgvArray {
         if ($Recipe.query.ContainsKey('promptFilter')) {
             $pf = [string]$Recipe.query.promptFilter
             if ($pf) {
-                [void]$tokens.Add('-PromptFilter')
-                [void]$tokens.Add($pf)
+                $parameters.Add('PromptFilter', $pf)
             }
         }
     }
@@ -646,14 +796,12 @@ function Get-PaxArgvArray {
         switch ($effectiveFactMode) {
             'outputPath' {
                 if ($outputPath) {
-                    [void]$tokens.Add('-OutputPath')
-                    [void]$tokens.Add($outputPath)
+                    $parameters.Add('OutputPath', $outputPath)
                 }
             }
             'append' {
                 if ($factAppendFile) {
-                    [void]$tokens.Add('-AppendFile')
-                    [void]$tokens.Add($factAppendFile)
+                    $parameters.Add('AppendFile', $factAppendFile)
                 }
             }
             default { }   # no fact destination projection
@@ -669,14 +817,12 @@ function Get-PaxArgvArray {
     switch ($uiMode) {
         'outputPath' {
             if ($uiPath) {
-                [void]$tokens.Add('-OutputPathUserInfo')
-                [void]$tokens.Add($uiPath)
+                $parameters.Add('OutputPathUserInfo', $uiPath)
             }
         }
         'append' {
             if ($uiAppendFile) {
-                [void]$tokens.Add('-AppendUserInfo')
-                [void]$tokens.Add($uiAppendFile)
+                $parameters.Add('AppendUserInfo', $uiAppendFile)
             }
         }
         default { }   # no user-info destination projection
@@ -700,7 +846,7 @@ function Get-PaxArgvArray {
             }
         }
         if ($cpKeyExists -and -not $cpValue) {
-            [void]$tokens.Add('-ExcludeCopilotInteraction')
+            $parameters.Add('ExcludeCopilotInteraction', $true)
         }
     }
 
@@ -718,28 +864,23 @@ function Get-PaxArgvArray {
     # All three sit outside Checkpoint 2 (adapter-only) scope.
     # Emission is deferred to a follow-on checkpoint.
 
-    # ---- Verbatim trailer ---------------------------------------------
-    # User-owned escape hatch. Trimmed; empty ignored. The whole trimmed
-    # value is appended as ONE opaque trailing token because the user
-    # may have used quoting that is NOT a simple whitespace tokenization
-    # (e.g. `-Foo "bar baz"`). Splitting it back into discrete elements
-    # is not possible without a full shell parser, and the adapter is
-    # deliberately not a shell parser.
+    # Advanced text shares the bounded C# literal grammar. Preserve legacy
+    # removed-switch diagnostics before parsing, without rewriting recipes.
     $extra = ''
     if ($Recipe.ContainsKey('advanced') -and $Recipe.advanced.ContainsKey('extraArguments')) {
         $extra = [string]$Recipe.advanced.extraArguments
     }
-    $extra = $extra.Trim()
     if ($extra) {
         # Both scans run unconditionally on every non-empty trailer.
         # RemovedSwitches blocks v1.11.2 contract drift; SecretShape
         # blocks the Phase AF auth-token smuggling surface.
         Test-ExtraArgumentsForRemovedSwitches -ExtraArguments $extra
         Test-ExtraArgumentsForSecretShape     -ExtraArguments $extra
-        [void]$tokens.Add($extra)
+        $advancedParameters = ConvertFrom-PaxAdvancedArguments -Text $extra
+        foreach ($entry in $advancedParameters.GetEnumerator()) { $parameters.Add($entry.Key, $entry.Value) }
     }
 
-    return ,([string[]]$tokens.ToArray())
+    return $parameters
 }
 
 # Render the canonical PAX argv array as a single space-joined command
@@ -754,34 +895,18 @@ function Get-PaxArgvArray {
 #   -AppendUserInfo     (V1.S26; user-info append target)
 #   -ClientCertificatePath (V1.S26 future; reserved for the
 #     deferred cert-file auth path)
-# Array-valued switches (-ActivityTypes, -UserIds, -GroupNames,
-# -AgentId) emit their values bare here. The spawn path uses the
-# argv array directly via ProcessStartInfo.ArgumentList, so any
-# whitespace in a value is preserved correctly on the spawn side
-# regardless of how it renders.
+# Array values retain explicit string[] syntax. This rendering is not the
+# execution authority; New-PaxInvocationPlan serializes the typed plan.
 function ConvertTo-PaxCommandString {
-    param([Parameter(Mandatory)][string[]]$ArgvArray)
-
-    $alwaysQuoteValueSwitches = @(
-        '-OutputPath',
-        '-AppendFile',
-        '-Resume',
-        '-OutputPathUserInfo',
-        '-AppendUserInfo',
-        '-ClientCertificatePath'
-    )
-
-    $parts = New-Object System.Collections.Generic.List[string]
-    $i = 0
-    while ($i -lt $ArgvArray.Length) {
-        $token = $ArgvArray[$i]
-        if (($alwaysQuoteValueSwitches -contains $token) -and ($i + 1) -lt $ArgvArray.Length) {
-            [void]$parts.Add($token)
-            [void]$parts.Add( (ConvertTo-QuotedArg $ArgvArray[$i + 1]) )
-            $i += 2
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Parameters)
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($entry in $Parameters.GetEnumerator()) {
+        if ($entry.Key -eq 'RemainingArgs') {
+            $parts.Add('-Resume ' + (ConvertTo-PaxLiteralString $entry.Value[1]))
+        } elseif ($entry.Value -is [bool]) {
+            $parts.Add('-' + $entry.Key + $(if ($entry.Value) { '' } else { ':$false' }))
         } else {
-            [void]$parts.Add($token)
-            $i += 1
+            $parts.Add('-' + $entry.Key + ' ' + (ConvertTo-PaxLiteralValue $entry.Value))
         }
     }
     return ($parts -join ' ')
@@ -795,8 +920,8 @@ function Convert-RecipeToPaxArgv {
         $AuthProfile = $null,
         [string]$ExecutionMode = ''
     )
-    $argv = Get-PaxArgvArray -Recipe $Recipe -AuthProfile $AuthProfile -ExecutionMode $ExecutionMode
-    return (ConvertTo-PaxCommandString -ArgvArray $argv)
+    $parameters = Get-PaxParameters -Recipe $Recipe -AuthProfile $AuthProfile -ExecutionMode $ExecutionMode
+    return (ConvertTo-PaxCommandString -Parameters $parameters)
 }
 
 # Build the full invocation plan: the canonical PAX argv, the rendered
@@ -817,39 +942,14 @@ function Get-PaxInvocationPlan {
         [string]$ExecutionMode = ''
     )
 
-    $paxArgv     = Get-PaxArgvArray -Recipe $Recipe -AuthProfile $AuthProfile -ExecutionMode $ExecutionMode
-    $paxCommand  = ConvertTo-PaxCommandString -ArgvArray $paxArgv
+    $parameters = Get-PaxParameters -Recipe $Recipe -AuthProfile $AuthProfile -ExecutionMode $ExecutionMode
 
     $extra = ''
     if ($Recipe.ContainsKey('advanced') -and $Recipe.advanced.ContainsKey('extraArguments')) {
         $extra = ([string]$Recipe.advanced.extraArguments).Trim()
     }
 
-    # Single-quoted-string escape: '  ->  ''
-    $escapedPath = $PaxScriptPath.Replace("'", "''")
-    $commandExpr = "& '$escapedPath' $paxCommand"
-    # Strip a trailing space when paxCommand is empty (defensive; the
-    # validator forbids it but the adapter must not emit a dangling
-    # space).
-    $commandExpr = $commandExpr.TrimEnd()
-
-    $spawnArgv = [string[]]@('-NoProfile', '-NoLogo', '-Command', $commandExpr)
-
-    # Human-readable rendering of the full pwsh invocation. NOT used to
-    # actually spawn -- spawnArgv is what ProcessStartInfo receives.
-    # The displayed pwsh exe is the literal token 'pwsh' because the
-    # bundled-pwsh path is a broker dispatch concern, not a projection
-    # concern.
-    $spawnCommand = 'pwsh -NoProfile -NoLogo -Command "' + $commandExpr.Replace('"', '\"') + '"'
-
-    return @{
-        paxArgv        = $paxArgv
-        extraArguments = $extra
-        paxCommand     = $paxCommand
-        spawnArgv      = $spawnArgv
-        spawnCommand   = $spawnCommand
-        paxScriptPath  = $PaxScriptPath
-    }
+    return (New-PaxInvocationPlan -Parameters $parameters -PaxScriptPath $PaxScriptPath -ExtraArguments $extra)
 }
 
 # V1.S03 -- dedicated resume projection. PAX's `-Resume` invocation
@@ -880,7 +980,7 @@ function Get-PaxInvocationPlan {
 # recipe_snapshot_json; the route layer extracts the auth fields and
 # resolves the AuthProfile before calling this function. Same purity
 # guarantees as Get-PaxArgvArray: no filesystem, no spawn, no state.
-function Get-PaxResumeArgvArray {
+function Get-PaxResumeParameters {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$CheckpointPath,
@@ -913,25 +1013,23 @@ function Get-PaxResumeArgvArray {
     if ([string]::IsNullOrWhiteSpace($execMode)) { $execMode = 'local-manual' }
     Test-RecipeExecutionModeForLocalAdapter -ExecutionMode $execMode
 
-    $tokens = New-Object System.Collections.Generic.List[string]
+    $parameters = [ordered]@{}
 
     # Resume token + path. Quoting is applied at render time
     # (ConvertTo-PaxCommandString); the argv array carries the
     # unquoted path so ProcessStartInfo.ArgumentList receives a single
     # logical token.
-    [void]$tokens.Add('-Resume')
-    [void]$tokens.Add($CheckpointPath)
+    $parameters.Add('RemainingArgs', [string[]]@('-Resume', $CheckpointPath))
 
     # Force suppresses the interactive "use most recent checkpoint?"
     # prompt that would otherwise block a non-interactive child.
-    [void]$tokens.Add('-Force')
+    $parameters.Add('Force', $true)
 
     # Optional auth companions. Mirror the normal projection's mode
     # mapping so that AppRegistrationSecret and AppRegistrationCertificate
     # both project to PAX's coarser 'AppRegistration' enum value.
     if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
-        [void]$tokens.Add('-TenantId')
-        [void]$tokens.Add($TenantId)
+        $parameters.Add('TenantId', $TenantId)
     }
 
     $paxAuthValue = ''
@@ -942,8 +1040,7 @@ function Get-PaxResumeArgvArray {
         default                      { $paxAuthValue = $AuthMode }
     }
     if ($paxAuthValue) {
-        [void]$tokens.Add('-Auth')
-        [void]$tokens.Add($paxAuthValue)
+        $parameters.Add('Auth', $paxAuthValue)
     }
 
     if ($AuthMode -eq 'AppRegistrationSecret' -or $AuthMode -eq 'AppRegistrationCertificate') {
@@ -955,15 +1052,13 @@ function Get-PaxResumeArgvArray {
         if ([string]::IsNullOrWhiteSpace($profileClientId)) {
             throw "Get-PaxResumeArgvArray: AuthProfile has no clientId. The profile row is malformed."
         }
-        [void]$tokens.Add('-ClientId')
-        [void]$tokens.Add($profileClientId)
+        $parameters.Add('ClientId', $profileClientId)
         if ($AuthMode -eq 'AppRegistrationCertificate') {
             $profileThumb = [string]$AuthProfile.certThumbprint
             if ([string]::IsNullOrWhiteSpace($profileThumb)) {
                 throw "Get-PaxResumeArgvArray: AuthProfile is mode AppRegistrationCertificate but has no certThumbprint."
             }
-            [void]$tokens.Add('-ClientCertificateThumbprint')
-            [void]$tokens.Add($profileThumb)
+            $parameters.Add('ClientCertificateThumbprint', $profileThumb)
         }
     }
 
@@ -973,7 +1068,13 @@ function Get-PaxResumeArgvArray {
     # escape hatch is reserved for fresh cook starts; resume cooks
     # inherit those concerns from the checkpoint.
 
-    return ,([string[]]$tokens.ToArray())
+    return $parameters
+}
+
+function Get-PaxResumeArgvArray {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$CheckpointPath, [string]$AuthMode='', [string]$TenantId='', $AuthProfile=$null, [string]$ExecutionMode='')
+    return ,(Get-PaxDisplayArguments (Get-PaxResumeParameters @PSBoundParameters))
 }
 
 # Build the full resume invocation plan. Mirror of Get-PaxInvocationPlan
@@ -991,33 +1092,16 @@ function Get-PaxResumeInvocationPlan {
         [string]$ExecutionMode = ''
     )
 
-    $paxArgv    = Get-PaxResumeArgvArray `
+    $parameters = Get-PaxResumeParameters `
                       -CheckpointPath $CheckpointPath `
                       -AuthMode $AuthMode `
                       -TenantId $TenantId `
                       -AuthProfile $AuthProfile `
                       -ExecutionMode $ExecutionMode
-    $paxCommand = ConvertTo-PaxCommandString -ArgvArray $paxArgv
-
-    # Single-quoted-string escape: '  ->  ''
-    $escapedPath = $PaxScriptPath.Replace("'", "''")
-    $commandExpr = "& '$escapedPath' $paxCommand"
-    $commandExpr = $commandExpr.TrimEnd()
-
-    $spawnArgv = [string[]]@('-NoProfile', '-NoLogo', '-Command', $commandExpr)
-
-    $spawnCommand = 'pwsh -NoProfile -NoLogo -Command "' + $commandExpr.Replace('"', '\"') + '"'
-
-    return @{
-        paxArgv        = $paxArgv
-        extraArguments = ''
-        paxCommand     = $paxCommand
-        spawnArgv      = $spawnArgv
-        spawnCommand   = $spawnCommand
-        paxScriptPath  = $PaxScriptPath
-        checkpointPath = $CheckpointPath
-        isResume       = $true
-    }
+    $plan = New-PaxInvocationPlan -Parameters $parameters -PaxScriptPath $PaxScriptPath
+    $plan.checkpointPath = $CheckpointPath
+    $plan.isResume = $true
+    return $plan
 }
 
 # V1.S06c -- recipe projection hash. SHA-256 of the redacted
@@ -1037,11 +1121,10 @@ function Get-PaxResumeInvocationPlan {
 #      hash so the operator must re-register the task against the new
 #      engine.
 #
-# Format of the hash input (UTF-8, no BOM):
-#       "<paxScriptVersion>\n<argv0>\n<argv1>\n...\n<argvN>\n"
-# i.e. version first, then one argv token per line, LF separated,
-# terminated by a final LF. The terminator pins the token count so
-# trailing-empty-token drift cannot collide with no-token drift.
+# Format: compact UTF-8 JSON with projectionVersion=2, paxScriptVersion,
+# and ordered name/type/value records. Array boundaries and embedded
+# newlines are unambiguous. Older registered hashes intentionally mismatch;
+# no automatic migration or registration is performed.
 #
 # Return value: lowercase hex SHA-256 digest (64 chars).
 function Get-RecipeProjectionHash {
@@ -1060,37 +1143,12 @@ function Get-RecipeProjectionHash {
                 -AuthProfile $AuthProfile `
                 -ExecutionMode $ExecutionMode
 
-    # Defensive redaction. The current PAX contract (v1.11.2) accepts
-    # the client secret ONLY through the GRAPH_CLIENT_SECRET env var;
-    # no projection switch carries a secret. The redactor below is a
-    # tripwire that would refuse to participate if a future contract
-    # ever passed a secret as a positional argv. The list of redacted
-    # switches MUST be reviewed alongside any PAX bump.
-    $secretBearingSwitches = @(
-        '-ClientSecret',
-        '-Password',
-        '-ApiKey'
-    )
-    $argv = $plan.paxArgv
-    $redactedTokens = New-Object System.Collections.Generic.List[string]
-    $i = 0
-    while ($i -lt $argv.Length) {
-        $tok = [string]$argv[$i]
-        [void]$redactedTokens.Add($tok)
-        if ($secretBearingSwitches -contains $tok -and ($i + 1) -lt $argv.Length) {
-            [void]$redactedTokens.Add('<REDACTED>')
-            $i += 2
-            continue
-        }
-        $i += 1
-    }
-
-    $sb = New-Object System.Text.StringBuilder
-    [void]$sb.Append($PaxScriptVersion); [void]$sb.Append("`n")
-    foreach ($t in $redactedTokens) {
-        [void]$sb.Append($t); [void]$sb.Append("`n")
-    }
-    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($sb.ToString())
+    $entries = @($plan.parameters.GetEnumerator() | ForEach-Object {
+        [ordered]@{name=$_.Key;type=$_.Value.GetType().FullName;value=$_.Value}
+    })
+    $projection = [ordered]@{projectionVersion=2;paxScriptVersion=$PaxScriptVersion;parameters=$entries}
+    $serialized = ConvertTo-Json -InputObject $projection -Depth 8 -Compress -EscapeHandling EscapeNonAscii
+    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($serialized)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
         $digest = $sha.ComputeHash($bytes)
@@ -1102,7 +1160,66 @@ function Get-RecipeProjectionHash {
     return $hex.ToString()
 }
 
+function Assert-PaxRecipePropertyNames {
+    param([System.Text.Json.JsonElement]$Element)
+    if ($Element.ValueKind -eq 'Object') {
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($property in $Element.EnumerateObject()) {
+            if (-not $names.Add($property.Name)) { throw 'Duplicate Recipe property.' }
+            Assert-PaxRecipePropertyNames -Element $property.Value
+        }
+    } elseif ($Element.ValueKind -eq 'Array') {
+        foreach ($item in $Element.EnumerateArray()) { Assert-PaxRecipePropertyNames -Element $item }
+    }
+}
+
+function ConvertFrom-PaxRecipeElement {
+    param([System.Text.Json.JsonElement]$Element)
+    switch ($Element.ValueKind) {
+        'Object' {
+            $values = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach ($property in $Element.EnumerateObject()) {
+                $values.Add($property.Name, (ConvertFrom-PaxRecipeElement -Element $property.Value))
+            }
+            return $values
+        }
+        'Array' {
+            $values = [Collections.Generic.List[object]]::new()
+            foreach ($item in $Element.EnumerateArray()) {
+                $values.Add((ConvertFrom-PaxRecipeElement -Element $item))
+            }
+            return ,$values.ToArray()
+        }
+        'String' { return $Element.GetString() }
+        'Number' {
+            [long]$integer = 0
+            if ($Element.TryGetInt64([ref]$integer)) { return $integer }
+            $number = $Element.GetDouble()
+            if (-not [double]::IsFinite($number)) { throw 'Invalid Recipe number.' }
+            return $number
+        }
+        'True' { return $true }
+        'False' { return $false }
+        'Null' { return $null }
+        default { throw 'Invalid Recipe value.' }
+    }
+}
+
+function ConvertFrom-PaxRecipeJson {
+    param([Parameter(Mandatory)][string]$Json)
+    $options = [System.Text.Json.JsonDocumentOptions]::new()
+    $options.MaxDepth = 12
+    $document = [System.Text.Json.JsonDocument]::Parse($Json, $options)
+    try {
+        Assert-PaxRecipePropertyNames -Element $document.RootElement
+        ConvertFrom-PaxRecipeElement -Element $document.RootElement
+    }
+    finally { $document.Dispose() }
+}
+
 Export-ModuleMember -Function @(
+    'ConvertFrom-PaxRecipeJson',
+    'Test-RecipeAdvancedArguments',
     'Convert-RecipeToPaxArgv',
     'Get-PaxArgvArray',
     'Get-PaxInvocationPlan',

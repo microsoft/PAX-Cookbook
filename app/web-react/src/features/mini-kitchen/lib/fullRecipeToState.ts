@@ -28,6 +28,7 @@
 
 import { createDefaultMiniKitchenRecipe, detectMatchingPreset } from './defaultRecipe';
 import { normalizeRecipe } from './normalizeRecipe';
+import { ADVANCED_ARGUMENTS_ERROR, parseAdvancedArguments } from './advancedArgs';
 import type {
   AgentFilterMode,
   AuthMode,
@@ -294,7 +295,13 @@ export function fullRecipeToState(recipe: unknown): FullRecipeOpenResult {
 
   // ---- Advanced ----
   const advanced = isObject(recipe.advanced) ? recipe.advanced : {};
-  const extraArguments = asString(advanced.extraArguments);
+  if (advanced.extraArguments !== undefined && typeof advanced.extraArguments !== 'string') {
+    return { ok: false, state: null, error: ADVANCED_ARGUMENTS_ERROR };
+  }
+  const extraArguments = typeof advanced.extraArguments === 'string' ? advanced.extraArguments : '';
+  if (parseAdvancedArguments(extraArguments).error) {
+    return { ok: false, state: null, error: ADVANCED_ARGUMENTS_ERROR };
+  }
   if (extraArguments) {
     state.advanced.extraArguments = extraArguments;
   }

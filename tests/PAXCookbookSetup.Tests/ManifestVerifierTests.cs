@@ -28,6 +28,40 @@ public class ManifestVerifierTests
     }
     """;
 
+    [Theory]
+    [InlineData("stable", "1.3.2")]
+    [InlineData("experimental", "2.0.0-exp.7")]
+    public void OnlineMetadataBindsChannelVersionFilenameSizeAndHash(string channel, string version)
+    {
+        string hash = new string('A', 64);
+        string valid = $$$$"""{"schemaVersion":1,"current":{"channel":"{{{{channel}}}}","version":"{{{{version}}}}","payload":{"filename":"PAX_Cookbook_Payload.zip","sha256":"{{{{hash}}}}","size":71}}}""";
+        Assert.NotNull(ManifestVerifier.ParseReleaseMetadata(valid, channel, version));
+        Assert.Null(ManifestVerifier.ParseReleaseMetadata(null, channel, version));
+        Assert.Null(ManifestVerifier.ParseReleaseMetadata("{", channel, version));
+        Assert.Null(ManifestVerifier.ParseReleaseMetadata(valid, channel, "0.0.0"));
+        Assert.Null(ManifestVerifier.ParseReleaseMetadata(valid.Replace($"\"{channel}\"", "\"internal\""), channel, version));
+        Assert.Null(ManifestVerifier.ParseReleaseMetadata(valid.Replace(",\"size\":71", ""), channel, version));
+        Assert.Null(ManifestVerifier.ParseReleaseMetadata(valid.Replace(hash, "short"), channel, version));
+        Assert.Null(ManifestVerifier.ParseReleaseMetadata(valid.Replace("PAX_Cookbook_Payload.zip", "other.zip"), channel, version));
+        Assert.Null(ManifestVerifier.ParseReleaseMetadata(valid.Replace("\"size\":71", "\"size\":71,\"Size\":71"), channel, version));
+    }
+
+    [Fact]
+    public void ExperimentalAssetsMustComeFromTheDiscoveredTag()
+    {
+        const string version = "2.0.0-exp.7";
+        var assets = new ExperimentalReleaseLocator.Located(ManifestVerifier.ReleaseAssetUrl(version, "versions.json"),
+            ManifestVerifier.ReleaseAssetUrl(version, ManifestVerifier.PayloadFileName)) { Tag = "v" + version };
+        Assert.True(PayloadDownloader.TryGetExperimentalVersion(assets, out var selected));
+        Assert.Equal(version, selected);
+        Assert.False(PayloadDownloader.TryGetExperimentalVersion(assets with { Tag = null }, out _));
+        Assert.False(PayloadDownloader.TryGetExperimentalVersion(assets with { Tag = "v2.0.0-exp.6" }, out _));
+        Assert.False(PayloadDownloader.TryGetExperimentalVersion(assets with
+        {
+            PayloadUrl = ManifestVerifier.ReleaseAssetUrl("2.0.0-exp.6", ManifestVerifier.PayloadFileName),
+        }, out _));
+    }
+
     [Fact]
     public void Parse_ValidManifest_ReturnsExpectationLowercased()
     {

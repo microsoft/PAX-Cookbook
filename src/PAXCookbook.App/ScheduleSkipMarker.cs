@@ -97,14 +97,19 @@ internal static class ScheduleSkipMarker
     // Removes any marker for this recipe (called when a schedule is canceled or a
     // recipe is saved without a schedule, so no stale marker lingers).
     internal static void Clear(string workspacePath, string recipeId)
+        => TryClear(workspacePath, recipeId);
+
+    internal static bool TryClear(string workspacePath, string recipeId)
     {
         try
         {
-            TryDelete(MarkerPath(workspacePath, recipeId));
+            File.Delete(MarkerPath(workspacePath, recipeId));
+            return true;
         }
+        catch (DirectoryNotFoundException) { return true; }
         catch
         {
-            // best-effort
+            return false;
         }
     }
 

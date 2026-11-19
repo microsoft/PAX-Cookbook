@@ -39,6 +39,7 @@ public sealed class PayloadDownloader
     {
         public ManifestVerifier.PayloadExpectation? Expectation { get; init; }
         public string? SourceUrl { get; init; }
+        internal bool IntegrityFailure { get; init; }
     }
 
     public static DownloadRoute ResolveDownloadRoute(string? channel)
@@ -72,14 +73,13 @@ public sealed class PayloadDownloader
         // caller-supplied URL crosses the trust boundary — an experimental
         // installer discovers its own pre-release; a stable installer keeps the
         // fixed release/manifest URLs unchanged.
-        string payloadUrl = PayloadUrl;
         ManifestVerifier.PayloadExpectation? expectation;
 
         if (route == DownloadRoute.Experimental)
         {
             using var gh = new HttpPrereqDownloader();
             var located = ExperimentalReleaseLocator.Locate(gh);
-            if (located is null)
+            if (located is null || !TryGetExperimentalVersion(located, out var selectedVersion))
             {
                 _log.Write("experimental-release-locate-failed", "warning");
                 return new DownloadResult(false, null,
@@ -87,7 +87,6 @@ public sealed class PayloadDownloader
                     $"You can download builds manually from {ManualDownloadUrl}");
             }
 
-            payloadUrl = located.PayloadUrl;
             _log.Write("experimental-release-located", "info",
                 new Dictionary<string, object?>
                 {
@@ -99,25 +98,19 @@ public sealed class PayloadDownloader
             // gate. Fetch it through the host-validated downloader and parse it
             // with the same parser the stable path uses.
             string? manifestJson = gh.GetText(located.ManifestUrl, "application/json");
-            expectation = ManifestVerifier.Parse(manifestJson ?? string.Empty);
-            if (expectation is null)
-            {
-                _progress("Version information is unavailable. Checking the download.");
-                _log.Write("payload-sha-skipped-no-manifest", "warning");
-            }
+            expectation = ManifestVerifier.ParseReleaseMetadata(manifestJson, SetupChannel.Experimental, selectedVersion);
         }
         else
         {
-            // Stable: fetch the versions manifest once up front. If it can't be
-            // reached or parsed (offline / proxy / air-gapped), we degrade to
-            // zip-integrity-only checking rather than blocking the install.
             expectation = await new ManifestVerifier(_log).TryFetchAsync(cancel);
-            if (expectation is null)
-            {
-                _progress("Version information is unavailable. Checking the download.");
-                _log.Write("payload-sha-skipped-no-manifest", "warning");
-            }
         }
+        if (expectation is null)
+        {
+            _log.Write("payload-release-metadata-rejected", "error");
+            return new DownloadResult(false, null, "The release information could not be verified.") { IntegrityFailure = true };
+        }
+
+        string payloadUrl = ManifestVerifier.ReleaseAssetUrl(expectation.Version!, ManifestVerifier.PayloadFileName);
 
         string? lastError = null;
         for (int attempt = 1; attempt <= MaxRetries; attempt++)
@@ -125,7 +118,7 @@ public sealed class PayloadDownloader
             try
             {
                 var result = await TryDownloadAsync(destPath, attempt, expectation, payloadUrl, cancel);
-                if (result.Success)
+                if (result.Success || result.IntegrityFailure)
                     return result;
 
                 lastError = result.Error;
@@ -175,8 +168,16 @@ public sealed class PayloadDownloader
         return new DownloadResult(false, null, finalMsg);
     }
     
+    internal static bool TryGetExperimentalVersion(ExperimentalReleaseLocator.Located release, out string? version)
+    {
+        version = release.Tag is { Length: > 1 } tag && tag[0] == 'v' ? tag[1..] : null;
+        return ManifestVerifier.IsReleaseVersion(version, SetupChannel.Experimental) &&
+            release.ManifestUrl == ManifestVerifier.ReleaseAssetUrl(version!, "versions.json") &&
+            release.PayloadUrl == ManifestVerifier.ReleaseAssetUrl(version!, ManifestVerifier.PayloadFileName);
+    }
+
     private async Task<DownloadResult> TryDownloadAsync(
-        string destPath, int attempt, ManifestVerifier.PayloadExpectation? expectation,
+        string destPath, int attempt, ManifestVerifier.PayloadExpectation expectation,
         string payloadUrl, CancellationToken cancel)
     {
         // Validate the URL is allowed
@@ -278,7 +279,7 @@ public sealed class PayloadDownloader
             break;
         }
         
-        // Integrity verification against the versions manifest (when available).
+        // Verify bytes against release metadata before inspecting the ZIP.
         // Order: cheap size sanity check first, then the SHA-256 comparison.
         if (expectation?.Size is long expectedSize)
         {
@@ -294,7 +295,7 @@ public sealed class PayloadDownloader
                 TryDelete(destPath);
                 return new DownloadResult(false, null,
                     $"The downloaded file is the wrong size (expected {expectedSize:N0} bytes, " +
-                    $"got {actualSize:N0}). The file may be incomplete or corrupted. Please try again.");
+                    $"got {actualSize:N0}). The file may be incomplete or corrupted. Please try again.") { IntegrityFailure = true };
             }
         }
 
@@ -313,18 +314,12 @@ public sealed class PayloadDownloader
                 TryDelete(destPath);
                 return new DownloadResult(false, null,
                     "The downloaded file failed integrity verification (SHA-256 mismatch). " +
-                    "The file may be corrupted or tampered with. Please try again.");
+                    "The file may be corrupted or tampered with. Please try again.") { IntegrityFailure = true };
             }
             _log.Write("payload-sha-verified", "info",
                 new Dictionary<string, object?> { ["sha256"] = actualSha });
         }
-        else
-        {
-            _log.Write("payload-sha-skipped", "warning");
-        }
-
-        // Structural fallback check: confirm it is a valid PAX Cookbook zip.
-        // This is the sole integrity gate when the manifest was unavailable.
+        // Confirm that the verified artifact is a PAX Cookbook ZIP.
         _progress("Verifying download...");
         try
         {

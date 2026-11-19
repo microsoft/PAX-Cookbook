@@ -444,8 +444,10 @@ public class Phase11PayloadResolverTests
     [Theory]
     [InlineData("missing")]
     [InlineData("size-only")]
+    [InlineData("hash-only")]
+    [InlineData("wrong-size")]
     [InlineData("wrong-sha")]
-    public async Task PreparedPayload_EarlyDownload_RequiresActualReleaseSha(string missingInformation)
+    public async Task PreparedPayload_OnlineDownload_RequiresCompleteMatchingReleaseMetadata(string missingInformation)
     {
         var testRoot = NewTempBase();
         try
@@ -457,10 +459,13 @@ public class Phase11PayloadResolverTests
             {
                 "missing" => null,
                 "size-only" => actual with { Sha256 = null },
+                "hash-only" => actual with { Size = null },
+                "wrong-size" => actual with { Size = zip.Length + 1 },
                 _ => actual with { Sha256 = new string('0', 64) }
             };
+            var progress = new List<string>();
             async Task<WizardPreparationResult> Prepare(ManifestVerifier.PayloadExpectation? expectation, bool early)
-                => await WizardInstallRunner.PrepareAsync(Path.Combine(testRoot, "absent"), null, _ => { }, log,
+                => await WizardInstallRunner.PrepareAsync(Path.Combine(testRoot, "absent"), null, progress.Add, log,
                     new WizardInstallRunner.PreparationDependencies(
                         (stage, _) => Task.FromResult(DeliverZip(stage, zip, expectation)), () => false),
                     forEarlyExecution: early);
@@ -468,31 +473,16 @@ public class Phase11PayloadResolverTests
             Assert.True(positive.Success, positive.Error);
             using var positiveOwner = positive.Payload!;
             Assert.Same(actual, positiveOwner.Expectation);
-            var negative = await Prepare(unavailable, true);
-            Assert.False(negative.Success);
-            Assert.Null(negative.Payload);
-            var legacy = await Prepare(null, false);
-            Assert.True(legacy.Success, legacy.Error);
-            using var legacyOwner = legacy.Payload!;
-            Assert.Null(legacyOwner.Expectation);
-            Assert.False(legacyOwner.PreparedForEarlyExecution);
-            Assert.NotEqual(positiveOwner.PayloadRoot, legacyOwner.PayloadRoot);
-            Assert.NotEqual(positiveOwner.DownloadedZipPath, legacyOwner.DownloadedZipPath);
-            var legacyInstall = WizardInstallRunner.InstallPrepared(legacyOwner, Path.Combine(testRoot, "legacy-install"),
-                _ => { }, log, new PreparedShell(), new RecordingAppStopper());
-            Assert.True(legacyInstall.Success, legacyInstall.Error);
-            legacyOwner.Dispose();
-            Assert.True(File.Exists(positiveOwner.DownloadedZipPath));
-            Assert.True(Directory.Exists(positiveOwner.PayloadRoot));
-            _output.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+            Assert.Contains(progress, message => message.StartsWith("Extracting", StringComparison.Ordinal));
+            foreach (bool early in new[] { false, true })
             {
-                universe = new { origin = "downloaded", missingInformation },
-                predicate = "PrepareAsync(forEarlyExecution: true).Success",
-                positiveControl = positive.Success, negativeControl = negative.Success,
-                legacyOptionalExpectation = legacy.Success, legacyInstall = legacyInstall.Success,
-                legacyEarlyExecution = legacyOwner.PreparedForEarlyExecution,
-                separateOwnerPreserved = Directory.Exists(positiveOwner.PayloadRoot)
-            }));
+                progress.Clear();
+                var negative = await Prepare(unavailable, early);
+                Assert.False(negative.Success);
+                Assert.Null(negative.Payload);
+                Assert.DoesNotContain(progress, message => message.StartsWith("Extracting", StringComparison.Ordinal));
+                negative.Cleanup?.Dispose();
+            }
         }
         finally { TryRm(testRoot); }
     }
@@ -528,6 +518,10 @@ public class Phase11PayloadResolverTests
                 string? ownedRoot = null;
                 bool ownedRootExisted = false;
                 int downloads = 0;
+                static ManifestVerifier.PayloadExpectation Expected(byte[] bytes) =>
+                    new(Sha256Hex(bytes), bytes.Length, "1.0.0");
+                static PayloadDownloader.DownloadResult DeliverVerified(string stage, byte[] bytes) =>
+                    DeliverZip(stage, bytes, Expected(bytes));
                 var dependencies = new WizardInstallRunner.PreparationDependencies((stage, _) =>
                 {
                     ownedRoot = stage;
@@ -542,15 +536,15 @@ public class Phase11PayloadResolverTests
                     if (injectFailure && failure is "download-failure" or "cancel-return")
                         return Task.FromResult(new PayloadDownloader.DownloadResult(false, null, "synthetic failure"));
                     if (injectFailure && failure == "traversal")
-                        return Task.FromResult(DeliverZip(stage, BuildZip(new[]
+                        return Task.FromResult(DeliverVerified(stage, BuildZip(new[]
                         {
                             ("partial.txt", "extracted before refusal"), ("../escape.txt", "refuse")
-                        }), null));
+                        })));
                     if (injectFailure && failure == "missing-manifest")
-                        return Task.FromResult(DeliverZip(stage, BuildZip(new[] { ("partial.txt", "no manifest") }), null));
+                        return Task.FromResult(DeliverVerified(stage, BuildZip(new[] { ("partial.txt", "no manifest") })));
                     if (injectFailure && failure == "bad-member")
-                        return Task.FromResult(DeliverZip(stage, PreparedZip("changed"), null));
-                    return Task.FromResult(new PayloadDownloader.DownloadResult(true, externalZip, null));
+                        return Task.FromResult(DeliverVerified(stage, PreparedZip("changed")));
+                    return Task.FromResult(new PayloadDownloader.DownloadResult(true, externalZip, null) { Expectation = Expected(zip) });
                 }, () => false);
                 Action<string> progress = text =>
                 {
@@ -641,7 +635,7 @@ public class Phase11PayloadResolverTests
     }
 
     [Fact]
-    public async Task PreparedPayload_CacheFallback_IsLegacyOnly_AndPreCancellationDoesNotDownload()
+    public async Task PreparedPayload_OnlineFailureNeverFallsBackToCache_AndPreCancellationDoesNotDownload()
     {
         var testRoot = NewTempBase();
         try
@@ -659,11 +653,9 @@ public class Phase11PayloadResolverTests
                 downloads++;
                 return Task.FromResult(new PayloadDownloader.DownloadResult(false, null, "synthetic offline"));
             }, () => false);
-            var positive = await WizardInstallRunner.PrepareAsync(existing, null, _ => { }, log, dependencies);
-            Assert.True(positive.Success, positive.Error);
-            Assert.Equal("local-cache", positive.Payload!.Origin);
-            Assert.False(positive.Payload.PreparedForEarlyExecution);
-            positive.Payload.Dispose();
+            var normal = await WizardInstallRunner.PrepareAsync(existing, null, _ => { }, log, dependencies);
+            Assert.False(normal.Success);
+            Assert.Null(normal.Payload);
             var negative = await WizardInstallRunner.PrepareAsync(existing, null, _ => { }, log, dependencies,
                 forEarlyExecution: true);
             Assert.False(negative.Success);
@@ -676,7 +668,7 @@ public class Phase11PayloadResolverTests
             _output.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
             {
                 universe = new { cache, delivery = "failed synthetic download" },
-                predicate = "PrepareAsync.Success", positiveControl = positive.Success,
+                predicate = "PrepareAsync.Success", normal = normal.Success,
                 negativeControl = negative.Success, cancelled = cancelled.Success,
                 beforeCancelledCall, downloads
             }));

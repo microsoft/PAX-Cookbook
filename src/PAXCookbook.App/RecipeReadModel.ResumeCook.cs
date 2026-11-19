@@ -80,6 +80,17 @@ internal static partial class RecipeReadModel
         bool force,
         string? chefKeyId,
         string? pwshPathOverride)
+        => StartResumeCookCore(workspacePath, versionInfo, engine, checkpointPath, force, chefKeyId, pwshPathOverride, null);
+
+    private static (int Status, object Body) StartResumeCookCore(
+        string workspacePath,
+        VersionInfo versionInfo,
+        EngineAcquisitionResult engine,
+        string? checkpointPath,
+        bool force,
+        string? chefKeyId,
+        string? pwshPathOverride,
+        CookProcessDependencies? dependencies)
     {
         // The three preparation phases (gates -> authorization -> preparation) are
         // ordered by the portable CookPreparationSequence, the SINGLE SOURCE
@@ -119,7 +130,7 @@ internal static partial class RecipeReadModel
         // the row to 'interrupted', which releases the checkpoint identity for a
         // later retry without any extra compensation here.
         (int spawnStatus, object spawnBody) = SpawnAndSupervise(
-            workspacePath, versionInfo, engine, prepared, ResumeReAuthId, pwshPathOverride, joinSupervisor: false);
+            workspacePath, versionInfo, engine, prepared, ResumeReAuthId, pwshPathOverride, joinSupervisor: false, dependencies);
 
         if (spawnStatus == 201)
         {
@@ -373,7 +384,7 @@ internal static partial class RecipeReadModel
             // comes from the validator's on-disk classification, never from the
             // filename suffix.
             PaxAdapter.InvocationPlan plan = BuildResumeInvocationPlan(
-                _checkpoint, _checkpointKind, _force, resolvedChefKey, _engine.ManagedEnginePath);
+                _checkpoint, _checkpointKind, _force, resolvedChefKey, _engine.ManagedEnginePath, _versionInfo.AppRoot);
 
             // (h) Project the per-cook folder paths. NOTHING is created yet: the
             // reservation below must be the FIRST side effect so two simultaneous
@@ -513,53 +524,36 @@ internal static partial class RecipeReadModel
             _ => "checkpointPath is not a usable checkpoint location.",
         };
 
-    // Projects the resume InvocationPlan: the resume argv, the rendered PAX
-    // command, and the outer pwsh spawn expression against the MANAGED engine
-    // path. The spawn-expression assembly is identical to the recipe path
-    // (GetInvocationPlan): & '<engine>' <paxCommand>, then the
-    // -NoProfile/-NoLogo/-Command spawn argv.
     private static PaxAdapter.InvocationPlan BuildResumeInvocationPlan(
         string checkpoint,
         ResumeCheckpointKind checkpointKind,
         bool force,
         ChefKeyModel.ChefKeyResolved? resolvedChefKey,
-        string paxScriptPath)
+        string paxScriptPath,
+        string? appRoot)
     {
-        (List<string> paxArgv, string paxCommand) = BuildResumeArgvAndCommand(
-            checkpoint, checkpointKind, force, resolvedChefKey);
-
-        string escapedPath = paxScriptPath.Replace("'", "''");
-        string commandExpr = $"& '{escapedPath}' {paxCommand}";
-        commandExpr = commandExpr.TrimEnd();
-
-        var spawnArgv = new List<string> { "-NoProfile", "-NoLogo", "-Command", commandExpr };
-        string spawnCommand = "pwsh -NoProfile -NoLogo -Command \"" + commandExpr.Replace("\"", "\\\"") + "\"";
-
-        return new PaxAdapter.InvocationPlan(paxArgv, string.Empty, paxCommand, spawnArgv, spawnCommand, paxScriptPath);
+        return PaxAdapter.CreateInvocationPlan(
+            BuildResumeParameters(checkpoint, checkpointKind, force, resolvedChefKey), paxScriptPath, appRoot: appRoot);
     }
 
-    // Builds the resume PAX argv and its rendered command string together.
-    //
-    // The command string is assembled directly here (rather than via
-    // PaxAdapter.ConvertToCommandString) on purpose: ConvertToCommandString
-    // treats -Resume as an always-quote-its-value switch and would quote whatever
-    // token follows it. That is correct for the explicit-file form (-Resume
-    // "<file>") but wrong for the bare auto-discover form, where -Resume takes no
-    // value and is followed by -OutputPath — ConvertToCommandString would emit
-    // `-Resume "-OutputPath" <folder>`, quoting -OutputPath as if it were the
-    // resume target so the folder never binds. So the resume command is built
-    // token-by-token, reusing PaxAdapter.ConvertToQuotedArg (the same value
-    // escaper the recipe path uses) for the path values and emitting the auth-tail
-    // values unquoted exactly as the recipe path does. The stored paxArgv keeps
-    // its natural order (resume tokens, then -Force, then the auth tail).
     private static (List<string> Argv, string Command) BuildResumeArgvAndCommand(
         string checkpoint,
         ResumeCheckpointKind checkpointKind,
         bool force,
         ChefKeyModel.ChefKeyResolved? resolvedChefKey)
     {
-        var argv = new List<string>();
-        var commandParts = new List<string>();
+        var plan = PaxAdapter.CreateInvocationPlan(
+            BuildResumeParameters(checkpoint, checkpointKind, force, resolvedChefKey), string.Empty);
+        return (plan.PaxArgv.ToList(), plan.PaxCommand);
+    }
+
+    private static List<PaxParameter> BuildResumeParameters(
+        string checkpoint,
+        ResumeCheckpointKind checkpointKind,
+        bool force,
+        ChefKeyModel.ChefKeyResolved? resolvedChefKey)
+    {
+        var parameters = new List<PaxParameter>();
 
         // Resume target. The kind is decided by what is on disk, NOT by the
         // filename suffix: an existing checkpoint .json file is the explicit
@@ -569,25 +563,17 @@ internal static partial class RecipeReadModel
         bool explicitFile = checkpointKind == ResumeCheckpointKind.JsonFile;
         if (explicitFile)
         {
-            argv.Add("-Resume");
-            argv.Add(checkpoint);
-            commandParts.Add("-Resume");
-            commandParts.Add(PaxAdapter.ConvertToQuotedArg(checkpoint));
+            parameters.Add(new("RemainingArgs", new[] { "-Resume", checkpoint }));
         }
         else
         {
-            argv.Add("-Resume");
-            argv.Add("-OutputPath");
-            argv.Add(checkpoint);
-            commandParts.Add("-Resume");
-            commandParts.Add("-OutputPath");
-            commandParts.Add(PaxAdapter.ConvertToQuotedArg(checkpoint));
+            parameters.Add(new("RemainingArgs", new[] { "-Resume" }));
+            parameters.Add(new("OutputPath", checkpoint));
         }
 
         if (force)
         {
-            argv.Add("-Force");
-            commandParts.Add("-Force");
+            parameters.Add(new("Force", true));
         }
 
         // Output-shaping switches (-Dashboard, -FillerLabel / -FillerLabelText,
@@ -606,26 +592,19 @@ internal static partial class RecipeReadModel
         // -ClientCertificateThumbprint. All values are non-secret metadata read
         // from the resolved Chef's Key; the secret / certificate private key is
         // NEVER a CLI arg — it is injected onto the child environment only by the
-        // reused supervisor credential injection. Auth-tail values are emitted
-        // unquoted exactly as the recipe path renders them.
+        // reused supervisor credential injection.
         if (resolvedChefKey is not null)
         {
             string tenantId = resolvedChefKey.TenantId ?? string.Empty;
             if (tenantId.Length > 0)
             {
-                argv.Add("-TenantId");
-                argv.Add(tenantId);
-                commandParts.Add("-TenantId");
-                commandParts.Add(tenantId);
+                parameters.Add(new("TenantId", tenantId));
             }
 
             string paxAuthValue = MapResumeAuthValue(resolvedChefKey.RecipeAuthMode);
             if (paxAuthValue.Length > 0)
             {
-                argv.Add("-Auth");
-                argv.Add(paxAuthValue);
-                commandParts.Add("-Auth");
-                commandParts.Add(paxAuthValue);
+                parameters.Add(new("Auth", paxAuthValue));
             }
 
             bool isAppReg =
@@ -636,10 +615,7 @@ internal static partial class RecipeReadModel
                 string clientId = resolvedChefKey.ClientId ?? string.Empty;
                 if (clientId.Length > 0)
                 {
-                    argv.Add("-ClientId");
-                    argv.Add(clientId);
-                    commandParts.Add("-ClientId");
-                    commandParts.Add(clientId);
+                    parameters.Add(new("ClientId", clientId));
                 }
 
                 if (string.Equals(resolvedChefKey.RecipeAuthMode, "AppRegistrationCertificate", StringComparison.OrdinalIgnoreCase))
@@ -647,16 +623,13 @@ internal static partial class RecipeReadModel
                     string thumb = resolvedChefKey.CertThumbprint ?? string.Empty;
                     if (thumb.Length > 0)
                     {
-                        argv.Add("-ClientCertificateThumbprint");
-                        argv.Add(thumb);
-                        commandParts.Add("-ClientCertificateThumbprint");
-                        commandParts.Add(thumb);
+                        parameters.Add(new("ClientCertificateThumbprint", thumb));
                     }
                 }
             }
         }
 
-        return (argv, string.Join(" ", commandParts));
+        return parameters;
     }
 
     // Recipe auth.mode -> PAX -Auth value (the same mapping the recipe argv

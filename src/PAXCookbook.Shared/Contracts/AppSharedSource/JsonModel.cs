@@ -23,7 +23,7 @@ internal static partial class JsonModel
     // Parses a JSON document string into the CLR tree. Returns null for
     // empty / whitespace input or malformed JSON (oracle: Read-RequestJson
     // returns $null which the route translates to 400 invalid_json).
-    public static object? Parse(string? raw)
+    public static object? Parse(string? raw, bool rejectAmbiguousProperties = false)
     {
         if (string.IsNullOrWhiteSpace(raw))
         {
@@ -33,12 +33,33 @@ internal static partial class JsonModel
         try
         {
             using var doc = JsonDocument.Parse(raw);
+            if (rejectAmbiguousProperties && HasAmbiguousProperties(doc.RootElement)) { return null; }
             return FromElement(doc.RootElement);
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    internal static bool HasAmbiguousProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name) || HasAmbiguousProperties(property.Value)) { return true; }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in element.EnumerateArray())
+            {
+                if (HasAmbiguousProperties(item)) { return true; }
+            }
+        }
+        return false;
     }
 
     // Converts an already-parsed JsonElement (e.g. a recipe file loaded by

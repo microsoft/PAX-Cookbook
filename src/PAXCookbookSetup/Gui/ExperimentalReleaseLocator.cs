@@ -21,7 +21,10 @@ public static class ExperimentalReleaseLocator
     private const string PayloadAssetName = "PAX_Cookbook_Payload.zip";
     private const string ManifestAssetName = "versions.json";
 
-    public sealed record Located(string ManifestUrl, string PayloadUrl);
+    public sealed record Located(string ManifestUrl, string PayloadUrl)
+    {
+        internal string? Tag { get; init; }
+    }
 
     // Pure selector (unit-tested): from the releases-list JSON, pick the newest
     // pre-release by created_at and return its payload + manifest asset URLs.
@@ -92,7 +95,9 @@ public static class ExperimentalReleaseLocator
                 return null;
             }
 
-            return new Located(manifestUrl, payloadUrl);
+            string? tag = newest.TryGetProperty("tag_name", out var tagElement) && tagElement.ValueKind == JsonValueKind.String
+                ? tagElement.GetString() : null;
+            return new Located(manifestUrl, payloadUrl) { Tag = tag };
         }
         catch
         {

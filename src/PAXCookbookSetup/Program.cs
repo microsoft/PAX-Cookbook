@@ -387,18 +387,13 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
     // Phase 11 / Phase 12 — resolve payload root in this order:
     //   1. --payload-root <dir>  (dev loop or external installer).
     //   2. Embedded payload zip resource (single-EXE public artifact).
-    //   3. Local payload cache under <installRoot>\PayloadCache
-    //      (written by InstallVerb so the installed Setup EXE — which
-    //      ships WITHOUT an embedded payload — can repair/update
-    //      without the user supplying --payload-root).
-    //   4. Fail clearly.
+    //   3. Online payload bound to external release metadata; otherwise refuse.
     //
     // Embedded extraction goes to a throwaway temp folder which is
-    // deleted in finally. Local cache and directory resolvers point
-    // at on-disk locations that we do not own at this layer; we never
-    // delete them here.
+    // deleted in finally. An explicit directory resolver is caller-owned.
     string? tempExtractRoot = null;
     string? downloadedZip = null;
+    FileStream? verifiedZip = null;
     try
     {
         // A CLI `install` mirrors the GUI wizard: when bootstrapping (no
@@ -425,12 +420,6 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
         }
         else
         {
-            // Always pull the LATEST payload from the GitHub Release (verified
-            // against versions.json) so re-running Setup — install, update, or an
-            // Add/Remove Programs repair — refreshes to the newest version
-            // instead of reusing a stale local cache. The local cache is kept
-            // only as an OFFLINE fallback when the download cannot be performed,
-            // so repair still works without a network connection.
             Action<string> dlProgress = parsed.Quiet ? (_ => { }) : ConsoleDownloadProgress;
             var downloader = new PayloadDownloader(log, dlProgress);
             var dl = downloader.DownloadAsync().GetAwaiter().GetResult();
@@ -438,17 +427,14 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
             if (dl.Success && !string.IsNullOrEmpty(dl.ZipPath))
             {
                 downloadedZip = dl.ZipPath;
+                verifiedZip = ManifestVerifier.OpenVerifiedPayload(downloadedZip, dl.Expectation);
+                if (verifiedZip is null)
+                {
+                    log.Write("payload-release-binding-rejected", "error");
+                    Console.Error.WriteLine("The downloaded payload could not be verified against the release information.");
+                    return SetupExitCodes.InstallFailed;
+                }
                 resolver = new DownloadedPayloadSourceResolver(downloadedZip);
-            }
-            else if (LocalCachePayloadSourceResolver.HasCache(installRoot))
-            {
-                log.Write("payload-download-fallback-cache", "warn",
-                    new Dictionary<string, object?>
-                    {
-                        ["installRoot"] = installRoot,
-                        ["detail"] = dl.Error
-                    });
-                resolver = new LocalCachePayloadSourceResolver(installRoot);
             }
             else
             {
@@ -465,6 +451,7 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
         }
 
         var src = resolver.Resolve();
+        verifiedZip?.Dispose();
         if (!src.Success || string.IsNullOrEmpty(src.PayloadRoot))
         {
             tempExtractRoot = src.TempExtractionRoot;
@@ -497,13 +484,12 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
             return SetupExitCodes.InstallFailed;
         }
 
-        // For embedded extraction, local-cache, and downloaded resolution,
+        // For embedded and downloaded extraction,
         // verify the staged files match the manifest before we proceed
         // (defence-in-depth on top of the existing ManifestValidator invoked
         // inside each verb). Directory mode is trusted because the caller
         // explicitly pointed us at a payload root.
         if (string.Equals(src.Origin, "embedded", StringComparison.Ordinal) ||
-            string.Equals(src.Origin, "local-cache", StringComparison.Ordinal) ||
             string.Equals(src.Origin, "downloaded", StringComparison.Ordinal))
         {
             var v = PayloadManifestVerifier.Verify(payloadRoot, m);
@@ -585,6 +571,7 @@ static int RunPayloadVerb(ParsedArgs parsed, string installRoot, SetupLogger log
                     ["deleted"] = !Directory.Exists(tempExtractRoot)
                 });
         }
+        verifiedZip?.Dispose();
         PayloadDownloader.Cleanup(downloadedZip);
     }
 }

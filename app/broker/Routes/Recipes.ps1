@@ -246,12 +246,12 @@ function Read-RecipeFile {
     # the validator's `-is [string]` check rejects DateTime values.
     $parsed = $null
     try {
-        $parsed = $raw | ConvertFrom-Json -AsHashtable -Depth 12 -DateKind String
+        $parsed = ConvertFrom-PaxRecipeJson -Json $raw
     } catch {
         return @{
             status = 'malformed'
             recipe = $null
-            detail = ('json_parse_failed: ' + [string]$_.Exception.Message)
+            detail = 'json_parse_failed'
         }
     }
 
@@ -538,7 +538,7 @@ function Invoke-RecipeGet {
 
 function Invoke-RecipeCreate {
     param($Context)
-    $body = Read-RequestJson -Context $Context
+    $body = Read-RequestJson -Context $Context -RejectAmbiguousProperties
     if ($null -eq $body) {
         Write-JsonResponse -Context $Context -Status 400 -Body @{ error = 'invalid_json' }
         return
@@ -602,7 +602,7 @@ function Invoke-RecipeUpdate {
         return
     }
 
-    $body = Read-RequestJson -Context $Context
+    $body = Read-RequestJson -Context $Context -RejectAmbiguousProperties
     if ($null -eq $body) {
         Write-JsonResponse -Context $Context -Status 400 -Body @{ error = 'invalid_json' }
         return
@@ -757,7 +757,7 @@ function Invoke-RecipeDelete {
 
 function Invoke-RecipePreview {
     param($Context)
-    $body = Read-RequestJson -Context $Context
+    $body = Read-RequestJson -Context $Context -RejectAmbiguousProperties
     if ($null -eq $body) {
         Write-JsonResponse -Context $Context -Status 400 -Body @{ error = 'invalid_json' }
         return

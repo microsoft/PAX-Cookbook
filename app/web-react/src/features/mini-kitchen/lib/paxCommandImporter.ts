@@ -44,7 +44,7 @@ import type {
   RollupMode,
   StorageTier,
 } from '../types';
-import { tokenizeAdvancedArgs } from './advancedArgs';
+import { ADVANCED_OPTIONS, parseAdvancedArguments, tokenizeAdvancedArgs, type PaxParameter } from './advancedArgs';
 import { createDefaultMiniKitchenRecipe } from './defaultRecipe';
 import { normalizeRecipe } from './normalizeRecipe';
 import { scanForSecrets } from './secretScanner';
@@ -92,6 +92,8 @@ export interface PaxCommandParseResult {
 export function parsePaxCommand(input: string): PaxCommandParseResult {
   const text = (input ?? '').trim();
 
+  if (text.length > 131072 || text.includes('\0')) return reject('The command is too large or contains unsupported characters.');
+
   if (!text) {
     return reject('Paste a PAX command above, then run the import.');
   }
@@ -117,7 +119,16 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
     .replace(/\r?\n/g, ' ')
     .trim();
 
-  const tokens = tokenizeAdvancedArgs(flattened);
+  let typed: readonly PaxParameter[] | undefined;
+  if (/\s-Command\b/i.test(flattened)) {
+    try { typed = parseTypedProjection(text); }
+    catch { return reject('This command is not a supported literal PAX command. Import a .pax or .paxlite recipe instead.'); }
+  }
+  const typedByName = new Map(typed?.map(parameter => [parameter.name, parameter]));
+  const isAdvanced = (parameter: PaxParameter) => ADVANCED_OPTIONS.some(([name]) => name === parameter.name) && !(parameter.name === 'CombineOutput' && parameter.value === true);
+  const tokens = typed
+    ? typed.filter(parameter => !isAdvanced(parameter)).map(parameter => ({ raw: `-${parameter.name}`, isSwitch: true, switchName: parameter.name }))
+    : tokenizeAdvancedArgs(flattened);
 
   const state = createDefaultMiniKitchenRecipe();
   // Clear the default-stamped name; command import names happen in the modal.
@@ -126,9 +137,9 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
   const applied: AppliedSwitch[] = [];
   const notApplied: NotAppliedSwitch[] = [];
   const notes: string[] = [];
-  const advancedTokens: string[] = [];
+  const advancedTokens: string[] = typed?.filter(isAdvanced).map(parameter => `-${parameter.name}:${typeof parameter.value === 'boolean' ? (parameter.value ? '$true' : '$false') : parameter.value}`) ?? [];
 
-  let recognizedCount = 0;
+  let recognizedCount = advancedTokens.length;
   let sawClientSecret = false;
   let sawScriptPath = false;
   // Track raw flags so dependent decisions (auth mode, combine output) can be
@@ -136,6 +147,7 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
   let sawCombineOutput = false;
   let authEnum: string | undefined;
   let sawCertThumbprint = false;
+  const seen = new Set<string>();
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
@@ -153,6 +165,8 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
     }
 
     const name = token.switchName ?? token.raw.slice(1);
+    if (seen.has(name.toLowerCase())) return reject('Duplicate command options are not supported.');
+    seen.add(name.toLowerCase());
 
     // PowerShell host switches that wrap the PAX invocation.
     if (HOST_FLAG_SWITCHES.has(name.toLowerCase())) {
@@ -206,8 +220,12 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
     recognizedCount++;
 
     // Value run for non-flag switches.
-    const run = def.kind === 'flag' ? null : collectValueRun(tokens, i);
-    const rawValue = run ? joinRaw(run.tokens) : '';
+    const typedParameter = typedByName.get(def.name);
+    const run = typed || def.kind === 'flag' ? null : collectValueRun(tokens, i);
+    const rawValue = typedParameter && typeof typedParameter.value === 'string'
+      ? `'${typedParameter.value.replace(/'/g, "''")}'`
+      : run ? joinRaw(run.tokens) : '';
+    const listValue = () => typedParameter?.type === 'string[]' ? [...typedParameter.value as readonly string[]] : splitListValue(rawValue);
     if (run) {
       i = run.end;
     }
@@ -269,25 +287,25 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
         break;
       }
       case 'ActivityTypes': {
-        const list = splitListValue(rawValue);
+        const list = listValue();
         state.processing.activityTypes = list;
         applied.push(mk('ActivityTypes', 'Activity types (Step 3)', list.join(', ')));
         break;
       }
       case 'UserIds': {
-        const list = splitListValue(rawValue);
+        const list = listValue();
         state.processing.userIds = list;
         applied.push(mk('UserIds', 'User IDs (Step 3)', list.join(', ')));
         break;
       }
       case 'GroupNames': {
-        const list = splitListValue(rawValue);
+        const list = listValue();
         state.processing.groupNames = list;
         applied.push(mk('GroupNames', 'Group names (Step 3)', list.join(', ')));
         break;
       }
       case 'AgentId': {
-        const list = splitListValue(rawValue);
+        const list = listValue();
         state.processing.agentFilter = { mode: 'ids-only', ids: list };
         applied.push(mk('AgentId', 'Agent filter (Step 3)', `Specific IDs: ${list.join(', ')}`));
         break;
@@ -326,6 +344,30 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
       case 'CombineOutput': {
         sawCombineOutput = true;
         applied.push(mk('CombineOutput', 'Output combine mode (Step 4)', 'Combined'));
+        break;
+      }
+      case 'Deidentify': {
+        state.processing.deidentify = true;
+        applied.push(mk(def.name, 'Deidentify', 'On'));
+        break;
+      }
+      case 'Dashboard': {
+        const value = unquote(rawValue).toLowerCase();
+        if (value !== 'aio' && value !== 'aibv') return reject('Select a supported dashboard value.');
+        state.processing.dashboard = value;
+        applied.push(mk(def.name, 'Dashboard', value));
+        break;
+      }
+      case 'FillerLabel': {
+        const value = unquote(rawValue);
+        if (value !== 'Self' && value !== 'RepeatManager' && value !== 'Fixed') return reject('Select a supported filler label.');
+        state.processing.fillerLabel = value;
+        applied.push(mk(def.name, 'Filler label', value));
+        break;
+      }
+      case 'FillerLabelText': {
+        state.processing.fillerLabelText = unquote(rawValue);
+        applied.push(mk(def.name, 'Filler label text', 'Imported'));
         break;
       }
       case 'OutputPath': {
@@ -418,6 +460,7 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
     );
   }
 
+  if (notApplied.length > 0) return reject('Unsupported command options were found. Remove them before importing.');
   if (recognizedCount === 0) {
     return {
       ok: false,
@@ -483,6 +526,8 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
   }
 
   const normalized = normalizeRecipe(state);
+  const advancedError = parseAdvancedArguments(normalized.advanced.extraArguments ?? '').error;
+  if (advancedError) return reject(advancedError);
 
   return {
     ok: true,
@@ -491,6 +536,95 @@ export function parsePaxCommand(input: string): PaxCommandParseResult {
     notApplied,
     notes: dedupe(notes),
   };
+}
+
+function parseTypedProjection(command: string): readonly PaxParameter[] {
+  let source = command;
+  let position = 0;
+  const fail = (): never => { throw new Error('Invalid literal command.'); };
+  const take = (literal: string) => {
+    if (!source.startsWith(literal, position)) fail();
+    position += literal.length;
+  };
+  const quoted = (): string => {
+    take("'");
+    let value = '';
+    while (position < source.length) {
+      const character = source[position++]!;
+      if (character !== "'") value += character;
+      else if (source[position] === "'") { value += "'"; position++; }
+      else return value;
+    }
+    return fail();
+  };
+  const stringValue = (): string => {
+    if (source[position] !== '(') return quoted();
+    take('(');
+    let value = quoted();
+    while (source[position] === '+') {
+      take('+[char]');
+      const number = /^\d+/.exec(source.slice(position))?.[0] ?? fail();
+      position += number.length;
+      const code = Number(number);
+      if (code < 8216 || code > 8223) fail();
+      take('+');
+      value += String.fromCharCode(code) + quoted();
+    }
+    take(')');
+    return value;
+  };
+  take('pwsh -NoProfile -NoLogo -Command ');
+  const expression = stringValue();
+  if (position !== source.length) fail();
+  source = expression;
+  position = 0;
+  take('$paxParameters=@{');
+  const parameters: PaxParameter[] = [];
+  const names = new Set<string>();
+  while (source[position] !== '}') {
+    if (parameters.length >= 128) fail();
+    const name = quoted();
+    if (names.has(name.toLowerCase())) fail();
+    names.add(name.toLowerCase());
+    take('=');
+    let parameter: PaxParameter;
+    if (source.startsWith('[string[]]@(', position)) {
+      take('[string[]]@(');
+      const value: string[] = [];
+      while (source[position] !== ')') {
+        value.push(stringValue());
+        if (source[position] !== ',') break;
+        take(',');
+      }
+      take(')');
+      parameter = { name, type: 'string[]', value };
+    } else if (source.startsWith('$true', position) || source.startsWith('$false', position)) {
+      const value = source.startsWith('$true', position);
+      take(value ? '$true' : '$false');
+      parameter = { name, type: 'bool', value };
+    } else if (source[position] === '[') {
+      const type = source.startsWith('[int]', position) ? 'int' : 'double';
+      take(`[${type}]`);
+      const literal = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(source.slice(position))?.[0] ?? fail();
+      position += literal.length;
+      parameter = { name, type, value: Number(literal) };
+    } else parameter = { name, type: 'string', value: stringValue() };
+    const advanced = ADVANCED_OPTIONS.find(([optionName]) => optionName === name);
+    const definition = resolveSwitchDefinition(name);
+    if (advanced) {
+      if (parameter.type !== advanced[1] || parseAdvancedArguments(`-${name}:${parameter.value}`).error) fail();
+    } else if (!definition || definition.name !== name ||
+      (definition.kind === 'flag' ? parameter.type !== 'bool' || parameter.value !== true :
+        definition.kind === 'string-list' ? parameter.type !== 'string[]' : parameter.type !== 'string')) fail();
+    parameters.push(parameter);
+    if (source[position] !== ';') break;
+    take(';');
+  }
+  take('}; & ');
+  stringValue();
+  take(' @paxParameters');
+  if (position !== source.length) fail();
+  return parameters;
 }
 
 // -----------------------------------------------------------------------------

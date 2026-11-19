@@ -30,7 +30,8 @@ import {
   SWITCH_CATALOG_VERSION,
   TARGET_PAX_VERSION_DEFAULT,
 } from '../data/mini-kitchen-constants';
-import type { RenderedCommand } from './commandRenderer';
+import { renderPaxCommand, type RenderedCommand } from './commandRenderer';
+import { parseAdvancedArguments } from './advancedArgs';
 import { scrubSavedRecipeState } from './recipeScrub';
 import type {
   LiteRecipe,
@@ -54,8 +55,11 @@ interface BuildLiteRecipeExportInput {
 export function buildLiteRecipeExport(
   input: BuildLiteRecipeExportInput,
 ): LiteRecipeExportResult {
+  const error = parseAdvancedArguments(input.state.advanced.extraArguments ?? '').error;
+  if (error) throw new Error(error);
   const scrub = scrubSavedRecipeState(input.state);
   const state = scrub.state;
+  const command = renderPaxCommand(state);
 
   const recipe: LiteRecipe = {
     kind: 'pax-cookbook-mini-recipe',
@@ -84,10 +88,10 @@ export function buildLiteRecipeExport(
       advanced: { ...state.advanced },
     },
     commandPreview: {
-      shell: input.command.shell,
-      argv: [...input.command.argv],
-      multiline: input.command.multiline,
-      singleLine: input.command.singleLine,
+      shell: command.shell,
+      argv: [...command.argv],
+      multiline: command.multiline,
+      singleLine: command.singleLine,
     },
     permissions: {
       required: input.permissions.required.map(entry => ({ ...entry })),
@@ -104,6 +108,8 @@ export function buildLiteRecipeExport(
 
 /** Pretty-print a `LiteRecipe` envelope as a 2-space-indented JSON string. */
 export function serializeLiteRecipe(recipe: LiteRecipe): string {
+  const error = parseAdvancedArguments(recipe.recipe.advanced.extraArguments ?? '').error;
+  if (error) throw new Error(error);
   return JSON.stringify(recipe, null, 2);
 }
 

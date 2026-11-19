@@ -35,6 +35,7 @@
 
 import type { MiniKitchenRecipeState } from '../types';
 import { fullRecipeToState } from './fullRecipeToState';
+import { parseRecipeJson } from './parseRecipeJson';
 import { containsLikelySecret } from './secretScanner';
 
 /** Envelope marker every `.pax` full recipe export carries at its top level. */
@@ -97,7 +98,7 @@ export function parseFullPaxRecipeJson(text: string): FullPaxImportResult {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = parseRecipeJson(text);
   } catch {
     return {
       ok: false,

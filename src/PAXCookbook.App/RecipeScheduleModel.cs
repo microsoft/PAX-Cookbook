@@ -44,6 +44,15 @@ namespace PAXCookbook.App;
 internal static class RecipeScheduleModel
 {
     private const int RegistrarTimeoutMs = 60000;
+    private static readonly object[] MutationGates = Enumerable.Range(0, 64).Select(_ => new object()).ToArray();
+
+    internal static object GetMutationGate(string workspacePath, string recipeId)
+    {
+        var comparer = StringComparer.OrdinalIgnoreCase;
+        int hash = HashCode.Combine(comparer.GetHashCode(Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspacePath))),
+            comparer.GetHashCode(recipeId));
+        return MutationGates[unchecked((uint)hash) % (uint)MutationGates.Length];
+    }
 
     private static string RecipeFilePath(string workspacePath, string recipeId) =>
         Path.Combine(workspacePath, "Recipes", recipeId + ".recipe.json");
@@ -55,6 +64,17 @@ internal static class RecipeScheduleModel
     // PUT /api/v1/recipes/{id}/scheduled-task
     // -----------------------------------------------------------------
     public static (int Status, object Body) PutScheduledTask(
+        string workspacePath, string appRoot, string recipeId, object? requestBody,
+        string? registrarPathOverride, string? taskFolderOverride, string? pwshOverride)
+    {
+        lock (GetMutationGate(workspacePath, recipeId))
+        {
+            return PutScheduledTaskCore(workspacePath, appRoot, recipeId, requestBody,
+                registrarPathOverride, taskFolderOverride, pwshOverride);
+        }
+    }
+
+    private static (int Status, object Body) PutScheduledTaskCore(
         string workspacePath,
         string appRoot,
         string recipeId,
@@ -96,6 +116,12 @@ internal static class RecipeScheduleModel
             return (400, new { error = "invalid_recurrence", recipeId, errors = recErrors });
         }
 
+        (bool storedOk, List<object> storedErrors) = RecipeValidationModel.ValidateAll(recipe);
+        if (!storedOk)
+        {
+            return (412, new { error = "recipe_invalid", recipeId, errors = storedErrors });
+        }
+
         // d. a schedule requires a bound + resolvable Chef's Key (all auth modes;
         //    Decision 1 / CK-2). Reuses the readiness CK resolution -- metadata
         //    only, never a secret.
@@ -131,6 +157,20 @@ internal static class RecipeScheduleModel
             return (412, new { error = "recipe_invalid", recipeId, errors });
         }
 
+        string selectedPwsh = ResolveRegistrarPowerShell(pwshOverride);
+        RegistrarResult preflight = RunRegistrar("preflight", workspacePath, recipeId, scheduledTaskId,
+            recurrenceJson: null, registrarPathOverride, taskFolderOverride, selectedPwsh, appRoot);
+        if (preflight.ExitCode != 0)
+        {
+            return (preflight.Launched ? 502 : 500, new
+            {
+                error = "schedule_preflight_failed",
+                recipeId,
+                token = preflight.ErrorToken,
+                message = "Scheduling requires PowerShell 7.2 or newer with Windows Task Scheduler commands available.",
+            });
+        }
+
         string finalPath = RecipeFilePath(workspacePath, recipeId);
         byte[]? oldBytes = File.Exists(finalPath) ? File.ReadAllBytes(finalPath) : null;
         RowState? oldRow = GetRowState(workspacePath, recipeId);
@@ -151,7 +191,7 @@ internal static class RecipeScheduleModel
         RegistrarResult reg = RunRegistrar(
             "register", workspacePath, recipeId, scheduledTaskId,
             EncodeRecurrenceJson(normalizedRecurrence),
-            registrarPathOverride, taskFolderOverride, pwshOverride, appRoot);
+            registrarPathOverride, taskFolderOverride, selectedPwsh, appRoot);
 
         if (reg.ExitCode != 0)
         {
@@ -176,6 +216,17 @@ internal static class RecipeScheduleModel
     // DELETE /api/v1/recipes/{id}/scheduled-task
     // -----------------------------------------------------------------
     public static (int Status, object Body) DeleteScheduledTask(
+        string workspacePath, string appRoot, string recipeId, string? registrarPathOverride,
+        string? taskFolderOverride, string? pwshOverride)
+    {
+        lock (GetMutationGate(workspacePath, recipeId))
+        {
+            return DeleteScheduledTaskCore(workspacePath, appRoot, recipeId, registrarPathOverride,
+                taskFolderOverride, pwshOverride);
+        }
+    }
+
+    private static (int Status, object Body) DeleteScheduledTaskCore(
         string workspacePath,
         string appRoot,
         string recipeId,
@@ -204,21 +255,10 @@ internal static class RecipeScheduleModel
 
         // Unregister FIRST. On a hard failure, leave the schedule block intact so
         // stored state and OS state stay consistent.
-        string scheduledTaskId = existing.ScheduledTaskId ?? string.Empty;
-        RegistrarResult reg = RunRegistrar(
-            "unregister", workspacePath, recipeId, scheduledTaskId,
-            recurrenceJson: null,
-            registrarPathOverride, taskFolderOverride, pwshOverride, appRoot);
-
-        if (reg.ExitCode != 0)
+        if (TryUnregisterTaskForRecipe(workspacePath, appRoot, recipeId, existing.ScheduledTaskId,
+            registrarPathOverride, taskFolderOverride, pwshOverride) is { } refusal)
         {
-            return (reg.Launched ? 502 : 500, new
-            {
-                error = "schedule_unregistration_failed",
-                recipeId,
-                registrarExitCode = reg.ExitCode,
-                token = reg.ErrorToken,
-            });
+            return refusal;
         }
 
         // Success (incl. the registrar's no_task_present exit 0): remove the
@@ -247,6 +287,29 @@ internal static class RecipeScheduleModel
         // The schedule is gone; sweep any skip-next marker so it cannot linger.
         ScheduleSkipMarker.Clear(workspacePath, recipeId);
         return (200, new { recipeId, schedule = (object?)null });
+    }
+
+    internal static (int Status, object Body)? TryUnregisterTaskForRecipe(
+        string workspacePath, string appRoot, string recipeId, string? scheduledTaskId,
+        string? registrarPathOverride, string? taskFolderOverride, string? pwshOverride)
+    {
+        RegistrarResult reg = RunRegistrar(
+            "unregister", workspacePath, recipeId, scheduledTaskId ?? string.Empty,
+            recurrenceJson: null,
+            registrarPathOverride, taskFolderOverride, pwshOverride, appRoot);
+
+        if (reg.ExitCode != 0)
+        {
+            return (reg.Launched ? 502 : 500, new
+            {
+                error = "schedule_unregistration_failed",
+                recipeId,
+                registrarExitCode = reg.ExitCode,
+                token = reg.ErrorToken,
+            });
+        }
+
+        return null;
     }
 
     // -----------------------------------------------------------------
@@ -304,6 +367,14 @@ internal static class RecipeScheduleModel
         string workspacePath,
         string recipeId)
     {
+        lock (GetMutationGate(workspacePath, recipeId))
+        {
+            return SkipNextScheduledRunCore(workspacePath, recipeId);
+        }
+    }
+
+    private static (int Status, object Body) SkipNextScheduledRunCore(string workspacePath, string recipeId)
+    {
         if (!RecipeReadModel.IsValidRecipeId(recipeId))
         {
             return (400, new { error = "invalid_recipe_id", recipeId });
@@ -333,37 +404,6 @@ internal static class RecipeScheduleModel
 
         string skippedRunAt = ScheduleSkipMarker.Write(workspacePath, recipeId, next.Value);
         return (200, new { recipeId, skippedRunAt });
-    }
-
-    // Best-effort unregister of a recipe's Windows Scheduled Task — the single
-    // cleanup primitive shared by all three paths that must remove an orphaned
-    // task: (1) a recipe saved without a schedule, (2) a recipe deleted, and
-    // (3) "Cancel all future bakes". Idempotent (a missing task succeeds via the
-    // registrar's no_task_present exit 0) and never throws; it also clears any
-    // skip marker so nothing stale lingers. It does NOT rewrite the recipe file
-    // (callers own the schedule-block / row state).
-    public static void UnregisterTaskForRecipe(
-        string workspacePath,
-        string appRoot,
-        string recipeId,
-        string? scheduledTaskId,
-        string? registrarPathOverride = null,
-        string? taskFolderOverride = null,
-        string? pwshOverride = null)
-    {
-        try
-        {
-            RunRegistrar(
-                "unregister", workspacePath, recipeId, scheduledTaskId ?? string.Empty,
-                recurrenceJson: null,
-                registrarPathOverride, taskFolderOverride, pwshOverride, appRoot);
-        }
-        catch
-        {
-            // Best-effort: a cleanup failure must never fail the save/delete that
-            // triggered it.
-        }
-        ScheduleSkipMarker.Clear(workspacePath, recipeId);
     }
 
     // =================================================================
@@ -635,6 +675,9 @@ internal static class RecipeScheduleModel
     private readonly record struct RegistrarResult(
         bool Launched, int ExitCode, string? ErrorToken, string Stdout, string Stderr);
 
+    private static string ResolveRegistrarPowerShell(string? pathOverride) =>
+        !string.IsNullOrWhiteSpace(pathOverride) ? pathOverride : (PwshLocator.Resolve() ?? "pwsh");
+
     private static RegistrarResult RunRegistrar(
         string action,
         string workspacePath,
@@ -649,9 +692,7 @@ internal static class RecipeScheduleModel
         string registrar = string.IsNullOrWhiteSpace(registrarPathOverride)
             ? Path.Combine(appRoot, "install", "Register-PAXScheduledRecipe.ps1")
             : registrarPathOverride!;
-        string pwsh = !string.IsNullOrWhiteSpace(pwshOverride)
-            ? pwshOverride!
-            : (PwshLocator.Resolve() ?? "pwsh");
+        string pwsh = ResolveRegistrarPowerShell(pwshOverride);
 
         var psi = new ProcessStartInfo
         {

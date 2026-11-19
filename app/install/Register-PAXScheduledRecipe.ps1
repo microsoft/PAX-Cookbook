@@ -1,5 +1,3 @@
-#requires -Version 7.4
-
 # =====================================================================
 # Register-PAXScheduledRecipe.ps1
 #
@@ -66,7 +64,7 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('register','unregister','probe')]
+    [Parameter(Mandatory=$true)][ValidateSet('register','unregister','probe','preflight')]
     [string]$Action,
 
     [Parameter(Mandatory=$false)]
@@ -121,6 +119,27 @@ function Write-RegistrarLine {
     } else {
         [Console]::Out.WriteLine('[Registrar] ' + $Text)
     }
+}
+
+if ($PSVersionTable.PSVersion -lt [version]'7.2') {
+    Write-RegistrarLine 'unsupported_powershell: Scheduling requires PowerShell 7.2 or newer.' 'stderr'
+    exit 5
+}
+
+if ($Action -in @('preflight', 'register', 'unregister')) {
+    $requiredCommands = if ($Action -eq 'unregister') {
+        @('Get-ScheduledTask', 'Unregister-ScheduledTask')
+    } else {
+        @('New-ScheduledTaskAction', 'New-ScheduledTaskTrigger', 'New-ScheduledTaskPrincipal',
+          'New-ScheduledTaskSettingsSet', 'Register-ScheduledTask')
+    }
+    foreach ($requiredCommand in $requiredCommands) {
+        if (-not (Get-Command -Name $requiredCommand -ErrorAction SilentlyContinue)) {
+            Write-RegistrarLine 'scheduler_unavailable: Windows Task Scheduler commands are unavailable in the selected PowerShell.' 'stderr'
+            exit 5
+        }
+    }
+    if ($Action -eq 'preflight') { exit 0 }
 }
 
 function Get-WindowsTaskNameForRecipe {
@@ -386,18 +405,19 @@ function Invoke-Unregister {
         exit 2
     }
     $taskName = Get-WindowsTaskNameForRecipe -RecipeIdArg $RecipeIdArg
-    $existing = $null
-    try {
-        $existing = Get-ScheduledTask -TaskPath $Script:ScheduledTaskFolderPath -TaskName $taskName -ErrorAction SilentlyContinue
-    } catch { $existing = $null }
-    if (-not $existing) {
+    $lookup = Get-PaxCookbookTasks
+    if (-not $lookup.ok) {
+        Write-RegistrarLine 'unregister_failed: Task lookup did not complete.' 'stderr'
+        exit 6
+    }
+    if (-not ($lookup.tasks | Where-Object { ([string]$_.TaskName) -eq $taskName })) {
         Write-RegistrarLine ('no_task_present: ' + $Script:ScheduledTaskFolderPath + $taskName)
         exit 0
     }
     try {
-        Unregister-ScheduledTask -TaskPath $Script:ScheduledTaskFolderPath -TaskName $taskName -Confirm:$false
+        Unregister-ScheduledTask -TaskPath $Script:ScheduledTaskFolderPath -TaskName $taskName -Confirm:$false -ErrorAction Stop
     } catch {
-        Write-RegistrarLine ('unregister_failed: ' + $_.Exception.Message) 'stderr'
+        Write-RegistrarLine 'unregister_failed: Task removal did not complete.' 'stderr'
         exit 6
     }
     Write-RegistrarLine ('unregistered: ' + $Script:ScheduledTaskFolderPath + $taskName)

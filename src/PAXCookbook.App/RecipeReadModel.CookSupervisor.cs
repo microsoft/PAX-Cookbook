@@ -170,7 +170,8 @@ internal static partial class RecipeReadModel
         long minFreeDiskBytes,
         CookKind kind,
         string? pwshPathOverride,
-        bool joinSupervisor)
+        bool joinSupervisor,
+        CookProcessDependencies? dependencies = null)
     {
         // The three preparation phases (gates -> authorization -> preparation) are
         // ordered by the portable CookPreparationSequence, which is the SINGLE
@@ -206,7 +207,7 @@ internal static partial class RecipeReadModel
         // the cook has fully finalized.
         PreparedCook prepared = ContinuationInput(adapter);
         (int spawnStatus, object spawnBody) = SpawnAndSupervise(
-            workspacePath, versionInfo, engine, prepared, recipeId, pwshPathOverride, joinSupervisor);
+            workspacePath, versionInfo, engine, prepared, recipeId, pwshPathOverride, joinSupervisor, dependencies);
 
         // For a scheduled one-shot the supervisor was joined, so the cook row is
         // already terminal. Surface the terminal status + trigger so the
@@ -642,7 +643,8 @@ internal static partial class RecipeReadModel
         PreparedCook prepared,
         string recipeId,
         string? pwshPathOverride,
-        bool joinSupervisor)
+        bool joinSupervisor,
+        CookProcessDependencies? dependencies)
     {
         string cookId = prepared.CookId;
         string cookFolderAbs = prepared.CookFolderAbs;
@@ -659,9 +661,6 @@ internal static partial class RecipeReadModel
                 workspacePath, cookFolderAbs, cookFolderRel, recipeId, cookId, host,
                 "PowerShell 7 is required to run bakes. Please reinstall PAX Cookbook to install it.");
         }
-        string commandExpr = prepared.Plan.SpawnArgv[3];
-        string paxScriptPath = prepared.Plan.PaxScriptPath;
-
         // Re-hash the managed engine bytes right now. Acquisition verified them a
         // moment ago, but the engine is invoked ONLY when its current bytes still
         // match the recorded approved hash. A miss is a spawn failure (the row was
@@ -684,6 +683,7 @@ internal static partial class RecipeReadModel
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             RedirectStandardInput = true,
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             // WebLogin recipes perform interactive MSAL/WAM browser sign-in,
             // which requires a parent window handle: a headless child
             // (CreateNoWindow=true) makes MSAL fail with "A window handle must be
@@ -706,10 +706,71 @@ internal static partial class RecipeReadModel
                 : ProcessWindowStyle.Normal,
             WorkingDirectory = cookFolderAbs,
         };
-        psi.ArgumentList.Add("-NoProfile");
-        psi.ArgumentList.Add("-NoLogo");
-        psi.ArgumentList.Add("-Command");
-        psi.ArgumentList.Add(commandExpr);
+        foreach (string argument in prepared.Plan.SpawnArgv) { psi.ArgumentList.Add(argument); }
+
+        return SupervisePreparedChild(
+            workspacePath, versionInfo, prepared, recipeId, currentHash, psi, joinSupervisor,
+            dependencies ?? new CookProcessDependencies(
+                CookCredentialInjection.ApplyChildCredentialEnv,
+                (url, code) => TelegramNotifier.RelayDeviceCode(TelegramNotifier.DefaultSender, url, code),
+                () => TelegramNotifier.RelayDeviceCodeExpiry(TelegramNotifier.DefaultSender, null),
+                TryNotifyBakeTerminal,
+                startInfo => new Process { StartInfo = startInfo },
+                process => process.WaitForExit()));
+    }
+
+    internal static (int Status, object Body) TestSeamRunInertCook(
+        CookTriggerKind trigger, string workspacePath, VersionInfo versionInfo, EngineAcquisitionResult engine,
+        string recipeId, string checkpointPath, string pwshPath, CookProcessDependencies dependencies)
+    {
+        ArgumentNullException.ThrowIfNull(dependencies);
+        return trigger switch
+        {
+            CookTriggerKind.Manual or CookTriggerKind.Scheduled => StartCookCore(
+                workspacePath, versionInfo, engine, recipeId, "TEST", "/inert-fixture", 0,
+                trigger == CookTriggerKind.Manual ? CookKind.Manual : CookKind.Scheduled,
+                pwshPath, joinSupervisor: trigger == CookTriggerKind.Scheduled, dependencies),
+            CookTriggerKind.Resume => StartResumeCookCore(
+                workspacePath, versionInfo, engine, checkpointPath, false, null, pwshPath, dependencies),
+            _ => throw new ArgumentOutOfRangeException(nameof(trigger)),
+        };
+    }
+
+    internal sealed record CookProcessDependencies(
+        Func<IDictionary<string, string?>, ChefKeyModel.ChefKeyResolved?, CookCredentialInjection.CredentialInjectionOutcome> InjectCredentials,
+        Action<string, string> RelayDeviceCode,
+        Action RelayDeviceCodeExpiry,
+        Action<string, string, string, string, int, double, string?, string?> NotifyTerminal,
+        Func<ProcessStartInfo, Process> CreateProcess,
+        Action<Process> WaitForExit);
+
+    internal static (int Status, object Body) TestSeamSuperviseInertChild(
+        string workspacePath, string cookId, string recipeId, string cookFolderAbs,
+        ProcessStartInfo startInfo, bool joinSupervisor, CookProcessDependencies dependencies)
+    {
+        var plan = new PaxAdapter.InvocationPlan(
+            Array.Empty<string>(), string.Empty, string.Empty, startInfo.ArgumentList.ToArray(),
+            string.Empty, "inert-test-child");
+        var prepared = new PreparedCook(
+            cookId, cookFolderAbs, Path.GetRelativePath(workspacePath, cookFolderAbs), plan,
+            ToCookIso(DateTime.UtcNow), null, false);
+        var version = new VersionInfo(
+            "test-seam", "experimental", "inert-test-child", string.Empty, string.Empty,
+            string.Empty, null, null, string.Empty, null);
+        return SupervisePreparedChild(
+            workspacePath, version, prepared, recipeId, string.Empty, startInfo, joinSupervisor, dependencies);
+    }
+
+    private static (int Status, object Body) SupervisePreparedChild(
+        string workspacePath, VersionInfo versionInfo, PreparedCook prepared, string recipeId,
+        string currentHash, ProcessStartInfo psi, bool joinSupervisor, CookProcessDependencies dependencies)
+    {
+        string cookId = prepared.CookId;
+        string cookFolderAbs = prepared.CookFolderAbs;
+        string cookFolderRel = prepared.CookFolderRel;
+        string host = Environment.MachineName;
+        string pwshPath = psi.FileName;
+        string paxScriptPath = prepared.Plan.PaxScriptPath;
 
         // CK-3 — child-only Graph credential injection. For App-registration
         // recipes the bound Chef's Key's non-secret fields (and, for the secret
@@ -722,23 +783,24 @@ internal static partial class RecipeReadModel
         // child that cannot authenticate. GRAPH_CLIENT_SECRET is scrubbed from this
         // parent dictionary the moment the child has inherited the env block (after
         // proc.Start) and again on the spawn-failure path (constraint 14).
-        CookCredentialInjection.CredentialInjectionOutcome credOutcome =
-            CookCredentialInjection.ApplyChildCredentialEnv(psi.Environment, prepared.CredentialInjection);
-        if (credOutcome == CookCredentialInjection.CredentialInjectionOutcome.SecretMissingAtSpawn)
-        {
-            return RecordSpawnFailure(
-                workspacePath, cookFolderAbs, cookFolderRel, recipeId, cookId, host,
-                "bound Chef's Key client secret was unavailable at spawn time");
-        }
-
         // cook.log — UTF-8 no-BOM, append, auto-flush. stdout/stderr arrive on
         // separate threads, so every append is serialized through a lock.
         string cookLogPath = Path.Combine(cookFolderAbs, "cook.log");
         StreamWriter? logWriter = null;
         var logLock = new object();
         Process? proc = null;
+        CookOutputRedactor? outputRedactor = null;
         try
         {
+            CookCredentialInjection.CredentialInjectionOutcome credOutcome =
+                dependencies.InjectCredentials(psi.Environment, prepared.CredentialInjection);
+            if (credOutcome == CookCredentialInjection.CredentialInjectionOutcome.SecretMissingAtSpawn)
+            {
+                throw new InvalidOperationException("credential_unavailable");
+            }
+            outputRedactor = new CookOutputRedactor(
+                psi.Environment.TryGetValue(CookCredentialInjection.GraphClientSecret, out string? knownSecret) ? knownSecret : null);
+            knownSecret = null;
             var logStream = new FileStream(cookLogPath, FileMode.Append, FileAccess.Write, FileShare.Read);
             logWriter = new StreamWriter(logStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
             {
@@ -751,18 +813,18 @@ internal static partial class RecipeReadModel
             // command summary is redacted and no auth material exists in the
             // argv that reaches this point (constraint 14).
             string headerUtc = ToCookIso(DateTime.UtcNow);
-            logWriter.WriteLine("=== PAX Cookbook managed cook ===");
-            logWriter.WriteLine("startedUtc: " + headerUtc);
-            logWriter.WriteLine("cookId: " + cookId);
-            logWriter.WriteLine("recipeId: " + recipeId);
-            logWriter.WriteLine("pwsh: " + pwshPath);
-            logWriter.WriteLine("paxScript: " + paxScriptPath);
-            logWriter.WriteLine("paxVersion: " + versionInfo.PaxVersion);
-            logWriter.WriteLine("paxSha256: " + currentHash);
-            logWriter.WriteLine("command (redacted): pwsh -NoProfile -NoLogo -Command <managed PAX engine; arguments redacted>");
-            logWriter.WriteLine("=================================");
+            outputRedactor.WriteLine(logWriter, "=== PAX Cookbook managed cook ===");
+            outputRedactor.WriteLine(logWriter, "startedUtc: " + headerUtc);
+            outputRedactor.WriteLine(logWriter, "cookId: " + cookId);
+            outputRedactor.WriteLine(logWriter, "recipeId: " + recipeId);
+            outputRedactor.WriteLine(logWriter, "pwsh: " + pwshPath);
+            outputRedactor.WriteLine(logWriter, "paxScript: " + paxScriptPath);
+            outputRedactor.WriteLine(logWriter, "paxVersion: " + versionInfo.PaxVersion);
+            outputRedactor.WriteLine(logWriter, "paxSha256: " + currentHash);
+            outputRedactor.WriteLine(logWriter, "command (redacted): pwsh -NoProfile -NoLogo -File <managed launcher; parameters redacted>");
+            outputRedactor.WriteLine(logWriter, "=================================");
 
-            proc = new Process { StartInfo = psi };
+            proc = dependencies.CreateProcess(psi);
             StreamWriter writerRef = logWriter;
 
             // CK-4 — real-time Device Code sign-in relay guard. Fires at most once
@@ -772,7 +834,8 @@ internal static partial class RecipeReadModel
             proc.OutputDataReceived += (_, e) =>
             {
                 if (e.Data is null) { return; }
-                lock (logLock) { writerRef.WriteLine(e.Data); }
+                try { lock (logLock) { outputRedactor.WriteLine(writerRef, e.Data); } }
+                catch { return; }
 
                 // CK-4 — detect PAX's Device Code prompt and relay the sign-in URL
                 // + code to the user's configured Telegram chat in real time. The
@@ -785,17 +848,13 @@ internal static partial class RecipeReadModel
                 {
                     if (Interlocked.Exchange(ref deviceCodeRelayed, 1) == 0)
                     {
-                        lock (logLock)
-                        {
-                            writerRef.WriteLine("[notify] device sign-in prompt detected; relaying to the configured Telegram chat");
-                        }
                         string urlCopy = devUrl;
                         string codeCopy = devCode;
                         ThreadPool.QueueUserWorkItem(_ =>
                         {
                             try
                             {
-                                TelegramNotifier.RelayDeviceCode(TelegramNotifier.DefaultSender, urlCopy, codeCopy);
+                                dependencies.RelayDeviceCode(urlCopy, codeCopy);
                             }
                             catch { /* relay is best-effort; never affects the cook */ }
                         });
@@ -806,15 +865,11 @@ internal static partial class RecipeReadModel
                     // Best-effort: relay only if PAX's stdout actually announces an
                     // expiry. No wall-clock timer is fabricated (it would risk false
                     // positives). If PAX emits no expiry line this never fires.
-                    lock (logLock)
-                    {
-                        writerRef.WriteLine("[notify] device sign-in expiry detected; relaying to the configured Telegram chat");
-                    }
                     ThreadPool.QueueUserWorkItem(_ =>
                     {
                         try
                         {
-                            TelegramNotifier.RelayDeviceCodeExpiry(TelegramNotifier.DefaultSender, null);
+                            dependencies.RelayDeviceCodeExpiry();
                         }
                         catch { /* best-effort */ }
                     });
@@ -823,7 +878,8 @@ internal static partial class RecipeReadModel
             proc.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data is null) { return; }
-                lock (logLock) { writerRef.WriteLine("[STDERR] " + e.Data); }
+                try { lock (logLock) { outputRedactor.WriteLine(writerRef, e.Data, "[STDERR] "); } }
+                catch { }
             };
 
             proc.Start();
@@ -835,6 +891,10 @@ internal static partial class RecipeReadModel
             CookCredentialInjection.ScrubSecretEnv(psi.Environment);
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
+            if (prepared.Plan.ParameterJson is { } parameterJson)
+            {
+                proc.StandardInput.WriteLine(parameterJson);
+            }
 
             // BUG-1 window-hide. A WebLogin cook allocates a visible console
             // (CreateNoWindow=false) so MSAL/WAM has a parent HWND, but the user
@@ -851,15 +911,21 @@ internal static partial class RecipeReadModel
                 CookConsoleWindow.QueueHideChildConsole(proc);
             }
         }
-        catch (Exception ex)
+        catch
         {
             // Ensure no injected secret lingers in the parent dictionary if the
             // spawn threw before/at Start.
-            CookCredentialInjection.ScrubSecretEnv(psi.Environment);
-            try { logWriter?.Dispose(); } catch { /* best-effort */ }
-            try { proc?.Dispose(); } catch { /* best-effort */ }
+            try { CookCredentialInjection.ScrubSecretEnv(psi.Environment); }
+            catch { }
+            finally
+            {
+                try { if (proc is not null && !proc.HasExited) { proc.Kill(entireProcessTree: true); proc.WaitForExit(); } } catch { }
+                try { logWriter?.Dispose(); } catch { }
+                try { proc?.Dispose(); } catch { }
+                outputRedactor?.Dispose();
+            }
             return RecordSpawnFailure(
-                workspacePath, cookFolderAbs, cookFolderRel, recipeId, cookId, host, ex.Message);
+                workspacePath, cookFolderAbs, cookFolderRel, recipeId, cookId, host, CookOutputRedactor.SpawnFailureMessage);
         }
 
         // Spawn succeeded. Record the running pid + started_at and write the
@@ -879,8 +945,10 @@ internal static partial class RecipeReadModel
             // terminal state, and the sentinels remain the source of truth.
         }
 
+        try
+        {
         WriteStartedSentinel(
-            cookFolderAbs, cookId, recipeId, pid, startedAt, pwshPath, commandExpr, paxScriptPath, host);
+            cookFolderAbs, cookId, recipeId, pid, startedAt, pwshPath, prepared.Plan.SpawnArgv, paxScriptPath, host);
 
         Process superviseProc = proc;
         StreamWriter superviseWriter = logWriter!;
@@ -896,7 +964,7 @@ internal static partial class RecipeReadModel
 
         var supervisor = new Thread(() => FinalizeCook(
             workspacePath, cookFolderAbs, cookId, superviseProc, superviseWriter, superviseLock,
-            startedUtc, startedAt))
+            startedUtc, startedAt, outputRedactor, dependencies))
         {
             IsBackground = true,
             Name = "pax-cook-supervisor-" + cookId,
@@ -912,6 +980,17 @@ internal static partial class RecipeReadModel
         if (joinSupervisor)
         {
             supervisor.Join();
+        }
+        }
+        catch
+        {
+            try { if (!proc.HasExited) { proc.Kill(entireProcessTree: true); }; proc.WaitForExit(); } catch { }
+            try { logWriter?.Dispose(); } catch { }
+            try { proc.Dispose(); } catch { }
+            outputRedactor.Dispose();
+            CookCancellation.Unregister(cookId);
+            return RecordSpawnFailure(
+                workspacePath, cookFolderAbs, cookFolderRel, recipeId, cookId, host, CookOutputRedactor.SpawnFailureMessage);
         }
 
         return (201, new
@@ -932,7 +1011,9 @@ internal static partial class RecipeReadModel
         StreamWriter logWriter,
         object logLock,
         DateTime startedUtc,
-        string startedAt)
+        string startedAt,
+        CookOutputRedactor outputRedactor,
+        CookProcessDependencies dependencies)
     {
         try
         {
@@ -940,12 +1021,18 @@ internal static partial class RecipeReadModel
             try
             {
                 // No-timeout WaitForExit also drains the async stdout/stderr readers.
-                proc.WaitForExit();
-                exitCode = proc.ExitCode;
+                dependencies.WaitForExit(proc);
+                exitCode = outputRedactor.CaptureFailed ? -1 : proc.ExitCode;
             }
             catch
             {
                 exitCode = -1;
+                try
+                {
+                    if (!proc.HasExited) { proc.Kill(entireProcessTree: true); }
+                    proc.WaitForExit();
+                }
+                catch { }
             }
 
             DateTime finishedUtc = DateTime.UtcNow;
@@ -959,6 +1046,7 @@ internal static partial class RecipeReadModel
             catch { /* best-effort */ }
             try { logWriter.Dispose(); } catch { /* best-effort */ }
             try { proc.Dispose(); } catch { /* best-effort */ }
+            outputRedactor.Dispose();
 
             WriteFinishedSentinel(cookFolderAbs, exitCode, finishedAt, durationSec);
 
@@ -1007,11 +1095,16 @@ internal static partial class RecipeReadModel
             // unconfigured it is a no-op. The payload is metadata-only and the bot
             // token never leaves Windows Credential Manager. A canceled bake flows
             // through this same swallow-all path.
-            TryNotifyBakeTerminal(
-                workspacePath, cookFolderAbs, cookId, status, exitCode, durationSec, errorClass, closureReason);
+            try
+            {
+                dependencies.NotifyTerminal(
+                    workspacePath, cookFolderAbs, cookId, status, exitCode, durationSec, errorClass, closureReason);
+            }
+            catch { }
         }
         finally
         {
+            outputRedactor.Dispose();
             // X6 — always release the cancellation handle once the supervisor has
             // finished, whether the cook completed, errored, was canceled, or the
             // supervisor threw. The live Process was already disposed above; the
@@ -1225,7 +1318,7 @@ internal static partial class RecipeReadModel
         int pid,
         string startedAt,
         string pwshPath,
-        string commandExpr,
+        IReadOnlyList<string> spawnArgv,
         string paxScriptPath,
         string host)
     {
@@ -1235,7 +1328,7 @@ internal static partial class RecipeReadModel
             ["recipeId"] = recipeId,
             ["pid"] = pid,
             ["startedAt"] = startedAt,
-            ["command"] = new List<object?> { pwshPath, "-NoProfile", "-NoLogo", "-Command", commandExpr },
+            ["command"] = new[] { pwshPath }.Concat(spawnArgv).Cast<object?>().ToList(),
             ["pwshPath"] = pwshPath,
             ["paxScriptPath"] = paxScriptPath,
             ["host"] = host,

@@ -26,6 +26,8 @@
 import { LITE_RECIPE_SCHEMA_VERSION, MINI_KITCHEN_CREATED_BY_TOOL } from '../data/mini-kitchen-constants';
 import { createDefaultMiniKitchenRecipe } from './defaultRecipe';
 import { normalizeRecipe } from './normalizeRecipe';
+import { ADVANCED_ARGUMENTS_ERROR, parseAdvancedArguments } from './advancedArgs';
+import { parseRecipeJson } from './parseRecipeJson';
 import { containsLikelySecret } from './secretScanner';
 import type {
   AgentFilterMode,
@@ -113,7 +115,7 @@ const KNOWN_ENVELOPE_KEYS = new Set([
 export function parseLiteRecipeJson(text: string): LiteRecipeImportResult {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = parseRecipeJson(text);
   } catch {
     return {
       ok: false,
@@ -172,6 +174,12 @@ export function validateLiteRecipe(value: unknown): LiteRecipeImportResult {
     };
   }
 
+  const advanced = isObject(recipeValue.advanced) ? recipeValue.advanced : {};
+  if ((advanced.extraArguments !== undefined && typeof advanced.extraArguments !== 'string') ||
+      parseAdvancedArguments((advanced.extraArguments as string | undefined) ?? '').error) {
+    return { ok: false, errors: [ADVANCED_ARGUMENTS_ERROR] };
+  }
+
   const secretHits: string[] = [];
   checkForSecrets(recipeValue, 'recipe', secretHits);
   if (secretHits.length > 0) {
@@ -197,6 +205,8 @@ export function validateLiteRecipe(value: unknown): LiteRecipeImportResult {
  * malformed in-memory shape.
  */
 export function liteRecipeToState(recipe: LiteRecipe): MiniKitchenRecipeState {
+  const error = parseAdvancedArguments(recipe.recipe.advanced.extraArguments ?? '').error;
+  if (error) throw new Error(error);
   return normalizeRecipe(recipe.recipe);
 }
 
@@ -396,7 +406,7 @@ function liteRecipeBlockToState(
       fallback.executionMode,
     ),
     advanced: {
-      extraArguments: readString(advanced.extraArguments) ?? '',
+      extraArguments: typeof advanced.extraArguments === 'string' ? advanced.extraArguments : '',
     },
   };
 

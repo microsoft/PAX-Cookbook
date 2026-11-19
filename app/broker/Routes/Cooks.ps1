@@ -1441,8 +1441,8 @@ function Invoke-CookStart {
     #   - plan.paxCommand     -> <CookFolder>/command.txt          (preview parity)
     #   - plan.paxArgv        -> <CookFolder>/command-argv.json    (structural form)
     #   - plan.spawnArgv      -> cooks.command_argv_json            (DB row; matches the actual ProcessStartInfo.ArgumentList)
-    #   - plan.spawnArgv[3]   -> supervisor -CommandExpr            (literal pwsh `-Command` value)
-    # The supervisor consumes spawnArgv[3] verbatim and MUST NOT
+    #   - plan.spawnArgv      -> supervisor -SpawnArgv              (complete vector)
+    # The supervisor consumes spawnArgv verbatim and MUST NOT
     # rebuild it. Projection rejection (e.g. removed-switch in
     # extraArguments) surfaces as an exception here and is mapped to a
     # 412 recipe_invalid response.
@@ -1628,7 +1628,7 @@ function Invoke-CookStart {
         # rewritten. Authoritative answer to "what argv was projected
         # from this recipe?" -- all four fields come from the same
         # Get-PaxInvocationPlan call as command.txt, the DB row, and
-        # the supervisor's -CommandExpr, so the four sinks cannot drift.
+        # the supervisor's -SpawnArgv, so the four sinks cannot drift.
         $argvDocPath = Join-Path $folder 'command-argv.json'
         $argvDoc = [ordered]@{
             paxArgv        = $plan.paxArgv
@@ -1729,7 +1729,8 @@ function Invoke-CookStart {
         Start-CookSupervisor `
             -CookId               $cookId `
             -RecipeId             $RecipeId `
-            -CommandExpr          $plan.spawnArgv[3] `
+            -SpawnArgv            $plan.spawnArgv `
+            -ParameterJson        $plan.parameterJson `
             -CookFolder           $folder `
             -PwshPath             $pwshPath `
             -PaxScriptPath        $paxPath `
@@ -1812,10 +1813,7 @@ function Invoke-CookResume {
     #     concurrency, re-auth (OpClass='manualCook'), disk precheck,
     #     path-length precheck. Auth profile resolution and secret
     #     read mirror Invoke-CookStart exactly.
-    #   - The recipe validator (Test-RecipeAll) is INTENTIONALLY NOT
-    #     re-run: the snapshot is authoritative; running the current
-    #     validator against a snapshot from an older Cookbook would
-    #     create a meaningless "schema-drifted" refusal.
+    #   - Revalidate the authoritative snapshot before using its auth or output settings.
     param($Context, [string]$CookId)
 
     if ($CookId -notmatch $Script:CookIdPattern) {
@@ -1863,12 +1861,12 @@ function Invoke-CookResume {
     }
     $snapshot = $null
     try {
-        $snapshot = $snapshotJson | ConvertFrom-Json -AsHashtable -Depth 12
+        $snapshot = ConvertFrom-PaxRecipeJson -Json $snapshotJson
     } catch {
         Write-JsonResponse -Context $Context -Status 500 -Body @{
             error   = 'cook_resume_internal'
             cookId  = $CookId
-            message = 'Parent cook recipe_snapshot_json is unparseable: ' + $_.Exception.Message
+            message = 'Parent cook recipe_snapshot_json is unparseable.'
         }
         return
     }
@@ -2011,6 +2009,16 @@ function Invoke-CookResume {
     # but the recipe data source is the frozen snapshot, not a fresh
     # disk read). Auth profile rows are NOT snapshotted; we resolve
     # them live so a rotated secret is picked up.
+    $snapshotValidation = Test-RecipeAll -Recipe $snapshot
+    if (-not $snapshotValidation.ok) {
+        Write-JsonResponse -Context $Context -Status 412 -Body @{
+            error = 'recipe_invalid'
+            cookId = $CookId
+            recipeId = $parentRecipeId
+            errors = $snapshotValidation.errors
+        }
+        return
+    }
     $authMode      = ''
     $authProfileId = ''
     $authProfileRow = $null
@@ -2233,7 +2241,8 @@ function Invoke-CookResume {
         Start-CookSupervisor `
             -CookId               $newCookId `
             -RecipeId             $parentRecipeId `
-            -CommandExpr          $plan.spawnArgv[3] `
+            -SpawnArgv            $plan.spawnArgv `
+            -ParameterJson        $plan.parameterJson `
             -CookFolder           $folder `
             -PwshPath             $pwshPath `
             -PaxScriptPath        $paxPath `
@@ -3246,7 +3255,7 @@ function Invoke-CookReadiness {
     # body). The endpoint is read-only and does NOT spawn PAX, mutate
     # any catalog row, or write any file on disk.
     param($Context)
-    $body = Read-RequestJson -Context $Context
+    $body = Read-RequestJson -Context $Context -RejectAmbiguousProperties
     if ($null -eq $body) {
         Write-JsonResponse -Context $Context -Status 400 -Body @{ error = 'invalid_json' }
         return

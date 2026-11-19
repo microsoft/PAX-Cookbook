@@ -73,7 +73,8 @@ param(
     [string]$SetupVersion  = '',
     [string]$BuildId       = '',
     [string]$Channel       = '',
-    [switch]$SkipReactBuild
+    [switch]$SkipReactBuild,
+    [switch]$DesktopOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -101,6 +102,11 @@ $AppVersion = $release.DisplayVersion
 $SetupVersion = $release.DisplayVersion
 $BuildId = $release.Provenance
 $channel = $release.Channel
+if ($DesktopOnly -and $channel -cne 'experimental') {
+    throw 'Desktop-only scan builds require the experimental channel.'
+}
+$allowUnsignedHelper = if ($DesktopOnly) { 'false' } else { 'true' }
+$expectedHelperCount = if ($DesktopOnly) { 0 } else { 1 }
 $versionProperties = @(
     "-p:Version=$($release.DisplayVersion)"
     "-p:AssemblyVersion=$($release.AssemblyVersion)"
@@ -137,7 +143,11 @@ if ($versionInfo.cookbook.PSObject.Properties.Name -contains 'buildTimestamp') {
     $versionInfo.cookbook | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue $buildTimestamp
 }
 $versionInfo.channel = $release.Channel
-if ($release.Channel -ceq 'internal') { $versionInfo.updateManifestUrl = $null }
+if ($DesktopOnly) {
+    $versionInfo.updateManifestUrl = "https://github.com/microsoft/PAX-Cookbook/releases/download/v$AppVersion/versions.json"
+} elseif ($release.Channel -ceq 'internal') {
+    $versionInfo.updateManifestUrl = $null
+}
 Assert-PaxSetupReleaseWritePath -Contract $release -Path $authoritativeVersionJson -Purpose build | Out-Null
 [IO.File]::WriteAllText(
     $authoritativeVersionJson,
@@ -344,7 +354,7 @@ Invoke-Step '[4b/8] publish Setup framework-dependent (payload\Setup)' {
         -c $Configuration --self-contained false `
         -p:UseAppHost=false -p:DebugType=none -p:DebugSymbols=false `
         -p:PaxChannel=$channel `
-        -p:PrereleaseUnsignedHelper=true `
+        -p:PrereleaseUnsignedHelper=$allowUnsignedHelper `
         -o $pubSetupFd --nologo 2>&1 |
         Tee-Object -Append -FilePath $logFile | Out-Null
 }
@@ -531,116 +541,119 @@ function New-DeterministicServicePayloadArchive {
     }
 }
 
-Invoke-Step '[4c/8] publish PAXCookbook.Service (framework-dependent, no apphost, no symbols)' {
-    dotnet publish (Join-Path $root 'src\PAXCookbook.Service\PAXCookbook.Service.csproj') `
-        -c $Configuration --self-contained false `
-        -p:UseAppHost=false -p:DebugType=none -p:DebugSymbols=false `
-        -o $pubServiceFd --nologo 2>&1 |
-        Tee-Object -Append -FilePath $logFile | Out-Null
-}
-
-# STRUCTURAL ANTI-BLOAT: the service runtime must be exactly the frozen set.
-$serviceFound = New-Object System.Collections.Generic.List[string]
-foreach ($serviceFile in (Get-ChildItem -LiteralPath $pubServiceFd -File -Recurse)) {
-    $serviceFound.Add($serviceFile.FullName.Substring($pubServiceFd.Length).TrimStart('\').Replace('\', '/'))
-}
-$serviceFoundArray = $serviceFound.ToArray()
-[Array]::Sort($serviceFoundArray, [StringComparer]::Ordinal)
-$frozenSorted = $frozenServiceMembers.Clone()
-[Array]::Sort($frozenSorted, [StringComparer]::Ordinal)
-if ($serviceFoundArray.Count -ne $frozenSorted.Count) {
-    throw ("service publish inventory changed: expected {0} files, found {1}. The frozen allow-list must be re-derived deliberately, never widened silently." -f $frozenSorted.Count, $serviceFoundArray.Count)
-}
-for ($i = 0; $i -lt $frozenSorted.Count; $i++) {
-    if ($serviceFoundArray[$i] -cne $frozenSorted[$i]) {
-        throw ("service publish inventory changed at position {0}: expected '{1}', found '{2}'." -f $i, $frozenSorted[$i], $serviceFoundArray[$i])
+if (-not $DesktopOnly) {
+    Invoke-Step '[4c/8] publish PAXCookbook.Service (framework-dependent, no apphost, no symbols)' {
+        dotnet publish (Join-Path $root 'src\PAXCookbook.Service\PAXCookbook.Service.csproj') `
+            -c $Configuration --self-contained false `
+            -p:UseAppHost=false -p:DebugType=none -p:DebugSymbols=false `
+            -o $pubServiceFd --nologo 2>&1 |
+            Tee-Object -Append -FilePath $logFile | Out-Null
     }
-}
-foreach ($serviceMember in $frozenServiceMembers) {
-    if ($serviceMember.EndsWith('.exe') -or $serviceMember.EndsWith('.pdb')) {
-        throw "embedded service runtime must contain no apphost and no symbols: $serviceMember"
-    }
-}
-# Cross-check the packaging allow-list against the compiled contract, so the
-# PowerShell builder and the C# verifier can never drift apart unnoticed.
-$formatSourcePath = Join-Path $root 'src\PAXCookbook.ServiceAdminHelper\Payload\ServicePayloadArchiveFormat.cs'
-$formatSource = [IO.File]::ReadAllText($formatSourcePath)
-foreach ($serviceMember in $frozenServiceMembers) {
-    if ($formatSource.IndexOf(('"' + $serviceMember + '"'), [StringComparison]::Ordinal) -lt 0) {
-        throw "frozen member not declared in ServicePayloadArchiveFormat.cs: $serviceMember"
-    }
-}
-Log ("  service runtime allow-list verified: {0} files, no apphost, no symbols" -f $frozenSorted.Count)
 
-Invoke-Step '[4c/8] build deterministic service payload archive (twice, byte-identity required)' {
-    New-DeterministicServicePayloadArchive -SourceDirectory $pubServiceFd `
-        -DestinationPath $servicePayloadArchive `
-        -OrderedMemberNames $frozenServiceMembers `
-        -ManifestEntryName $servicePayloadManifestName
-
-    $determinismProbe = Join-Path $out 'service-payload.determinism.zip'
-    New-DeterministicServicePayloadArchive -SourceDirectory $pubServiceFd `
-        -DestinationPath $determinismProbe `
-        -OrderedMemberNames $frozenServiceMembers `
-        -ManifestEntryName $servicePayloadManifestName
-
-    $firstBytes = [IO.File]::ReadAllBytes($servicePayloadArchive)
-    $secondBytes = [IO.File]::ReadAllBytes($determinismProbe)
-    if ($firstBytes.LongLength -ne $secondBytes.LongLength) {
-        throw 'deterministic payload archive is not reproducible: lengths differ'
+    # STRUCTURAL ANTI-BLOAT: the service runtime must be exactly the frozen set.
+    $serviceFound = New-Object System.Collections.Generic.List[string]
+    foreach ($serviceFile in (Get-ChildItem -LiteralPath $pubServiceFd -File -Recurse)) {
+        $serviceFound.Add($serviceFile.FullName.Substring($pubServiceFd.Length).TrimStart('\').Replace('\', '/'))
     }
-    for ($i = 0; $i -lt $firstBytes.Length; $i++) {
-        if ($firstBytes[$i] -ne $secondBytes[$i]) {
-            throw "deterministic payload archive is not reproducible: byte $i differs"
+    $serviceFoundArray = $serviceFound.ToArray()
+    [Array]::Sort($serviceFoundArray, [StringComparer]::Ordinal)
+    $frozenSorted = $frozenServiceMembers.Clone()
+    [Array]::Sort($frozenSorted, [StringComparer]::Ordinal)
+    if ($serviceFoundArray.Count -ne $frozenSorted.Count) {
+        throw ("service publish inventory changed: expected {0} files, found {1}. The frozen allow-list must be re-derived deliberately, never widened silently." -f $frozenSorted.Count, $serviceFoundArray.Count)
+    }
+    for ($i = 0; $i -lt $frozenSorted.Count; $i++) {
+        if ($serviceFoundArray[$i] -cne $frozenSorted[$i]) {
+            throw ("service publish inventory changed at position {0}: expected '{1}', observed '{2}'." -f $i, $frozenSorted[$i], $serviceFoundArray[$i])
         }
     }
-    $firstSha = HashOf $servicePayloadArchive
-    $secondSha = HashOf $determinismProbe
-    if ($firstSha -ne $secondSha) { throw 'deterministic payload archive is not reproducible: sha mismatch' }
-    Remove-Item -LiteralPath $determinismProbe -Force
-    Log ("  deterministic service payload archive: {0} bytes sha256={1} (byte-identical on rebuild)" -f (SizeOf $servicePayloadArchive), $firstSha)
-}
+    foreach ($serviceMember in $frozenServiceMembers) {
+        if ($serviceMember.EndsWith('.exe') -or $serviceMember.EndsWith('.pdb')) {
+            throw "embedded service runtime must contain no apphost and no symbols: $serviceMember"
+        }
+    }
+    # Cross-check the packaging allow-list against the compiled contract, so the
+    # PowerShell builder and the C# verifier can never drift apart unnoticed.
+    $formatSourcePath = Join-Path $root 'src\PAXCookbook.ServiceAdminHelper\Payload\ServicePayloadArchiveFormat.cs'
+    $formatSource = [IO.File]::ReadAllText($formatSourcePath)
+    foreach ($serviceMember in $frozenServiceMembers) {
+        if ($formatSource.IndexOf(('"' + $serviceMember + '"'), [StringComparison]::Ordinal) -lt 0) {
+            throw "frozen member not declared in ServicePayloadArchiveFormat.cs: $serviceMember"
+        }
+    }
+    Log ("  service runtime allow-list verified: {0} files, no apphost, no symbols" -f $frozenSorted.Count)
 
-Invoke-Step '[4c/8] publish UNSIGNED PRERELEASE service admin helper (self-contained, single file)' {
-    dotnet publish (Join-Path $root 'src\PAXCookbook.ServiceAdminHelper\PAXCookbook.ServiceAdminHelper.csproj') `
-        -c $Configuration -r win-x64 --self-contained true `
-        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-        -p:EnableCompressionInSingleFile=true `
-        -p:DebugType=none -p:DebugSymbols=false `
-        -p:PrereleaseUnsignedHelper=true `
-        "-p:ServicePayloadArchive=$servicePayloadArchive" `
-        -o $pubHelper --nologo 2>&1 |
-        Tee-Object -Append -FilePath $logFile | Out-Null
-}
+    Invoke-Step '[4c/8] build deterministic service payload archive (twice, byte-identity required)' {
+        New-DeterministicServicePayloadArchive -SourceDirectory $pubServiceFd `
+            -DestinationPath $servicePayloadArchive `
+            -OrderedMemberNames $frozenServiceMembers `
+            -ManifestEntryName $servicePayloadManifestName
 
-$helperExeBuilt = Join-Path $pubHelper $serviceAdminHelperFileName
-if (-not (Test-Path -LiteralPath $helperExeBuilt)) {
-    throw "service admin helper publish did not produce $serviceAdminHelperFileName at: $helperExeBuilt"
+        $determinismProbe = Join-Path $out 'service-payload.determinism.zip'
+        New-DeterministicServicePayloadArchive -SourceDirectory $pubServiceFd `
+            -DestinationPath $determinismProbe `
+            -OrderedMemberNames $frozenServiceMembers `
+            -ManifestEntryName $servicePayloadManifestName
+
+        $firstBytes = [IO.File]::ReadAllBytes($servicePayloadArchive)
+        $secondBytes = [IO.File]::ReadAllBytes($determinismProbe)
+        if ($firstBytes.LongLength -ne $secondBytes.LongLength) {
+            throw 'deterministic payload archive is not reproducible: lengths differ'
+        }
+        for ($i = 0; $i -lt $firstBytes.Length; $i++) {
+            if ($firstBytes[$i] -ne $secondBytes[$i]) {
+                throw "deterministic payload archive is not reproducible: byte $i differs"
+            }
+        }
+        $firstSha = HashOf $servicePayloadArchive
+        $secondSha = HashOf $determinismProbe
+        if ($firstSha -ne $secondSha) { throw 'deterministic payload archive is not reproducible: sha mismatch' }
+        Remove-Item -LiteralPath $determinismProbe -Force
+        Log ("  deterministic service payload archive: {0} bytes sha256={1} (byte-identical on rebuild)" -f (SizeOf $servicePayloadArchive), $firstSha)
+    }
+
+    Invoke-Step '[4c/8] publish UNSIGNED PRERELEASE service admin helper (self-contained, single file)' {
+        dotnet publish (Join-Path $root 'src\PAXCookbook.ServiceAdminHelper\PAXCookbook.ServiceAdminHelper.csproj') `
+            -c $Configuration -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=none -p:DebugSymbols=false `
+            -p:PrereleaseUnsignedHelper=true `
+            "-p:ServicePayloadArchive=$servicePayloadArchive" `
+            -o $pubHelper --nologo 2>&1 |
+            Tee-Object -Append -FilePath $logFile | Out-Null
+    }
+
+    $helperExeBuilt = Join-Path $pubHelper $serviceAdminHelperFileName
+    if (-not (Test-Path -LiteralPath $helperExeBuilt)) {
+        throw "service admin helper publish did not produce $serviceAdminHelperFileName at: $helperExeBuilt"
+    }
+    # STRUCTURAL ANTI-BLOAT: exactly one artifact, and no sibling managed helper
+    # assembly or symbols alongside it.
+    $helperPublished = @(Get-ChildItem -LiteralPath $pubHelper -File -Recurse)
+    if ($helperPublished.Count -ne 1) {
+        throw ("service admin helper publish must produce exactly one file; found {0}: {1}" -f $helperPublished.Count, (($helperPublished | ForEach-Object { $_.Name }) -join ', '))
+    }
+    if ($helperPublished[0].Name -cne $serviceAdminHelperFileName) {
+        throw "service admin helper publish produced an unexpected file: $($helperPublished[0].Name)"
+    }
+    Copy-Item $helperExeBuilt (Join-Path $setupStageDir $serviceAdminHelperFileName) -Force
+    Log ("  staged UNSIGNED PRERELEASE service admin helper: {0} ({1:N1} MiB)" -f $serviceAdminHelperFileName, ((SizeOf $helperExeBuilt) / 1MB))
 }
-# STRUCTURAL ANTI-BLOAT: exactly one artifact, and no sibling managed helper
-# assembly or symbols alongside it.
-$helperPublished = @(Get-ChildItem -LiteralPath $pubHelper -File -Recurse)
-if ($helperPublished.Count -ne 1) {
-    throw ("service admin helper publish must produce exactly one file; found {0}: {1}" -f $helperPublished.Count, (($helperPublished | ForEach-Object { $_.Name }) -join ', '))
-}
-if ($helperPublished[0].Name -cne $serviceAdminHelperFileName) {
-    throw "service admin helper publish produced an unexpected file: $($helperPublished[0].Name)"
-}
-Copy-Item $helperExeBuilt (Join-Path $setupStageDir $serviceAdminHelperFileName) -Force
-Log ("  staged UNSIGNED PRERELEASE service admin helper: {0} ({1:N1} MiB)" -f $serviceAdminHelperFileName, ((SizeOf $helperExeBuilt) / 1MB))
 
 # STRUCTURAL ANTI-BLOAT over the whole staged payload.
 $stagedSetupFiles = @(Get-ChildItem -LiteralPath $setupStageDir -File -Recurse)
-if ($stagedSetupFiles.Count -ne ($setupFdFiles.Count + 1)) {
-    throw ("payload\Setup must contain exactly {0} files; found {1}" -f ($setupFdFiles.Count + 1), $stagedSetupFiles.Count)
+$expectedSetupCount = $setupFdFiles.Count + $expectedHelperCount
+if ($stagedSetupFiles.Count -ne $expectedSetupCount) {
+    throw ("payload\Setup must contain exactly {0} files; found {1}" -f $expectedSetupCount, $stagedSetupFiles.Count)
 }
 $helperCopies = @(Get-ChildItem -LiteralPath $payload -File -Recurse |
     Where-Object { $_.Name -like '*ServiceAdminHelper*' })
-if ($helperCopies.Count -ne 1) {
-    throw ("the payload must carry exactly ONE service admin helper; found {0}" -f $helperCopies.Count)
+if ($helperCopies.Count -ne $expectedHelperCount) {
+    throw ("the payload must carry exactly {0} service admin helpers; found {1}" -f $expectedHelperCount, $helperCopies.Count)
 }
 $expectedHelperPath = Join-Path $setupStageDir $serviceAdminHelperFileName
-if ($helperCopies[0].FullName -ne $expectedHelperPath) {
+if ($expectedHelperCount -eq 1 -and $helperCopies[0].FullName -ne $expectedHelperPath) {
     throw "the service admin helper is not at its one fixed payload path: $($helperCopies[0].FullName)"
 }
 $strayHelpers = @(Get-ChildItem -LiteralPath $payload -File -Recurse |
@@ -660,7 +673,7 @@ $appSymbols = @(Get-ChildItem -LiteralPath $payload -File -Recurse | Where-Objec
 if ($appSymbols.Count -gt 0) {
     Log ("  NOTE (pre-existing, not introduced by the helper): payload carries {0} symbol file(s): {1}" -f $appSymbols.Count, (($appSymbols | ForEach-Object { $_.Name }) -join ', '))
 }
-Log '  payload anti-bloat checks passed: one helper, one fixed path, no Setup symbols, no stray executables'
+Log "  payload anti-bloat checks passed: $expectedHelperCount helper(s), no Setup symbols, no stray executables"
 
 # ---------------------------------------------------------------------
 # [5/7] Write manifest.json
@@ -673,6 +686,7 @@ Invoke-Step '[5/7] write manifest.json' {
         'App\bin\PAX Cookbook.exe'
         'App\bin\PAX Cookbook.dll'
         'App\broker\Start-Broker.ps1'
+        'App\broker\Pax\Invoke-PaxParameters.ps1'
         'App\web\index.html'
         'App\resources\manifest.json'
         'App\resources\pax\PAX_Purview_Audit_Log_Processor.ps1'
@@ -923,14 +937,18 @@ Invoke-Step '[8/8] verify artifact sizes' {
     $helperCompressed = 0
     $zipRead = [System.IO.Compression.ZipFile]::OpenRead($distPayload)
     try {
-        foreach ($zipEntry in $zipRead.Entries) {
-            if ($zipEntry.FullName -like ('*' + $serviceAdminHelperFileName)) {
-                $helperCompressed = $zipEntry.CompressedLength
-            }
+        $helperEntries = @($zipRead.Entries | Where-Object { $_.Name -like '*ServiceAdminHelper*' })
+        if ($helperEntries.Count -ne $expectedHelperCount) {
+            throw ("payload ZIP must carry exactly {0} service admin helpers; found {1}" -f $expectedHelperCount, $helperEntries.Count)
         }
+        if ($expectedHelperCount -eq 1) { $helperCompressed = $helperEntries[0].CompressedLength }
     } finally { $zipRead.Dispose() }
     $headroom = $maxPayloadBytes - $payloadSize
-    Log ("  Helper : {0:N1} MiB compressed inside the payload ZIP (UNSIGNED PRERELEASE)" -f ($helperCompressed/1MB))
+    if ($DesktopOnly) {
+        Log '  Helper : omitted from desktop-only experimental payload'
+    } else {
+        Log ("  Helper : {0:N1} MiB compressed inside the payload ZIP (UNSIGNED PRERELEASE)" -f ($helperCompressed/1MB))
+    }
     Log ("  Headroom: {0:N1} MiB remaining under the 100 MiB payload ceiling" -f ($headroom/1MB))
     Write-Host ("PAYLOAD_HELPER_COMPRESSED_BYTES={0}" -f $helperCompressed)
     Write-Host ("PAYLOAD_HEADROOM_BYTES={0}" -f $headroom)

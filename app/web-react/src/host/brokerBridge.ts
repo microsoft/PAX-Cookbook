@@ -134,6 +134,17 @@ export interface RecipeDeleteBody {
   trashPath: string;
 }
 
+export type RecipeMutationOutcome =
+  | 'committed'
+  | 'committedWithMarkerWarning'
+  | 'unregisterRefused'
+  | 'persistFailedAfterUnregister'
+  | 'failed';
+
+export interface RecipeMutationResponse<T> extends BrokerResponse<T> {
+  outcome: RecipeMutationOutcome;
+}
+
 /** One run requirement the readiness projection evaluated. */
 export interface ReadinessRequirement {
   id: string;
@@ -392,8 +403,8 @@ export function updateRecipe(
   recipeId: string,
   body: Record<string, unknown>,
   options: RecipeRequestOptions = {},
-): Promise<BrokerResponse<RecipeDetailBody>> {
-  return request<RecipeDetailBody>(
+): Promise<RecipeMutationResponse<RecipeDetailBody>> {
+  return requestRecipeMutation<RecipeDetailBody>(
     'PUT',
     RECIPES_PATH + '/' + encodeURIComponent(recipeId),
     body,
@@ -404,21 +415,52 @@ export function updateRecipe(
 /**
  * DELETE /api/v1/recipes/{id} — soft-delete a recipe. The broker moves the
  * recipe file to its trash, stamps a deletion time, and drops it from the
- * active list, answering { recipeId, deletedAt, trashPath }. It deliberately
- * does NOT touch scheduler, cook, or notification state, so a scheduled
- * recipe's OS task must be unregistered separately (deleteScheduledTask) before
- * this is called. It runs no PAX and reads no secret.
+ * active list. The broker checks unregister for a persisted task binding
+ * before committing the delete. It runs no PAX and reads no secret.
  */
 export function deleteRecipe(
   recipeId: string,
   options: RecipeRequestOptions = {},
-): Promise<BrokerResponse<RecipeDeleteBody>> {
-  return request<RecipeDeleteBody>(
+): Promise<RecipeMutationResponse<RecipeDeleteBody>> {
+  return requestRecipeMutation<RecipeDeleteBody>(
     'DELETE',
     RECIPES_PATH + '/' + encodeURIComponent(recipeId),
     undefined,
     options,
   );
+}
+
+async function requestRecipeMutation<T>(
+  method: 'PUT' | 'DELETE',
+  path: string,
+  body: unknown,
+  options: RecipeRequestOptions,
+): Promise<RecipeMutationResponse<T>> {
+  const res = await request<T>(method, path, body, options);
+  if (res.ok) return { ...res, outcome: 'committed' };
+
+  const persistError = method === 'PUT' ? 'persist_failed' : 'delete_failed';
+  const commitFlag = method === 'PUT' ? 'recipeSaved' : 'recipeDeleted';
+  const markerFailure = res.error === 'schedule_skip_marker_clear_failed';
+  const unregisterFailure = res.error === 'schedule_unregistration_failed';
+  if (!markerFailure && !unregisterFailure && res.error !== persistError) {
+    return { ...res, outcome: 'failed' };
+  }
+
+  let outcome: RecipeMutationOutcome = 'failed';
+  if (unregisterFailure && (res.status === 500 || res.status === 502)) {
+    outcome = 'unregisterRefused';
+  } else if (res.status === 500 && (markerFailure || res.error === persistError)) {
+    const flags = JSON.parse(res.rawText) as Record<string, unknown>;
+    if (flags.scheduleUnregistered === true) {
+      if (markerFailure && flags[commitFlag] === true) {
+        outcome = 'committedWithMarkerWarning';
+      } else if (!markerFailure) {
+        outcome = 'persistFailedAfterUnregister';
+      }
+    }
+  }
+  return { ...res, outcome, message: null, validationErrors: null, rawText: '' };
 }
 
 /**

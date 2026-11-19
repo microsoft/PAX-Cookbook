@@ -172,6 +172,7 @@ public static class WizardInstallRunner
             bool transferred = false;
             string? downloadedZipPath = null;
             PayloadDownloader.DownloadResult? download = null;
+            FileStream? verifiedZip = null;
             try
             {
                 cancel.ThrowIfCancellationRequested();
@@ -188,10 +189,6 @@ public static class WizardInstallRunner
                 }
                 else
                 {
-                    // Always pull the LATEST payload from GitHub so re-running Setup
-                    // over an existing install refreshes to the newest version
-                    // instead of reusing a stale local cache. The cache is used only
-                    // as an offline fallback when the download cannot be performed.
                     var downloadResult = await dependencies.Download(ownedRoot, cancel);
                     cancel.ThrowIfCancellationRequested();
 
@@ -199,26 +196,28 @@ public static class WizardInstallRunner
                     {
                         downloadedZipPath = downloadResult.ZipPath;
                         download = downloadResult;
+                        if (!ManifestVerifier.HasPayloadBinding(download.Expectation))
+                            return Fail(SetupExitCodes.InstallFailed, "The release information could not be verified.");
+
+                        verifiedZip = ManifestVerifier.OpenVerifiedPayload(downloadedZipPath, download.Expectation);
+                        if (verifiedZip is null)
+                            return Fail(SetupExitCodes.InstallFailed, "The downloaded payload did not match the verified release information.");
+
                         progress("Extracting installation files…");
                         resolver = new DownloadedPayloadSourceResolver(downloadedZipPath, ownedRoot);
-                    }
-                    else if (LocalCachePayloadSourceResolver.HasCache(installRoot))
-                    {
-                        log.Write("wizard-payload-download-fallback-cache", "warn",
-                            new Dictionary<string, object?> { ["detail"] = downloadResult.Error });
-                        progress("Using previously downloaded installation files…");
-                        resolver = new LocalCachePayloadSourceResolver(installRoot);
                     }
                     else
                     {
                         log.Write("wizard-payload-download-failed", "error",
                             new Dictionary<string, object?> { ["detail"] = downloadResult.Error });
                         return Fail(SetupExitCodes.InstallFailed,
-                            "PAX Cookbook could not be downloaded. Check your internet connection and try again.");
+                            "PAX Cookbook could not be downloaded and verified. Use an approved verified installer or try again.");
                     }
                 }
 
                 var src = resolver.Resolve();
+                verifiedZip?.Dispose();
+                verifiedZip = null;
                 cancel.ThrowIfCancellationRequested();
                 if (!src.Success || string.IsNullOrEmpty(src.PayloadRoot))
                 {
@@ -295,6 +294,7 @@ public static class WizardInstallRunner
             }
             finally
             {
+                verifiedZip?.Dispose();
                 if (!transferred)
                     cleanup.TryCleanup();
             }

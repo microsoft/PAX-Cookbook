@@ -1884,6 +1884,7 @@ function Test-RecipeAll {
     $unsupportedSw      = @(Test-RecipeExtraArgumentsUnsupportedSwitches -Recipe $Recipe)
     $structurallyOwned  = @(Test-RecipeExtraArgumentsStructurallyOwned -Recipe $Recipe)
     $rollupBlock        = @(Test-RecipeRollupBlockers -Recipe $Recipe)
+    $advancedGrammar    = @(Test-RecipeAdvancedArguments -Recipe $Recipe)
     $all = New-Object System.Collections.Generic.List[object]
     foreach ($e in $schemaResult.errors) { $all.Add($e) }
     foreach ($e in $tierErrors)          { $all.Add($e) }
@@ -1902,5 +1903,6 @@ function Test-RecipeAll {
     foreach ($e in $unsupportedSw)       { $all.Add($e) }
     foreach ($e in $structurallyOwned)   { $all.Add($e) }
     foreach ($e in $rollupBlock)         { $all.Add($e) }
+    foreach ($e in $advancedGrammar)     { $all.Add($e) }
     return @{ ok = ($all.Count -eq 0); errors = @($all.ToArray()) }
 }

@@ -3,6 +3,8 @@ using System.Text.RegularExpressions;
 
 namespace PAXCookbook.App;
 
+internal sealed record PaxParameter(string Name, object Value);
+
 // Read-only / non-mutating native port of the recipe validation pipeline
 // (app\broker\Routes\RecipeValidator.ps1): the JSON-schema-subset walker plus
 // the 17 cross-field gates, run in the same order as Test-RecipeAll. Emits
@@ -10,6 +12,152 @@ namespace PAXCookbook.App;
 // oracle byte-for-byte. Pure computation: no I/O, no mutation, no PAX touch.
 internal static class RecipeValidationModel
 {
+    internal const string AdvancedArgumentsError = "advanced.extraArguments requires exact supported option names and literal values. Use single or double quotes for literal strings, invariant numbers, and $true/$false for switches; expressions, duplicates, and structured/auth/output overrides are not allowed.";
+
+    private sealed record AdvancedOption(string Name, Type Type, double Minimum = int.MinValue, double Maximum = int.MaxValue);
+
+    private static readonly AdvancedOption[] AdvancedOptions =
+    {
+        new("BlockHours", typeof(double), 0.016667, 24),
+        new("PartitionHours", typeof(int), 1, 72),
+        new("MaxPartitions", typeof(int), 1, 1000),
+        new("ResultSize", typeof(int), 1, 10000),
+        new("PacingMs", typeof(int), 0, 10000),
+        new("FlatDepth", typeof(int)),
+        new("MaxConcurrency", typeof(int)),
+        new("EnableParallel", typeof(bool)),
+        new("MaxParallelGroups", typeof(int), 0, 50),
+        new("ParallelMode", typeof(string)),
+        new("ExplosionThreads", typeof(int), 0, 32),
+        new("DisableAdaptive", typeof(bool)),
+        new("ProgressSmoothingAlpha", typeof(double), 0, 1),
+        new("HighLatencyMs", typeof(int), 1000, 600000),
+        new("MemoryPressureMB", typeof(int), 256, 32768),
+        new("MaxMemoryMB", typeof(int), -1, 65536),
+        new("StatusIntervalSeconds", typeof(int), 30, 600),
+        new("LowLatencyMs", typeof(int), 100, 600000),
+        new("LowLatencyConsecutive", typeof(int), 1, 10),
+        new("ThroughputDropPct", typeof(int), 1, 100),
+        new("ThroughputSmoothingAlpha", typeof(double), 0, 1),
+        new("AdaptiveConcurrencyCeiling", typeof(int), 1, 50),
+        new("ExportProgressInterval", typeof(int), 1, 10000),
+        new("StreamingSchemaSample", typeof(int), 100, 50000),
+        new("StreamingChunkSize", typeof(int), 100, 50000),
+        new("CircuitBreakerThreshold", typeof(int), 1, 50),
+        new("CircuitBreakerCooldownSeconds", typeof(int), 5, 3600),
+        new("BackoffBaseSeconds", typeof(double), 0.1, 120),
+        new("BackoffMaxSeconds", typeof(int), 1, 600),
+        new("EmitMetricsJson", typeof(bool)),
+        new("AutoCompleteness", typeof(bool)),
+        new("CombineOutput", typeof(bool)),
+        new("Force", typeof(bool)),
+        new("SkipDiagnostics", typeof(bool)),
+        new("SkipVersionCheck", typeof(bool)),
+        new("MaxNetworkOutageMinutes", typeof(int)),
+        new("IncludeTelemetry", typeof(bool)),
+    };
+
+    internal static bool IsAdvancedParameter(PaxParameter parameter) =>
+        AdvancedOptions.Any(option => option.Name == parameter.Name && option.Type == parameter.Value?.GetType());
+
+    internal static bool TryParseAdvancedArguments(string text, out List<PaxParameter> parameters)
+    {
+        parameters = new();
+        if (text.Length > 16384 || text.Contains('\0')) { return false; }
+        var parsed = new List<PaxParameter>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int position = 0;
+        while (position < text.Length)
+        {
+            SkipWhitespace();
+            if (position == text.Length) { break; }
+            if (parsed.Count >= 64 || text[position++] != '-') { return false; }
+            int nameStart = position;
+            while (position < text.Length && char.IsAsciiLetterOrDigit(text[position])) { position++; }
+            string name = text[nameStart..position];
+            var option = AdvancedOptions.FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (option is null || !names.Add(option.Name)) { return false; }
+            bool colon = position < text.Length && text[position] == ':';
+            if (colon) { position++; }
+            else if (position < text.Length && !char.IsWhiteSpace(text[position])) { return false; }
+            SkipWhitespace();
+            if (option.Type == typeof(bool) && !colon && (position == text.Length || text[position] == '-'))
+            {
+                parsed.Add(new(option.Name, true));
+                continue;
+            }
+            if (!ReadLiteral(out string literal)) { return false; }
+            object value;
+            if (option.Type == typeof(bool))
+            {
+                if (literal.Equals("$true", StringComparison.OrdinalIgnoreCase) || literal.Equals("true", StringComparison.OrdinalIgnoreCase)) { value = true; }
+                else if (literal.Equals("$false", StringComparison.OrdinalIgnoreCase) || literal.Equals("false", StringComparison.OrdinalIgnoreCase)) { value = false; }
+                else { return false; }
+            }
+            else if (option.Type == typeof(int))
+            {
+                if (!int.TryParse(literal, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int number) || number < option.Minimum || number > option.Maximum) { return false; }
+                value = number;
+            }
+            else if (option.Type == typeof(double))
+            {
+                if (!double.TryParse(literal, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out double number) ||
+                    !double.IsFinite(number) || number < option.Minimum || number > option.Maximum) { return false; }
+                value = number;
+            }
+            else
+            {
+                if (!new[] { "Off", "On", "Auto" }.Contains(literal, StringComparer.OrdinalIgnoreCase)) { return false; }
+                value = literal;
+            }
+            parsed.Add(new(option.Name, value));
+        }
+        parameters = parsed;
+        return true;
+
+        void SkipWhitespace()
+        {
+            while (position < text.Length && char.IsWhiteSpace(text[position])) { position++; }
+        }
+
+        bool ReadLiteral(out string literal)
+        {
+            literal = string.Empty;
+            if (position == text.Length) { return false; }
+            char quote = text[position];
+            if (quote is '\'' or '"')
+            {
+                position++;
+                var content = new System.Text.StringBuilder();
+                while (position < text.Length)
+                {
+                    char character = text[position++];
+                    if (character == quote)
+                    {
+                        if (position < text.Length && text[position] == quote) { content.Append(quote); position++; }
+                        else
+                        {
+                            literal = content.ToString();
+                            return position == text.Length || char.IsWhiteSpace(text[position]);
+                        }
+                    }
+                    else { content.Append(character); }
+                    if (content.Length > 4096) { return false; }
+                }
+                return false;
+            }
+            int start = position;
+            while (position < text.Length && !char.IsWhiteSpace(text[position]))
+            {
+                char character = text[position++];
+                if (!(char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '+' or '.' or '$')) { return false; }
+                if (position - start > 4096) { return false; }
+            }
+            literal = text[start..position];
+            return literal.Length > 0;
+        }
+    }
+
     // ---- AJV-shaped error helper ----
     private static Dictionary<string, object?> Err(string instancePath, string keyword, string message, Dictionary<string, object?>? prms = null) =>
         new()
@@ -1473,6 +1621,10 @@ internal static class RecipeValidationModel
             UnsupportedSwitchesGate(r, errors);
             StructurallyOwnedGate(r, errors);
             RollupBlockersGate(r, errors);
+            if (!TryParseAdvancedArguments(ExtraArguments(r), out _))
+            {
+                errors.Add(Err("/advanced/extraArguments", "literalArguments", AdvancedArgumentsError));
+            }
         }
 
         return (errors.Count == 0, errors);

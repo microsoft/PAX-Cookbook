@@ -50,7 +50,6 @@ import {
   getRecipe,
   startCook,
   putScheduledTask,
-  deleteScheduledTask,
   getScheduledTask,
 } from '../../host/brokerBridge';
 import type {
@@ -200,6 +199,11 @@ interface ActionStatus {
   text: string;
 }
 
+interface ScheduleDocument {
+  recipeId: string | null;
+  readGeneration: number;
+}
+
 // Map a failed schedule registration (PUT …/scheduled-task) to a bounded,
 // recipe-saved-but-not-scheduled sentence. The recipe itself is already saved
 // at this point, so every message makes clear scheduling did not take — it
@@ -346,7 +350,12 @@ export function MiniKitchenBuilderPreview({
   const [scheduleDraft, setScheduleDraft] = useState<ScheduleDraft>(defaultScheduleDraft());
   const [serverSchedule, setServerSchedule] = useState<ScheduleDraft | null>(null);
   const [scheduleNote, setScheduleNote] = useState<string | null>(null);
+  const [scheduleNeedsRepair, setScheduleNeedsRepair] = useState(false);
   const scheduleBaselineRef = useRef<string>(JSON.stringify(defaultScheduleDraft()));
+  const scheduleDocumentRef = useRef<ScheduleDocument>({ recipeId: null, readGeneration: 0 });
+  const [scheduleLoadPhase, setScheduleLoadPhase] = useState<'draft' | 'loading' | 'unavailable' | 'resolved'>('draft');
+  const canEditSchedule = scheduleLoadPhase === 'draft' || scheduleLoadPhase === 'resolved';
+  useEffect(() => () => { scheduleDocumentRef.current = { recipeId: null, readGeneration: 0 }; }, []);
 
   // Adapter-backed readiness state. This is a read-only check against the local
   // broker: it asks whether the recipe could run and what is still missing,
@@ -635,7 +644,7 @@ export function MiniKitchenBuilderPreview({
       // Load the recipe's current schedule (if any) so the Schedule card opens
       // reflecting what is actually registered. Fire-and-forget: a read failure
       // shows defaults and never blocks opening the recipe.
-      void loadScheduleForRecipe(summary.recipeId);
+      void loadScheduleForRecipe(resetScheduleForDocument(summary.recipeId));
       const openedName =
         mapped.state.identity.name && mapped.state.identity.name.length > 0
           ? `"${mapped.state.identity.name}"`
@@ -749,130 +758,110 @@ export function MiniKitchenBuilderPreview({
     return `Save failed: ${codeLabel}${detailSuffix}`;
   }
 
-  // Reset the schedule card to a disabled default. Used whenever a fresh,
-  // unsaved draft replaces the builder contents (import / file-open): a new
-  // draft is never scheduled until it is saved and a schedule is configured.
-  function resetScheduleForNewDraft() {
+  function resetScheduleForDocument(recipeId: string | null): ScheduleDocument {
+    const document = { recipeId, readGeneration: 0 };
+    scheduleDocumentRef.current = document;
     const fresh = defaultScheduleDraft();
     setScheduleDraft(fresh);
     setServerSchedule(null);
     setScheduleNote(null);
+    setScheduleNeedsRepair(false);
+    setScheduleLoadPhase(recipeId ? 'loading' : 'draft');
     scheduleBaselineRef.current = JSON.stringify(fresh);
+    return document;
   }
 
-  // Read a saved recipe's current schedule from the broker (GET …/scheduled-task)
-  // so the card opens reflecting what is actually registered, with a drift probe.
-  // Read-only: it never registers, runs, or mutates anything. On a read failure
-  // it falls back to defaults and never assumes a schedule exists, so the save
-  // flow can never delete a schedule it could not see.
-  async function loadScheduleForRecipe(recipeId: string) {
+  async function loadScheduleForRecipe(document: ScheduleDocument) {
+    const { recipeId } = document;
+    if (!recipeId || scheduleDocumentRef.current !== document) return;
+    const generation = ++document.readGeneration;
+    setScheduleLoadPhase('loading');
     const res = await getScheduledTask(recipeId);
-    if (res.ok && res.data) {
-      const sched = res.data.schedule ?? null;
+    if (scheduleDocumentRef.current !== document || document.readGeneration !== generation) return;
+    if (res.ok && res.data?.recipeId === recipeId && res.data.schedule !== undefined) {
+      const sched = res.data.schedule;
       const draft = scheduleFromResponse(sched);
       const active = sched && sched.enabled ? draft : null;
       setScheduleDraft(draft);
       setServerSchedule(active);
       scheduleBaselineRef.current = JSON.stringify(draft);
+      setScheduleNeedsRepair(Boolean(active && res.data.drift));
+      setScheduleLoadPhase('resolved');
       if (active && res.data.drift) {
         setScheduleNote(
-          'This recipe is scheduled, but its Windows task looks missing. Save again to re-register it.',
+          'This recipe is scheduled, but its Windows task does not match the saved schedule.',
         );
       } else {
         setScheduleNote(null);
       }
       return;
     }
-    const fresh = defaultScheduleDraft();
-    setScheduleDraft(fresh);
-    setServerSchedule(null);
-    scheduleBaselineRef.current = JSON.stringify(fresh);
-    setScheduleNote(
-      'Could not read this recipe\u2019s current schedule. Configure one here to register it.',
-    );
+    setScheduleNeedsRepair(false);
+    setScheduleLoadPhase('unavailable');
   }
 
-  // Reconcile the recipe's OS schedule AFTER the recipe itself has been saved.
-  // The recipe is already persisted, so a scheduling problem is never fatal — it
-  // is reported as an advisory and the recipe stays saved. Returns the schedule
-  // outcome to fold into the save status, or null when nothing was changed.
-  async function reconcileSchedule(
+  async function registerSchedule(
+    scheduleDocument: ScheduleDocument,
     recipeId: string,
-  ): Promise<{ kind: ActionStatus['kind']; text: string } | null> {
-    const prevHadSchedule = serverSchedule !== null;
-    const action = decideScheduleAction(prevHadSchedule, scheduleDraft);
-    const chefKeyBound = Boolean(state.auth.chefKeyId);
-
-    if (action === 'put') {
-      // Client-side Chef's-Key gate (the broker also returns 409). Without a
-      // bound key the recipe cannot run unattended, so do not attempt to
-      // register — and never delete an existing schedule as a side effect.
-      if (!chefKeyBound) {
-        return {
-          kind: 'info',
-          text: 'Bind a Chef\u2019s Key, then save again to put this recipe on a schedule.',
-        };
-      }
-      const res = await putScheduledTask(recipeId, scheduleToRecurrence(scheduleDraft));
-      if (res.ok && res.data) {
-        const sched = res.data.schedule ?? null;
-        const draft = scheduleFromResponse(sched);
-        const active = sched && sched.enabled ? draft : null;
-        setScheduleDraft(draft);
-        setServerSchedule(active);
-        scheduleBaselineRef.current = JSON.stringify(draft);
-        setScheduleNote(null);
-        return { kind: 'success', text: `Scheduled \u2014 ${describeSchedule(draft)}.` };
-      }
-      return { kind: 'info', text: describeScheduleFailure(res.error, res.status) };
+  ): Promise<ActionStatus | null> {
+    if (scheduleDocumentRef.current !== scheduleDocument) return null;
+    if (!state.auth.chefKeyId) {
+      return { kind: 'info', text: 'Bind a Chef\u2019s Key to put this recipe on a schedule.' };
     }
-
-    if (action === 'delete') {
-      const res = await deleteScheduledTask(recipeId);
-      if (res.ok) {
-        const draft = { ...scheduleDraft, enabled: false };
-        setScheduleDraft(draft);
-        setServerSchedule(null);
-        scheduleBaselineRef.current = JSON.stringify(draft);
-        setScheduleNote(null);
-        return { kind: 'success', text: 'Scheduling turned off.' };
-      }
-      return {
-        kind: 'info',
-        text: 'The schedule could not be turned off. Try saving again.',
-      };
+    const res = await putScheduledTask(recipeId, scheduleToRecurrence(scheduleDraft));
+    if (scheduleDocumentRef.current !== scheduleDocument) return null;
+    if (res.ok && res.data?.schedule?.enabled) {
+      const draft = scheduleFromResponse(res.data.schedule);
+      setScheduleDraft(draft);
+      setServerSchedule(draft);
+      scheduleBaselineRef.current = JSON.stringify(draft);
+      setScheduleNote(null);
+      setScheduleNeedsRepair(false);
+      return { kind: 'success', text: `Scheduled \u2014 ${describeSchedule(draft)}.` };
     }
-
-    // 'none' — nothing to register or remove. Keep the baseline in sync so a
-    // no-op save does not leave the schedule looking dirty.
-    scheduleBaselineRef.current = JSON.stringify(scheduleDraft);
-    return null;
+    return { kind: 'info', text: describeScheduleFailure(res.error, res.status) };
   }
 
-  // Save (create) or update the recipe. Returns true only when the recipe was
-  // actually persisted, so callers like "Save and leave" can continue the
-  // navigation on success and abort it on a block or failure. The ONLY
+  async function handleRepairSchedule() {
+    if (busy || isDirty || !canEditSchedule || !savedRecipeId || !scheduleNeedsRepair || !state.auth.chefKeyId ||
+        decideScheduleAction(true, scheduleDraft) !== 'put') return;
+    setBusy(true);
+    setSaveHint(null);
+    const scheduleDocument = scheduleDocumentRef.current;
+    try {
+      const result = await registerSchedule(scheduleDocument, savedRecipeId);
+      if (result && scheduleDocumentRef.current === scheduleDocument) setScheduleNote(result.text);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Save (create) or update the recipe. Keep a committed warning distinct so
+  // "Save and leave" can show it in the editor without asking for another save. The ONLY
   // requirement to save is a recipe name — saving is decoupled from baking, so
   // an incomplete recipe persists as a draft and the Bake action enforces full
   // completeness separately.
-  async function handleSaveOrUpdate(): Promise<boolean> {
+  async function handleSaveOrUpdate(): Promise<'saved' | 'savedWithWarning' | 'notSaved' | 'superseded'> {
     if (busy) {
-      return false;
+      return 'notSaved';
     }
     const hasName = (state.identity.name ?? '').trim().length > 0;
     if (!hasName) {
       setSaveHint('A recipe name is required to save.');
-      return false;
+      return 'notSaved';
     }
     if (!createBuild.body) {
       // Building the request body failed structurally (rare for a named
       // recipe). Surface a brief inline hint rather than blocking silently.
       setSaveHint('This recipe can\u2019t be saved yet. Check the recipe details above.');
-      return false;
+      return 'notSaved';
     }
     setSaveHint(null);
     setBusy(true);
     setActionStatus({ kind: 'info', text: savedRecipeId ? 'Updating…' : 'Saving…' });
+    const scheduleDocument = scheduleDocumentRef.current;
+    const scheduleChanged = canEditSchedule && JSON.stringify(scheduleDraft) !== scheduleBaselineRef.current;
+    const scheduleAction = scheduleChanged ? decideScheduleAction(serverSchedule !== null, scheduleDraft) : 'none';
 
     try {
       if (savedRecipeId) {
@@ -881,19 +870,41 @@ export function MiniKitchenBuilderPreview({
         });
         if (!updateBody.body) {
           setSaveHint('The recipe still needs some details before it can be updated.');
-          return false;
+          return 'notSaved';
         }
-        const result = await updateRecipe(savedRecipeId, updateBody.body);
-        if (result.ok) {
+        const result = await updateRecipe(savedRecipeId, {
+          ...updateBody.body,
+          scheduleIntent: scheduleAction === 'delete' ? 'disable' : 'preserve',
+        });
+        if (scheduleDocumentRef.current !== scheduleDocument) return 'superseded';
+        if (result.outcome === 'committedWithMarkerWarning') {
           baselineSnapshotRef.current = JSON.stringify(state);
-          const sched = await reconcileSchedule(savedRecipeId);
-          setActionStatus(
-            buildSaveStatus(
-              'Recipe saved.',
-              sched,
-            ),
-          );
-          return true;
+          await loadScheduleForRecipe(scheduleDocument);
+          if (scheduleDocumentRef.current !== scheduleDocument) return 'superseded';
+          setSaveHint('Recipe saved. Its skip-next marker could not be cleared.');
+          return 'savedWithWarning';
+        }
+        if (result.outcome === 'committed') {
+          baselineSnapshotRef.current = JSON.stringify(state);
+          if (scheduleAction === 'delete') {
+            setServerSchedule(null);
+            setScheduleNeedsRepair(false);
+            setScheduleNote(null);
+            scheduleBaselineRef.current = JSON.stringify(scheduleDraft);
+          }
+          return await finishSave(savedRecipeId);
+        }
+        if (result.outcome === 'unregisterRefused') {
+          setSaveHint('PAX Cookbook could not remove the Windows task. The Recipe was not saved.');
+          return 'notSaved';
+        }
+        if (result.outcome === 'persistFailedAfterUnregister') {
+          setSaveHint('The Windows task is no longer registered, but PAX Cookbook could not save the Recipe. Check the Recipe and its schedule before making more changes.');
+          return 'notSaved';
+        }
+        if (result.error === 'schedule_skip_marker_clear_failed') {
+          setSaveHint('PAX Cookbook could not confirm whether the Recipe was saved. Reopen it to check.');
+          return 'notSaved';
         }
         setSaveHint(
           describeBrokerFailure(
@@ -904,9 +915,10 @@ export function MiniKitchenBuilderPreview({
             result.status,
           ),
         );
-        return false;
+        return 'notSaved';
       }
       const result = await createRecipe(createBuild.body);
+      if (scheduleDocumentRef.current !== scheduleDocument) return 'superseded';
       if (result.ok) {
         const newId =
           result.data && typeof result.data.recipeId === 'string'
@@ -914,16 +926,11 @@ export function MiniKitchenBuilderPreview({
             : null;
         if (newId) {
           setSavedRecipeId(newId);
+          scheduleDocument.recipeId = newId;
+          setScheduleLoadPhase('resolved');
         }
         baselineSnapshotRef.current = JSON.stringify(state);
-        const sched = newId ? await reconcileSchedule(newId) : null;
-        setActionStatus(
-          buildSaveStatus(
-            'Recipe saved.',
-            sched,
-          ),
-        );
-        return true;
+        return await finishSave(newId);
       }
       setSaveHint(
         describeBrokerFailure(
@@ -934,9 +941,25 @@ export function MiniKitchenBuilderPreview({
           result.status,
         ),
       );
-      return false;
+      return 'notSaved';
     } finally {
       setBusy(false);
+    }
+
+    async function finishSave(recipeId: string | null): Promise<'saved' | 'savedWithWarning' | 'superseded'> {
+      const result = recipeId && scheduleAction === 'put' ? await registerSchedule(scheduleDocument, recipeId) : null;
+      if (scheduleDocumentRef.current !== scheduleDocument) return 'superseded';
+      if (result?.kind === 'info') {
+        setSaveHint(`Recipe saved. ${result.text}`);
+        return 'savedWithWarning';
+      }
+      if (scheduleChanged && scheduleDraft.enabled && !result) {
+        setSaveHint('Recipe saved. The schedule was not changed. Check its recurrence.');
+        return 'savedWithWarning';
+      }
+      if (scheduleAction === 'none' && scheduleChanged) scheduleBaselineRef.current = JSON.stringify(scheduleDraft);
+      setActionStatus(buildSaveStatus('Recipe saved.', result));
+      return 'saved';
     }
   }
 
@@ -1243,7 +1266,7 @@ export function MiniKitchenBuilderPreview({
     setSavedRecipeId(null);
     // The imported recipe becomes the clean baseline for the unsaved-edits prompt.
     baselineSnapshotRef.current = JSON.stringify(result.state);
-    resetScheduleForNewDraft();
+    resetScheduleForDocument(null);
     const warned = result.warnings.length;
     const warnNote =
       warned > 0
@@ -1273,7 +1296,7 @@ export function MiniKitchenBuilderPreview({
     setSavedRecipeId(null);
     // The imported recipe becomes the clean baseline for the unsaved-edits prompt.
     baselineSnapshotRef.current = JSON.stringify(result.state);
-    resetScheduleForNewDraft();
+    resetScheduleForDocument(null);
     setActionStatus({
       kind: 'success',
       text: `Imported from full PAX recipe: ${fileName}. Review the details above, then Save when it is ready.`,
@@ -1583,7 +1606,9 @@ export function MiniKitchenBuilderPreview({
     : isUserInfoOnly
     ? (state.destinations.userInfo.path ?? '').trim() || 'Not set'
     : (state.destinations.fact.path ?? '').trim() || 'Not set';
-  const reviewScheduleText = serverSchedule
+  const reviewScheduleText = !canEditSchedule
+    ? scheduleLoadPhase === 'loading' ? 'Loading schedule...' : 'Schedule unavailable'
+    : serverSchedule
     ? `Scheduled \u2014 ${describeSchedule(serverSchedule)}`
     : 'Not scheduled';
 
@@ -1959,10 +1984,9 @@ export function MiniKitchenBuilderPreview({
                 </>
               ) : null}
 
-              {/* Step 6 — Schedule (optional): the ScheduleCard, gated on a bound
-                  Chef's Key. Relocated here from the former Sign-in & Context
-                  step; its props and behavior are unchanged. */}
               {activeStep === 6 ? (
+                canEditSchedule ? (
+                <>
                 <ScheduleCard
                   value={scheduleDraft}
                   onChange={setScheduleDraft}
@@ -1971,6 +1995,30 @@ export function MiniKitchenBuilderPreview({
                   onGoToAuthStep={() => setActiveStep(2)}
                   statusNote={scheduleNote}
                 />
+                {scheduleNeedsRepair && state.auth.chefKeyId ? (
+                  <button
+                    type="button"
+                    className="mk-preview-boundary__btn"
+                    disabled={busy || isDirty}
+                    onClick={() => { void handleRepairSchedule(); }}
+                  >
+                    Repair schedule
+                  </button>
+                ) : null}
+                </>
+                ) : (
+                  <div className="mk-callout mk-callout--warning">
+                    <p role="status">{reviewScheduleText}</p>
+                    <button
+                      type="button"
+                      className="mk-preview-boundary__btn"
+                      disabled={busy}
+                      onClick={() => { void loadScheduleForRecipe(scheduleDocumentRef.current); }}
+                    >
+                      Reload schedule
+                    </button>
+                  </div>
+                )
               ) : null}
 
               {/* Step 7 — Review + Save. The customer reads a plain, read-only
@@ -2557,15 +2605,15 @@ export function MiniKitchenBuilderPreview({
           saving={busy}
           onSaveAndLeave={() => {
             const intent = navIntent;
+            const scheduleDocument = scheduleDocumentRef.current;
             void (async () => {
               const saved = await handleSaveOrUpdate();
-              setNavIntent(null);
-              if (saved) {
+              setNavIntent(current => current === intent ? null : current);
+              if (saved === 'superseded' || scheduleDocumentRef.current !== scheduleDocument) return;
+              if (saved === 'saved') {
                 intent.proceed();
               } else {
-                // Blocked (missing details) or failed — the save-requirements
-                // dialog / error is already shown. Cancel the navigation and
-                // keep the operator in the builder.
+                // Keep the operator in the builder to read the warning or error.
                 intent.cancel();
               }
             })();

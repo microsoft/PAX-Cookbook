@@ -17,6 +17,7 @@
  * credential store, and never constructs or runs a command.
  */
 
+import { parseAdvancedArguments } from './advancedArgs';
 import {
   COOKBOOK_RECIPE_SCHEMA_VERSION,
   LITE_RECIPE_SCHEMA_VERSION,
@@ -60,7 +61,7 @@ export function buildRecipeRequestBody(
   options: BuildRecipeRequestBodyOptions = {},
 ): RecipeRequestBodyBuild {
   const candidate = result.fullRecipeCandidate;
-  if (!candidate) {
+  if (!result.ok || !candidate || parseAdvancedArguments(candidate.advanced?.extraArguments ?? '').error) {
     return { ok: false, body: null, droppedForSchema: [] };
   }
 

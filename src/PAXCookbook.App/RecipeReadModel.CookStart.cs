@@ -271,7 +271,7 @@ internal static partial class RecipeReadModel
         PaxAdapter.InvocationPlan plan;
         try
         {
-            plan = PaxAdapter.GetInvocationPlan(recipe, engine.ManagedEnginePath, chefKeyRow, "local-manual");
+            plan = PaxAdapter.GetInvocationPlan(recipe, engine.ManagedEnginePath, chefKeyRow, "local-manual", versionInfo.AppRoot);
         }
         catch (PaxAdapter.ProjectionException ex)
         {

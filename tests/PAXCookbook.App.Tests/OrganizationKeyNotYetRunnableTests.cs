@@ -671,16 +671,61 @@ public sealed class OrganizationKeyNotYetRunnableTests
           "chefKeyId": "no-such-personal-key"
         }
         """);
+        int personalLookups = 0;
 
         RecipePreviewModel.ProjectionResult projection = RecipePreviewModel.Project(
             "C:\\PAXCookbookTestWorkspace", "C:\\PAXCookbookTestEngine\\pax.ps1", Version(), recipe,
-            ReadyLocalAuthority());
+            ReadyLocalAuthority(), keyId =>
+            {
+                personalLookups++;
+                Assert.Equal("no-such-personal-key", keyId);
+                return null;
+            });
 
+        Assert.Equal(1, personalLookups);
         Assert.False(projection.Ok);
         string json = JsonSerializer.Serialize(projection.ErrorBody);
         // The pre-existing personal error is preserved verbatim.
         Assert.Contains("chefKeyNotFound", json, StringComparison.Ordinal);
         Assert.DoesNotContain("organization_key_not_yet_runnable", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void P03_InvalidPersonalPreview_NeverResolvesKey()
+    {
+        Dictionary<string, object?> recipe = RecipeWithAuth($$"""
+        {
+          "mode": "AppRegistrationCertificate",
+          "tenantId": "{{TenantId}}",
+          "chefKeyId": "no-such-personal-key"
+        }
+        """);
+        int personalLookups = 0;
+        Func<string?, ChefKeyModel.ChefKeyResolved?> resolveChefKey = keyId =>
+        {
+            personalLookups++;
+            Assert.Equal("no-such-personal-key", keyId);
+            return null;
+        };
+
+        RecipePreviewModel.ProjectionResult valid = RecipePreviewModel.Project(
+            "C:\\PAXCookbookTestWorkspace", "C:\\PAXCookbookTestEngine\\pax.ps1", Version(), recipe,
+            ReadyLocalAuthority(), resolveChefKey);
+        Assert.Equal(1, personalLookups);
+        Assert.Contains("chefKeyNotFound", JsonSerializer.Serialize(valid.ErrorBody), StringComparison.Ordinal);
+
+        recipe["identity"] = null;
+        personalLookups = 0;
+        RecipePreviewModel.ProjectionResult invalid = RecipePreviewModel.Project(
+            "C:\\PAXCookbookTestWorkspace", "C:\\PAXCookbookTestEngine\\pax.ps1", Version(), recipe,
+            ReadyLocalAuthority(), resolveChefKey);
+
+        Assert.Equal(0, personalLookups);
+        Assert.False(invalid.Ok);
+        Assert.Equal(400, invalid.Status);
+        Assert.Null(invalid.Plan);
+        Assert.Null(invalid.AuthRow);
+        Assert.Contains("validation_failed", JsonSerializer.Serialize(invalid.ErrorBody), StringComparison.Ordinal);
     }
 
     // =========================================================================

@@ -21,7 +21,6 @@ import {
   getRecipeReadiness,
   createRecipe,
   deleteRecipe,
-  deleteScheduledTask,
   listCooks,
   getCook,
   startCook,
@@ -32,7 +31,7 @@ import type {
   RecipeReadinessBody,
 } from '../host/brokerBridge';
 import { listChefKeys } from '../host/chefKeys';
-import { getRuntimeVersion, getPaxEngineState } from '../host/systemInfo';
+import { getRuntimeVersion } from '../host/systemInfo';
 import { MiniKitchenBuilderPreview } from '../features/mini-kitchen/MiniKitchenBuilderPreview';
 import {
   ImportCommandModal,
@@ -44,7 +43,6 @@ import { translateLiteRecipeToFullRecipe } from '../features/mini-kitchen/lib/tr
 import { buildRecipeRequestBody } from '../features/mini-kitchen/lib/candidateToRecipeBody';
 import { fullRecipeToState } from '../features/mini-kitchen/lib/fullRecipeToState';
 import { resolvePermissions } from '../features/mini-kitchen/lib/permissionsResolver';
-import { renderPaxCommand } from '../features/mini-kitchen/lib/commandRenderer';
 import { createRecipeFromPreset } from '../features/mini-kitchen/lib/defaultRecipe';
 import { pickAndParseRecipeFile } from '../features/mini-kitchen/lib/recipeFileImport';
 import {
@@ -127,8 +125,7 @@ function describeBakeDestination(state: MiniKitchenRecipeState): string {
 // Read the selected recipe's persisted schedule block defensively. The full
 // recipe carries an optional `schedule` object ({ enabled, recurrence, ... });
 // this guards every access and returns true only for an enabled schedule. Used
-// to decide whether a delete must first unregister the recipe's OS task and to
-// drive the delete modal's "schedule will also be removed" note.
+// to drive the delete modal's "schedule will also be removed" note.
 function isRecipeScheduled(recipe: Record<string, unknown> | null): boolean {
   if (!recipe || typeof recipe !== 'object') {
     return false;
@@ -160,26 +157,6 @@ function describeDeleteFailure(res: {
     return 'That recipe is no longer in PAX Cookbook. Refresh the list.';
   }
   return 'PAX Cookbook could not delete this recipe. Try again.';
-}
-
-// Map a failed schedule removal (the step that must precede deleting a
-// scheduled recipe) to one bounded sentence. Every message makes clear the
-// recipe was NOT deleted, so its OS task is never orphaned.
-function describeScheduleRemovalFailure(res: {
-  error: string | null;
-  networkError: string | null;
-  status: number;
-}): string {
-  if (res.networkError) {
-    return 'Could not reach PAX Cookbook to remove this recipe\u2019s schedule, so it was not deleted. Try again.';
-  }
-  if (res.status === 401) {
-    return 'PAX Cookbook needs you to sign in again before it can remove this recipe\u2019s schedule, so it was not deleted. Try again.';
-  }
-  if (res.status === 423) {
-    return 'PAX Cookbook is locked right now. Unlock it, then try deleting again \u2014 the recipe was not deleted.';
-  }
-  return 'PAX Cookbook could not remove this recipe\u2019s schedule, so it was not deleted. Try again.';
 }
 
 type Mode =
@@ -227,7 +204,6 @@ export function RecipesWorkspace() {
   // error leaves it null and the row is omitted. This is the same value Settings
   // shows; it surfaces no secret, no path, and no new execution channel.
   const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [enginePath, setEnginePath] = useState<string | null>(null);
 
   // Friendly Chef's Key names (id → displayName) so the detail summary shows the
   // saved name instead of the raw id. Fetched once, fail-soft; only id +
@@ -275,6 +251,7 @@ export function RecipesWorkspace() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteWarning, setDeleteWarning] = useState<string | null>(null);
 
   // Export — a pure client-side download of the selected saved recipe as a full
   // `.pax` recipe. The detail card's Export (.pax) button calls this handler; it
@@ -548,29 +525,6 @@ export function RecipesWorkspace() {
     };
   }, []);
 
-  // Fetch the managed engine path once on mount for the resume command preview.
-  // Read-only GET of the same engine-state route the overlay and Settings use; no
-  // secret is involved — the managed engine path is non-secret display data (it
-  // already appears in Bakes output paths). Fail-soft and cancellation-guarded:
-  // any error leaves it null and the modal falls back to a readable token.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await getPaxEngineState();
-        if (cancelled || !res.ok) {
-          return;
-        }
-        setEnginePath(res.data.managedEnginePath);
-      } catch {
-        // Fail-soft: leave the engine path null; the preview uses a readable token.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // Graph API permissions the selected recipe will require at runtime, derived
   // purely from the loaded recipe detail. `fullRecipeToState` projects the
   // persisted recipe back into builder state and `resolvePermissions` reports
@@ -805,13 +759,8 @@ export function RecipesWorkspace() {
     setDeleteError(null);
   }
 
-  // Delete the selected recipe through the broker. A scheduled recipe owns a
-  // per-user Windows Task; recipe-delete is a soft delete that does NOT cascade
-  // to the scheduler, so when the recipe is scheduled its OS task is
-  // unregistered FIRST (deleteScheduledTask) — if that fails the recipe is left
-  // in place so its task is never orphaned. On success the selection is cleared
-  // the same way a fresh selection resets it and the list is reloaded (which
-  // drops the soft-deleted recipe). This runs no PAX and starts no cook.
+  // The broker checks task cleanup before committing the ordinary delete.
+  // On commit, clear the selection and reload the active list.
   async function runDelete(): Promise<void> {
     if (deleteSubmitting || !selectedId) {
       return;
@@ -819,17 +768,14 @@ export function RecipesWorkspace() {
     const recipeId = selectedId;
     setDeleteSubmitting(true);
     setDeleteError(null);
+    setDeleteWarning(null);
     try {
-      if (isRecipeScheduled(detail)) {
-        const sched = await deleteScheduledTask(recipeId);
-        if (!sched.ok) {
-          setDeleteError(describeScheduleRemovalFailure(sched));
-          return;
-        }
-      }
       const res = await deleteRecipe(recipeId);
-      if (res.ok) {
+      if (res.outcome === 'committed' || res.outcome === 'committedWithMarkerWarning') {
         setDeleteConfirmOpen(false);
+        if (res.outcome === 'committedWithMarkerWarning') {
+          setDeleteWarning('Recipe deleted. Its skip-next marker could not be cleared.');
+        }
         // Clear the selection the same way selectRecipe resets state, so the
         // detail / readiness / advanced panes return to their empty state. The
         // diagnostics effect clears itself when selectedId becomes null.
@@ -842,6 +788,18 @@ export function RecipesWorkspace() {
         setReadinessError(null);
         setAdvancedOpen(false);
         await reloadRecipes();
+        return;
+      }
+      if (res.outcome === 'unregisterRefused') {
+        setDeleteError('PAX Cookbook could not remove the Windows task. The Recipe was not deleted.');
+        return;
+      }
+      if (res.outcome === 'persistFailedAfterUnregister') {
+        setDeleteError('The Windows task is no longer registered, but PAX Cookbook could not delete the Recipe. Check the Recipe and its schedule before making more changes.');
+        return;
+      }
+      if (res.error === 'schedule_skip_marker_clear_failed') {
+        setDeleteError('PAX Cookbook could not confirm whether the Recipe was deleted. Refresh the list to check.');
         return;
       }
       setDeleteError(describeDeleteFailure(res));
@@ -878,7 +836,7 @@ export function RecipesWorkspace() {
       };
     }
     const state = projection.state;
-    const command = renderPaxCommand(state).singleLine;
+    const command = readiness?.command;
     return {
       recipeName,
       authSummary: describeBakeAuth(state),
@@ -1191,9 +1149,7 @@ export function RecipesWorkspace() {
   // whose detail has loaded. The selected recipe is the persisted on-disk recipe
   // — saved + clean by definition — so a draft can never reach this button.
   const canBake = selectedId !== null && detailPhase === 'loaded';
-  // Whether the selected recipe has an enabled schedule. Drives the delete
-  // modal's "schedule will also be removed" note and the delete flow's
-  // unschedule-first step.
+  // Whether the selected recipe has an enabled schedule, for the delete modal note.
   const isScheduledForSelected = isRecipeScheduled(detail);
   // Friendly name for the delete confirmation modal (never a secret or path).
   const deleteRecipeName =
@@ -1277,6 +1233,8 @@ export function RecipesWorkspace() {
           <span>Resume from checkpoint</span>
         </button>
       </div>
+
+      {deleteWarning ? <p className="dvw-card__muted" role="status">{deleteWarning}</p> : null}
 
       {importError ? (
         <p
@@ -1370,7 +1328,6 @@ export function RecipesWorkspace() {
             chefKeys={chefKeyList}
             submitting={resumeSubmitting}
             error={resumeError}
-            enginePath={enginePath}
             onCancel={handleResumeCancel}
             onConfirm={handleResumeConfirm}
             onNavigate={() => {

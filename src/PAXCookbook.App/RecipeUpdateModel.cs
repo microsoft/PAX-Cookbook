@@ -8,8 +8,8 @@ namespace PAXCookbook.App;
 // app\broker\Routes\Recipes.ps1). PUT /api/v1/recipes/{id} replaces the body of
 // an existing, non-deleted recipe: it re-validates with the same validator the
 // oracle uses, preserves the server-owned provenance leaves, writes the recipe
-// file in place, and updates exactly one recipe row. It never invokes PAX,
-// never reads or mutates the PAX bytes, and never touches cook / scheduler /
+// file in place, and updates exactly one recipe row. Disabling a saved schedule
+// requires confirmed unregister first. It never invokes PAX or touches cook or
 // notification state.
 //
 // Parity is decision parity, not byte parity: the persisted JSON is produced by
@@ -38,7 +38,18 @@ internal static class RecipeUpdateModel
     // Oracle: Invoke-RecipeUpdate. Returns (httpStatus, body). The recipe-id
     // format is validated by the caller before this is invoked.
     public static (int Status, object Body) Handle(
-        string workspacePath, VersionInfo versionInfo, string recipeId, object? body)
+        string workspacePath, string appRoot, VersionInfo versionInfo, string recipeId, object? body,
+        string? registrarPathOverride = null, string? pwshOverride = null)
+    {
+        lock (RecipeScheduleModel.GetMutationGate(workspacePath, recipeId))
+        {
+            return HandleCore(workspacePath, appRoot, versionInfo, recipeId, body, registrarPathOverride, pwshOverride);
+        }
+    }
+
+    private static (int Status, object Body) HandleCore(
+        string workspacePath, string appRoot, VersionInfo versionInfo, string recipeId, object? body,
+        string? registrarPathOverride, string? pwshOverride)
     {
         // Oracle: Get-RecipeRow; not found OR soft-deleted -> 404 not_found.
         // This precedes the body parse so a missing row wins over a bad body.
@@ -52,6 +63,16 @@ internal static class RecipeUpdateModel
         if (body is not Dictionary<string, object?> recipe)
         {
             return (400, new { error = "invalid_json" });
+        }
+
+        bool preserveSchedule = false;
+        if (recipe.Remove("scheduleIntent", out object? scheduleIntent))
+        {
+            if (scheduleIntent is not ("preserve" or "disable") || recipe.ContainsKey("schedule"))
+            {
+                return (400, new { error = "invalid_schedule_intent" });
+            }
+            preserveSchedule = scheduleIntent is "preserve";
         }
 
         // Oracle: if $body.recipeId present AND != url id -> 400 id_mismatch.
@@ -95,6 +116,10 @@ internal static class RecipeUpdateModel
         }
 
         Dictionary<string, object?>? existingRecipe = existing.Recipe;
+        if (preserveSchedule && existingRecipe is not null && existingRecipe.TryGetValue("schedule", out var savedSchedule))
+        {
+            recipe["schedule"] = savedSchedule;
+        }
 
         // Server-owned fields. recipeId / schema version / bundled-PAX version
         // are re-asserted; createdAt is preserved from the index row; updatedAt
@@ -156,10 +181,19 @@ internal static class RecipeUpdateModel
         string finalPath = RecipeFilePath(workspacePath, recipeId);
         byte[]? oldBytes = File.Exists(finalPath) ? File.ReadAllBytes(finalPath) : null;
 
-        string fileHash = WriteRecipeFile(finalPath, recipe);
+        var storedSchedule = existingRecipe is null ? null : RecipeReadModel.ProjectSchedule(existingRecipe);
+        bool removeSchedule = storedSchedule is { Enabled: true } &&
+            RecipeReadModel.ProjectSchedule(recipe) is not { Enabled: true };
+        if (removeSchedule && RecipeScheduleModel.TryUnregisterTaskForRecipe(
+            workspacePath, appRoot, recipeId, storedSchedule?.ScheduledTaskId,
+            registrarPathOverride, taskFolderOverride: null, pwshOverride) is { } refusal)
+        {
+            return refusal;
+        }
 
         try
         {
+            string fileHash = WriteRecipeFile(finalPath, recipe);
             int affected = UpdateRecipeRow(
                 workspacePath,
                 recipeId: recipeId,
@@ -173,6 +207,7 @@ internal static class RecipeUpdateModel
                 return (500, new
                 {
                     error = "persist_failed",
+                    scheduleUnregistered = removeSchedule,
                     message = "The recipe index row could not be updated; the recipe file was rolled back.",
                 });
             }
@@ -183,11 +218,16 @@ internal static class RecipeUpdateModel
             return (500, new
             {
                 error = "persist_failed",
+                scheduleUnregistered = removeSchedule,
                 message = "The recipe index row could not be updated; the recipe file was rolled back.",
                 detail = ex.Message,
             });
         }
 
+        if (removeSchedule && !ScheduleSkipMarker.TryClear(workspacePath, recipeId))
+        {
+            return (500, new { error = "schedule_skip_marker_clear_failed", recipeId, recipeSaved = true, scheduleUnregistered = true });
+        }
         return (200, new { recipeId, recipe });
     }
 

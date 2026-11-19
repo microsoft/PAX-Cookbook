@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace PAXCookbookSetup.Gui;
 
@@ -10,9 +11,6 @@ namespace PAXCookbookSetup.Gui;
 // embedding it, so a payload update only requires updating the manifest in the
 // repo — the signed Setup EXE never has to change.
 //
-// Graceful degradation: if the manifest cannot be fetched or parsed (offline,
-// corporate proxy, GitHub blocked), TryFetchAsync returns null and the caller
-// falls back to the zip-integrity check only.
 public sealed class ManifestVerifier
 {
     public const string ManifestUrl =
@@ -26,8 +24,80 @@ public sealed class ManifestVerifier
     // when the manifest omits it; callers verify only the fields that are set.
     public sealed record PayloadExpectation(string? Sha256, long? Size, string? Version);
 
-    // Downloads and parses versions.json. Returns null (never throws, except on
-    // cancellation) so the install can degrade to zip-integrity-only checking.
+    internal const string PayloadFileName = "PAX_Cookbook_Payload.zip";
+    private const string ReleaseDownloadRoot = "https://github.com/microsoft/PAX-Cookbook/releases/download/";
+
+    internal static string ReleaseAssetUrl(string version, string asset) => ReleaseDownloadRoot + "v" + version + "/" + asset;
+
+    internal static bool IsReleaseVersion(string? version, string channel) => version is not null &&
+        (channel switch
+        {
+            SetupChannel.Stable => Regex.IsMatch(version, @"\A[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?\z"),
+            SetupChannel.Experimental => Regex.IsMatch(version, @"\A[0-9]+\.[0-9]+\.[0-9]+-exp\.[1-9][0-9]*\z"),
+            _ => false,
+        });
+
+    internal static bool HasPayloadBinding(PayloadExpectation? expectation) =>
+        expectation is { Size: > 0, Sha256.Length: 64 } && expectation.Sha256.All(Uri.IsHexDigit);
+
+    internal static FileStream? OpenVerifiedPayload(string path, PayloadExpectation? expectation)
+    {
+        if (!HasPayloadBinding(expectation)) return null;
+        var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        try
+        {
+            if (stream.Length == expectation!.Size &&
+                Convert.ToHexString(SHA256.HashData(stream)).Equals(expectation.Sha256, StringComparison.OrdinalIgnoreCase))
+                return stream;
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+        stream.Dispose();
+        return null;
+    }
+
+    internal static PayloadExpectation? ParseReleaseMetadata(string? json, string channel, string? selectedVersion = null)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            JsonElement root = document.RootElement;
+            if (!HasUniqueProperties(root) || !root.TryGetProperty("schemaVersion", out var schema) ||
+                schema.ValueKind != JsonValueKind.Number || !schema.TryGetInt32(out int versionNumber) || versionNumber != 1 ||
+                !root.TryGetProperty("current", out var current) || !HasUniqueProperties(current) ||
+                !current.TryGetProperty("payload", out var payload) || !HasUniqueProperties(payload)) return null;
+
+            string? version = ReadText(current, "version");
+            if (!IsReleaseVersion(version, channel) || (selectedVersion is not null && version != selectedVersion) ||
+                ReadText(payload, "filename") != PayloadFileName) return null;
+
+            // Only the historical stable feed lacks an explicit channel field.
+            if (current.TryGetProperty("channel", out _) ? ReadText(current, "channel") != channel : channel != SetupChannel.Stable)
+                return null;
+
+            string? hash = ReadText(payload, "sha256");
+            long? size = payload.TryGetProperty("size", out var number) && number.ValueKind == JsonValueKind.Number &&
+                number.TryGetInt64(out long length) ? length : null;
+            var expectation = new PayloadExpectation(hash, size, version);
+            return HasPayloadBinding(expectation) ? expectation : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static bool HasUniqueProperties(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return false;
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return element.EnumerateObject().All(property => names.Add(property.Name));
+    }
+
+    private static string? ReadText(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
     public async Task<PayloadExpectation?> TryFetchAsync(CancellationToken cancel)
     {
         if (!PrereqDownloadHosts.IsAllowed(ManifestUrl))
@@ -44,8 +114,7 @@ public sealed class ManifestVerifier
             using var resp = await http.GetAsync(ManifestUrl,
                 HttpCompletionOption.ResponseContentRead, cancel);
 
-            // Reject redirects rather than chasing them (SSRF hygiene); a missing
-            // or moved manifest simply degrades to integrity-only verification.
+            // The approved stable feed is fixed and is not followed through redirects.
             if ((int)resp.StatusCode >= 300 && (int)resp.StatusCode < 400)
             {
                 _log.Write("manifest-fetch-redirect", "warning",
@@ -60,7 +129,7 @@ public sealed class ManifestVerifier
             }
 
             var json = await resp.Content.ReadAsStringAsync(cancel);
-            var parsed = Parse(json);
+            var parsed = ParseReleaseMetadata(json, SetupChannel.Stable);
             if (parsed is null)
             {
                 _log.Write("manifest-parse-failed", "warning");

@@ -20,11 +20,10 @@ namespace PAXCookbook.App;
 //     be truly zeroed. The realistic mitigation is lifetime minimization: the
 //     caller removes the entry from the parent ProcessStartInfo.Environment the
 //     moment the child has inherited the env block (see ScrubSecretEnv), so the
-//     string is unreferenced and GC-eligible almost immediately after spawn.
-//   * The GRAPH_* values are NEVER written to cook.log, the started/finished/
-//     interrupted sentinels, command.txt / command-argv.json, the readiness
-//     snapshot, the cook row, or any route response. Only the child's env block
-//     ever carries them.
+//     output redactor retains the known literal until output drainage completes.
+//     Clearing parent references does not erase the child's inherited copy.
+//   * The supervisor sanitizes captured output before persistence. Known literal
+//     and newline-fragment matching does not cover arbitrary encoded derivatives.
 //
 // WebLogin / DeviceCode (and any non-App mode) are interactive and receive NO
 // GRAPH_* variables; PAX performs the sign-in itself.
@@ -65,9 +64,9 @@ internal static class CookCredentialInjection
     internal static Dictionary<string, string> BuildGraphCredentialEnv(
         ChefKeyModel.ChefKeyResolved? ck, byte[]? secretBytes)
     {
-        var env = new Dictionary<string, string>(StringComparer.Ordinal);
         try
         {
+            var env = new Dictionary<string, string>(StringComparer.Ordinal);
             if (ck is null)
             {
                 return env;
@@ -113,9 +112,8 @@ internal static class CookCredentialInjection
     // seam). Reads the client secret from WCM for AppRegistrationSecret recipes,
     // builds the GRAPH_* additions, and copies them onto the supplied CHILD
     // environment dictionary (ProcessStartInfo.Environment). The transient
-    // builder dictionary is cleared after the copy so the only managed reference
-    // to the secret string is the child-env entry, which the caller scrubs after
-    // the child has started.
+    // builder dictionary is cleared after the copy. The supervisor retains a
+    // redaction reference through output drainage and scrubs the env after Start.
     //
     // Returns:
     //   None                -> no GRAPH_* set (interactive / unbound recipe).
@@ -126,6 +124,7 @@ internal static class CookCredentialInjection
     internal static CredentialInjectionOutcome ApplyChildCredentialEnv(
         IDictionary<string, string?> childEnv, ChefKeyModel.ChefKeyResolved? ck)
     {
+        ScrubSecretEnv(childEnv);
         if (ck is null ||
             (ck.AuthType != ChefKeyModel.AuthAppRegSecret &&
              ck.AuthType != ChefKeyModel.AuthAppRegCertificate))
@@ -135,52 +134,70 @@ internal static class CookCredentialInjection
 
         // Read the secret as late as possible, only for the secret mode. The bytes
         // are handed to BuildGraphCredentialEnv, which zeroes them.
-        byte[]? secretBytes = ck.AuthType == ChefKeyModel.AuthAppRegSecret
-            ? ChefKeyModel.ReadRecipeSecretBytes(ck.ChefKeyId)
-            : null;
-
-        Dictionary<string, string> additions = BuildGraphCredentialEnv(ck, secretBytes);
+        byte[]? secretBytes = null;
         try
         {
-            // Defense in depth: a secret-mode recipe that reaches spawn without a
-            // readable secret must not launch a child that cannot authenticate.
+            secretBytes = ck.AuthType == ChefKeyModel.AuthAppRegSecret
+                ? ChefKeyModel.ReadRecipeSecretBytes(ck.ChefKeyId)
+                : null;
+            return ApplyGraphCredentialEnv(childEnv, ck, secretBytes);
+        }
+        catch
+        {
+            ScrubSecretEnv(childEnv);
+            return CredentialInjectionOutcome.SecretMissingAtSpawn;
+        }
+        finally
+        {
+            if (secretBytes is not null) { Array.Clear(secretBytes, 0, secretBytes.Length); }
+        }
+    }
+
+    internal static CredentialInjectionOutcome ApplyGraphCredentialEnv(
+        IDictionary<string, string?> childEnv, ChefKeyModel.ChefKeyResolved ck, byte[]? secretBytes)
+    {
+        Dictionary<string, string>? additions = null;
+        bool applied = false;
+        try
+        {
+            ScrubSecretEnv(childEnv);
+            additions = BuildGraphCredentialEnv(ck, secretBytes);
             if (ck.AuthType == ChefKeyModel.AuthAppRegSecret &&
                 !additions.ContainsKey(GraphClientSecret))
             {
-                // Secret-free: logs the non-secret key identifier only, never the
-                // secret value.
-                Console.WriteLine(
-                    "[CRED-DIAG] AppRegistrationSecret recipe but the client secret " +
-                    $"was not readable from Windows Credential Manager (chefKeyId={ck.ChefKeyId}); " +
-                    "failing the spawn.");
                 return CredentialInjectionOutcome.SecretMissingAtSpawn;
             }
-
             foreach (KeyValuePair<string, string> kv in additions)
             {
                 childEnv[kv.Key] = kv.Value;
             }
-
-            Console.WriteLine(
-                $"[CRED-DIAG] injected GRAPH_* for {ck.AuthType} " +
-                $"(chefKeyId={ck.ChefKeyId}, secretPresent={additions.ContainsKey(GraphClientSecret)}).");
+            applied = true;
             return CredentialInjectionOutcome.Injected;
+        }
+        catch
+        {
+            throw new InvalidOperationException("credential_injection_failed");
         }
         finally
         {
-            // Drop the only other managed reference to the secret string; the
-            // child-env copy remains until the caller scrubs it post-spawn.
-            additions.Clear();
+            if (secretBytes is not null) { Array.Clear(secretBytes, 0, secretBytes.Length); }
+            additions?.Clear();
+            if (!applied) { ScrubSecretEnv(childEnv); }
         }
     }
 
-    // Removes GRAPH_CLIENT_SECRET from the CHILD environment dictionary once the
-    // child has inherited the env block, minimizing the secret string's lifetime
-    // in the parent process. Safe to call when the key is absent (interactive
-    // recipes, or a second defensive call on the spawn-failure path).
+    // Removes inherited or injected GRAPH_* names from the child dictionary only.
+    // This does not modify the parent process or an already-started child's env.
     internal static void ScrubSecretEnv(IDictionary<string, string?> childEnv)
     {
-        childEnv.Remove(GraphClientSecret);
+        try
+        {
+            foreach (string name in childEnv.Keys.ToArray())
+            {
+                if (name.StartsWith("GRAPH_", StringComparison.OrdinalIgnoreCase)) { childEnv.Remove(name); }
+            }
+        }
+        catch { throw new InvalidOperationException("credential_cleanup_failed"); }
     }
 
     private static void AddIfPresent(IDictionary<string, string> env, string key, string? value)

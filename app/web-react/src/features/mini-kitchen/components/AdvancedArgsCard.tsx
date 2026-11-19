@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { analyzeAdvancedArgs } from '../lib/advancedArgs';
-import { REMOVED_OR_UNSUPPORTED_SWITCHES } from '../data/pax-switch-catalog';
 import { MiniKitchenSectionCard } from './MiniKitchenSectionCard';
 import { MiniKitchenField } from './MiniKitchenField';
 
@@ -21,24 +20,10 @@ interface AdvancedArgsCardProps {
 export function AdvancedArgsCard({ value, onChange }: AdvancedArgsCardProps) {
   const analysis = useMemo(() => analyzeAdvancedArgs(value), [value]);
   const warnings: string[] = [];
-  for (const dup of analysis.duplicates) {
-    warnings.push(`-${dup} is specified more than once. The last value will win.`);
-  }
-  for (const removed of analysis.removedSwitches) {
-    const def = REMOVED_OR_UNSUPPORTED_SWITCHES.find(s => s.name === removed);
-    const label = def?.userFacingName ?? `-${removed}`;
-    warnings.push(
-      `${label} is a removed / unsupported switch and will be dropped from the rendered command.`,
-    );
-  }
-  for (const unknown of analysis.unknownSwitches) {
-    warnings.push(
-      `-${unknown} is not in the builder's switch catalog. It will pass through unchanged.`,
-    );
-  }
+  if (analysis.parseError) warnings.push(analysis.parseError);
   if (analysis.secretWarnings.length > 0) {
     warnings.push(
-      'A token in this field looks like a client secret or password. The builder does not store this value, but recipe drafts you export will contain it as plain text.',
+      'A value looks like a credential. Remove it from this field before saving or exporting.',
     );
   }
   const notes: string[] = [];
@@ -53,7 +38,7 @@ export function AdvancedArgsCard({ value, onChange }: AdvancedArgsCardProps) {
       id="mk-advanced"
       title="Advanced options (switches)"
       subtitle="Optional — most bakes don't need anything here. Only add raw PAX switches for edge cases the guided options above don't cover."
-      helpText="Use carefully. The builder does not validate values — it only flags removed, duplicate, unknown, or secret-shaped tokens. Documentation for the available switches is linked below."
+      helpText="Only supported literal options are accepted. Invalid options block saving, command previews, and exports."
       optional
       collapsible
       defaultOpen={false}

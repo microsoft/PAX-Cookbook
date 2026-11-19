@@ -68,7 +68,7 @@ $Script:CookSupervisorScript = {
     param(
         [string]$CookId,
         [string]$RecipeId,
-        [string]$CommandExpr,
+        [string[]]$SpawnArgv,
         [string]$CookFolder,
         [string]$PwshPath,
         [string]$PaxScriptPath,
@@ -101,10 +101,71 @@ $Script:CookSupervisorScript = {
         # runspace cannot see the main-runspace dot-source or the
         # $Script:WorkspacePath broker variable.
         [string]$NotifyModulePath,
-        [string]$WorkspacePath
+        [string]$WorkspacePath,
+        [string]$ParameterJson
     )
 
     $ErrorActionPreference = 'Continue'
+
+    $knownSecret = $null
+    function Protect-CookOutputText {
+        param([AllowEmptyString()][string]$Text, [AllowNull()][string]$KnownSecret, [string]$Delimiter = '')
+        $ErrorActionPreference = 'Stop'
+        try {
+            if ($Text -match '(?i)https?://\S*devicelogin\S*.*?\bcode\s+[A-Za-z0-9-]{4,}\b' -or
+                $Text -match '(?i)open the page\s+https?://\S+\s+and enter the code\s+[A-Za-z0-9-]{4,}') {
+                $Text = '[notify] device sign-in details omitted'
+            }
+            $Text = [regex]::Replace($Text, '(?i)(\bBearer\s+)[^\s"''<>]+', '$1[REDACTED]')
+            $Text = [regex]::Replace($Text, '(?i)\beyJ[0-9A-Za-z_-]{8,}\.[0-9A-Za-z_-]{8,}\.[0-9A-Za-z_-]{8,}\b', '[REDACTED]')
+            $Text = [regex]::Replace($Text, '(?i)(\b(?:GRAPH_CLIENT_SECRET|client_secret|access_token|refresh_token)\b\s*[=:]\s*)(?:"[^"]*"|''[^'']*''|[^\s,;]+)', '$1[REDACTED]')
+            $Text += $Delimiter
+            if (-not [string]::IsNullOrEmpty($KnownSecret)) {
+                $literals = @($KnownSecret) + @($KnownSecret -split '\r\n|\r|\n' | Where-Object { $_.Length -gt 0 })
+                $replacement = '[REDACTED]'
+                foreach ($literal in $literals) {
+                    if ($replacement.Contains($literal)) { $replacement = ''; break }
+                }
+                foreach ($literal in ($literals | Sort-Object Length -Descending)) {
+                    $Text = $Text.Replace($literal, $replacement)
+                }
+                $validText = [Text.StringBuilder]::new($Text.Length)
+                for ($index = 0; $index -lt $Text.Length; $index++) {
+                    if ([char]::IsHighSurrogate($Text[$index])) {
+                        if ($index + 1 -lt $Text.Length -and [char]::IsLowSurrogate($Text[$index + 1])) {
+                            [void]$validText.Append($Text[$index])
+                            [void]$validText.Append($Text[++$index])
+                        }
+                    } elseif (-not [char]::IsLowSurrogate($Text[$index])) { [void]$validText.Append($Text[$index]) }
+                }
+                $Text = $validText.ToString()
+                do {
+                    $removed = $false
+                    foreach ($literal in $literals) {
+                        $position = $Text.IndexOf($literal, [StringComparison]::Ordinal)
+                        if ($position -ge 0) {
+                            $end = $position + $literal.Length
+                            if ($position -gt 0 -and [char]::IsLowSurrogate($Text[$position]) -and [char]::IsHighSurrogate($Text[$position - 1])) { $position-- }
+                            if ($end -lt $Text.Length -and [char]::IsHighSurrogate($Text[$end - 1]) -and [char]::IsLowSurrogate($Text[$end])) { $end++ }
+                            $Text = $Text.Remove($position, $end - $position)
+                            $removed = $true
+                        }
+                        for ($length = [Math]::Min($literal.Length - 1, $Text.Length); $length -gt 0; $length--) {
+                            if (-not $Text.EndsWith($literal.Substring(0, $length), [StringComparison]::Ordinal)) { continue }
+                            $end = $Text.Length - $length
+                            if ($end -gt 0 -and [char]::IsHighSurrogate($Text[$end - 1]) -and [char]::IsLowSurrogate($Text[$end])) { $end-- }
+                            $Text = $Text.Substring(0, $end)
+                            $removed = $true
+                            break
+                        }
+                    }
+                } while ($removed)
+            }
+            return $Text
+        } catch {
+            throw 'output_sanitization_failed'
+        }
+    }
 
     # ---------------- Terminal notification helper (best-effort) ----------------
     #
@@ -152,6 +213,7 @@ $Script:CookSupervisorScript = {
 
     $publish = {
         param([string]$Type, [string]$Data)
+        $Data = Protect-CookOutputText -Text $Data -KnownSecret $knownSecret
         if (-not $WsRegistry.ContainsKey($CookId)) { return }
         $frame = (@{ type = $Type; cookId = $CookId; data = $Data } | ConvertTo-Json -Compress -Depth 4)
         $list = $WsRegistry[$CookId]
@@ -187,7 +249,7 @@ $Script:CookSupervisorScript = {
 
     $logAppend = {
         param([System.IO.StreamWriter]$Writer, [string]$Line)
-        try { $Writer.WriteLine($Line) } catch {}
+        try { $Writer.Write((Protect-CookOutputText -Text $Line -KnownSecret $knownSecret -Delimiter $Writer.NewLine)) } catch {}
     }
 
     $sqlExec = {
@@ -312,13 +374,8 @@ $Script:CookSupervisorScript = {
 
     # ---------------- Build and spawn the child process ----------------
     #
-    # $CommandExpr was built once by the broker dispatch path via
-    # Get-PaxInvocationPlan (Pax/Adapter.psm1). It is the literal value
-    # passed as the pwsh `-Command` argument and contains the inner
-    # `& '<PaxScriptPath>' <paxCommand>` invocation. The supervisor uses
-    # it verbatim -- no re-quoting, no flag injection, no path
-    # re-escaping. The path-escaping rule for embedded single quotes is
-    # the adapter's responsibility.
+    # The complete adapter-owned SpawnArgv is forwarded unchanged. No
+    # positional extraction, wrapper reconstruction or display-token parsing.
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName               = $PwshPath
@@ -326,12 +383,13 @@ $Script:CookSupervisorScript = {
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError  = $true
     $psi.RedirectStandardInput  = $true
+    $psi.StandardInputEncoding  = [Text.UTF8Encoding]::new($false)
     $psi.CreateNoWindow         = $true
     $psi.WorkingDirectory       = $CookFolder
-    [void]$psi.ArgumentList.Add('-NoProfile')
-    [void]$psi.ArgumentList.Add('-NoLogo')
-    [void]$psi.ArgumentList.Add('-Command')
-    [void]$psi.ArgumentList.Add($CommandExpr)
+    foreach ($argument in $SpawnArgv) { [void]$psi.ArgumentList.Add($argument) }
+    foreach ($name in @($psi.Environment.Keys)) {
+        if ($name.StartsWith('GRAPH_', [StringComparison]::OrdinalIgnoreCase)) { [void]$psi.Environment.Remove($name) }
+    }
 
     $spawnErr = $null
 
@@ -352,18 +410,15 @@ $Script:CookSupervisorScript = {
     # $ClientSecretSecure is a SecureString reference passed in from
     # the dispatch path (which read it from Windows Credential Manager
     # via Read-AuthProfileSecret). We marshal to a transient plaintext
-    # string ONLY long enough to copy it into psi.EnvironmentVariables,
-    # then zero-free the BSTR and remove the env-var entry from psi
-    # immediately after $proc.Start() returns (the child has already
-    # received its own copy of the env block). The original
-    # SecureString is owned by the caller and disposed there.
+    # string for child injection and exact-literal output redaction. The
+    # BSTR and psi entry are cleared immediately after Start; knownSecret
+    # remains until output drainage ends, then is released (not zeroed).
+    # The original SecureString is owned by the caller and disposed there.
     #
     # Acknowledged limitation: PowerShell strings are immutable; the
     # transient plaintext stays in managed memory until GC. The
-    # primary defense is "the secret never leaves the broker process
-    # except via Windows Credential Manager"; this best-effort zero
-    # narrows the window but does not eliminate the GC retention
-    # surface.
+    # child inherits its own copy. Known-literal output redaction cannot
+    # guarantee removal of arbitrary encoded or derived secret values.
     #
     # Phase AG -- secret-isolation invariants (canonical reference).
     # The following properties hold across the entire broker codebase
@@ -377,8 +432,8 @@ $Script:CookSupervisorScript = {
     #   2. GRAPH_CLIENT_SECRET reaches the child ONLY via
     #      $psi.EnvironmentVariables['GRAPH_CLIENT_SECRET'] = ...
     #      together with $psi.UseShellExecute = $false. This combo
-    #      gives the child a FRESH env block; the child does NOT
-    #      inherit the broker's process env.
+    #      uses a per-child copy, with inherited GRAPH_* entries removed
+    #      above before the authorized credential is added.
     #
     #   3. Sibling cooks each get their own $psi instance. A second
     #      cook spawned in parallel cannot see the first cook's
@@ -400,11 +455,14 @@ $Script:CookSupervisorScript = {
         try {
             $secretBSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecretSecure)
             $plaintextSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretBSTR)
+            $knownSecret = $plaintextSecret
             $psi.EnvironmentVariables['GRAPH_CLIENT_SECRET'] = $plaintextSecret
             $secretEnvSet = $true
             $plaintextSecret = $null
         } catch {
-            $spawnErr = 'client_secret_marshal_failed: ' + $_.Exception.Message
+            $spawnErr = 'client_secret_marshal_failed'
+        } finally {
+            $plaintextSecret = $null
         }
     }
 
@@ -476,7 +534,7 @@ $Script:CookSupervisorScript = {
             $proc.BeginOutputReadLine()
             $proc.BeginErrorReadLine()
         } catch {
-            $spawnErr = $_.Exception.Message
+            $spawnErr = 'child_start_failed'
         }
     }
 
@@ -486,7 +544,7 @@ $Script:CookSupervisorScript = {
     # narrows the broker-side window. This MUST run regardless of
     # whether Start() succeeded or threw.
     if ($secretBSTR -ne [IntPtr]::Zero) {
-        try { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretBSTR) } catch {}
+        try { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretBSTR) } catch { $spawnErr = 'credential_cleanup_failed' }
         $secretBSTR = [IntPtr]::Zero
     }
     if ($secretEnvSet) {
@@ -494,11 +552,21 @@ $Script:CookSupervisorScript = {
             if ($psi.EnvironmentVariables.ContainsKey('GRAPH_CLIENT_SECRET')) {
                 [void]$psi.EnvironmentVariables.Remove('GRAPH_CLIENT_SECRET')
             }
-        } catch {}
+        } catch { $spawnErr = 'credential_cleanup_failed' }
         $secretEnvSet = $false
     }
 
+    if (-not $spawnErr) {
+        try { $proc.StandardInput.WriteLine($ParameterJson) }
+        catch { $spawnErr = 'child_input_failed' }
+    }
+
     if ($spawnErr) {
+        $spawnErr = Protect-CookOutputText -Text $spawnErr -KnownSecret $knownSecret
+        if ($childPid -gt 0) {
+            try { if (-not $proc.HasExited) { $proc.Kill($true) }; $proc.WaitForExit() } catch { }
+        }
+        try { $proc.Dispose() } catch { }
         # Spawn failed: write interrupted sentinel, mark row interrupted,
         # publish error/interrupted, clean up, exit job.
         & $logAppend $logWr ('[BROKER] cook spawn failed: ' + $spawnErr)
@@ -556,6 +624,7 @@ WHERE cook_id=@c
         & $emitNotification 'interrupted' $null $null $null
 
         try { $CookRegistry.Remove($CookId) } catch {}
+        $knownSecret = $null
         return
     }
 
@@ -569,7 +638,7 @@ WHERE cook_id=@c
         recipeId      = $RecipeId
         pid           = $childPid
         startedAt     = $startedAt
-        command       = @($PwshPath, '-NoProfile', '-NoLogo', '-Command', $CommandExpr)
+        command       = [string[]](@($PwshPath) + @($psi.ArgumentList))
         pwshPath      = $PwshPath
         paxScriptPath = $PaxScriptPath
         host          = $HostName
@@ -584,7 +653,7 @@ WHERE cook_id=@c
         & $sqlExec 'UPDATE cooks SET pid=@p, started_at=@s, updated_at=@u WHERE cook_id=@c' `
             @{ '@p' = [int]$childPid; '@s' = $startedAt; '@u' = $startedAt; '@c' = $CookId }
     } catch {
-        & $logAppend $logWr ('[BROKER] pid update failed: ' + $_.Exception.Message)
+        & $logAppend $logWr '[BROKER] pid update failed'
     }
 
     & $publish 'started' ('pid=' + $childPid)
@@ -1058,6 +1127,7 @@ VALUES
     # touch cook status, exit code, artifacts, or the frames above.
     & $emitNotification $finalStatus $exitCode $duration $factRowCount
 
+    $knownSecret = $null
     try { $CookRegistry.Remove($CookId) } catch {}
 }
 
@@ -1069,7 +1139,7 @@ function Start-CookSupervisor {
     param(
         [Parameter(Mandatory)] [string]$CookId,
         [Parameter(Mandatory)] [string]$RecipeId,
-        [Parameter(Mandatory)] [string]$CommandExpr,
+        [Parameter()]          [string]$CommandExpr,
         [Parameter(Mandatory)] [string]$CookFolder,
         [Parameter(Mandatory)] [string]$PwshPath,
         [Parameter(Mandatory)] [string]$PaxScriptPath,
@@ -1087,24 +1157,24 @@ function Start-CookSupervisor {
         # cooks; $null for every other auth mode. The supervisor zero-
         # frees the BSTR copy after $proc.Start(); the original
         # SecureString remains owned by the caller.
-        [Parameter()]          [System.Security.SecureString]$ClientSecretSecure = $null
+        [Parameter()]          [System.Security.SecureString]$ClientSecretSecure = $null,
+        [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string[]]$SpawnArgv,
+        [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$ParameterJson
     )
 
-    # $CommandExpr is the literal pwsh `-Command` value. It is built
-    # ONCE by the broker dispatch path via Get-PaxInvocationPlan and is
-    # the single source of authority for what the child process
-    # actually executes. The supervisor does not rebuild it.
+    # SpawnArgv is required. CommandExpr is retained only for parameter
+    # compatibility and never supplies an alternate execution path.
     #
     # The supervisor runspace cannot see the main-runspace dot-source of
     # the notification core nor $Script:WorkspacePath, so both are
     # resolved here and passed positionally into the ThreadJob.
     $notifyModulePath = Join-Path $Script:BrokerRoot 'Notify\Notification.ps1'
     [void](Start-ThreadJob -ScriptBlock $Script:CookSupervisorScript -ArgumentList @(
-        $CookId, $RecipeId, $CommandExpr, $CookFolder, $PwshPath, $PaxScriptPath,
+        $CookId, $RecipeId, $SpawnArgv, $CookFolder, $PwshPath, $PaxScriptPath,
         $FactPath, $ConnectionString, $HostName,
         $ExecutionMode, $ClientSecretSecure,
         $CookState, $Script:WsRegistry, $Script:CookRegistry,
-        $notifyModulePath, $Script:WorkspacePath
+        $notifyModulePath, $Script:WorkspacePath, $ParameterJson
     ))
 }
 

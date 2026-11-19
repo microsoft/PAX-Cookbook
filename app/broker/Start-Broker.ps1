@@ -3812,7 +3812,7 @@ function Read-RequestJson {
     # as type=string and Test-RecipeSchemaNode's `-is [string]` check
     # would otherwise reject any round-tripped recipe. Read-RecipeFile
     # uses the same flag for symmetry on the persistence side.
-    param($Context)
+    param($Context, [switch]$RejectAmbiguousProperties)
     $req = $Context.Request
     if (-not $req.HasEntityBody) { return $null }
     try {
@@ -3825,6 +3825,7 @@ function Read-RequestJson {
     }
     if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
     try {
+        if ($RejectAmbiguousProperties) { return (ConvertFrom-PaxRecipeJson -Json $raw) }
         return ($raw | ConvertFrom-Json -AsHashtable -Depth 12 -DateKind String)
     } catch {
         return $null

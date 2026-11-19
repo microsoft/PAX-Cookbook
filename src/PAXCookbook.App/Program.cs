@@ -1161,7 +1161,7 @@ internal static class Program
         // broker lock are all enforced upstream before this runs.
         app.MapPost("/api/v1/recipes", async (HttpContext context) =>
         {
-            object? createBody = await JsonModel.ReadBodyAsync(context);
+            object? createBody = await JsonModel.ReadBodyAsync(context, rejectAmbiguousProperties: true);
             (int status, object responseBody) =
                 RecipeCreateModel.Handle(workspacePath, versionInfo, createBody);
             return Results.Json(responseBody, statusCode: status);
@@ -1172,17 +1172,17 @@ internal static class Program
         // the authoritative PAX invocation plan. This route never inserts a
         // recipe row, writes a recipe file, creates a cook, or invokes PAX; the
         // only fills it performs live in the request's in-memory value tree. The
-        // bundled PAX script path is a pure string the projection renders into
-        // the preview command — the file itself is never read or executed.
+        // preview uses the acquired engine path when available; the bundled
+        // path is only a display fallback and is never executed here.
         string paxScriptPath = Path.Combine(appRoot, "resources", "pax", "PAX_Purview_Audit_Log_Processor.ps1");
         app.MapPost("/api/v1/recipes/preview", async (HttpContext context) =>
         {
-            object? previewBody = await JsonModel.ReadBodyAsync(context);
+            object? previewBody = await JsonModel.ReadBodyAsync(context, rejectAmbiguousProperties: true);
+            EngineAcquisitionResult previewEngine = EngineAcquisition.Resolve(versionInfo, engineLocalAppDataBase);
             (int status, object responseBody) =
                 RecipePreviewModel.Handle(
-                    workspacePath, paxScriptPath, versionInfo, previewBody,
-                    () => ProductionOrganizationAuthority.CreateSnapshot(
-                        versionInfo, EngineAcquisition.Resolve(versionInfo, engineLocalAppDataBase)));
+                    workspacePath, previewEngine.IsAcquired ? previewEngine.ManagedEnginePath : paxScriptPath,
+                    versionInfo, previewBody, () => ProductionOrganizationAuthority.CreateSnapshot(versionInfo, previewEngine));
             return Results.Json(responseBody, statusCode: status);
         });
 
@@ -1198,7 +1198,7 @@ internal static class Program
         // enforced upstream before this runs.
         app.MapPost("/api/v1/recipes/readiness", async (HttpContext context) =>
         {
-            object? readinessBody = await JsonModel.ReadBodyAsync(context);
+            object? readinessBody = await JsonModel.ReadBodyAsync(context, rejectAmbiguousProperties: true);
             (int status, object responseBody) =
                 RecipeReadinessModel.Handle(
                     workspacePath, paxScriptPath, versionInfo, engineLocalAppDataBase, readinessBody);
@@ -1221,26 +1221,9 @@ internal static class Program
                 return Results.Json(new { error = "invalid_recipe_id", recipeId = id },
                     statusCode: StatusCodes.Status400BadRequest);
             }
-            // Cleanup case 1: capture the recipe's schedule BEFORE the save so the
-            // save flow can detect an unchecked-schedule transition and remove the
-            // now-orphaned Windows Scheduled Task. Read-only; never fails the save.
-            RecipeReadModel.ScheduleInfo? priorSchedule =
-                RecipeReadModel.ReadRecipeSchedule(workspacePath, id);
-            object? updateBody = await JsonModel.ReadBodyAsync(context);
+            object? updateBody = await JsonModel.ReadBodyAsync(context, rejectAmbiguousProperties: true);
             (int status, object responseBody) =
-                RecipeUpdateModel.Handle(workspacePath, versionInfo, id, updateBody);
-            if (status >= 200 && status < 300 && priorSchedule is not null && priorSchedule.Enabled)
-            {
-                RecipeReadModel.ScheduleInfo? nowSchedule =
-                    RecipeReadModel.ReadRecipeSchedule(workspacePath, id);
-                if (nowSchedule is null || !nowSchedule.Enabled)
-                {
-                    // The recipe was saved without an enabled schedule: remove the
-                    // orphaned OS task (best-effort; the save already succeeded).
-                    RecipeScheduleModel.UnregisterTaskForRecipe(
-                        workspacePath, appRoot!, id, priorSchedule.ScheduledTaskId);
-                }
-            }
+                RecipeUpdateModel.Handle(workspacePath, appRoot!, versionInfo, id, updateBody);
             return Results.Json(responseBody, statusCode: status);
         });
 
@@ -1257,18 +1240,8 @@ internal static class Program
                 return Results.Json(new { error = "invalid_recipe_id", recipeId = id },
                     statusCode: StatusCodes.Status400BadRequest);
             }
-            // Cleanup case 2: if a scheduled task exists for this recipe, remove it
-            // BEFORE the recipe is deleted so no orphaned task keeps firing for a
-            // recipe that no longer exists. Best-effort; never blocks the delete.
-            RecipeReadModel.ScheduleInfo? schedule =
-                RecipeReadModel.ReadRecipeSchedule(workspacePath, id);
-            if (schedule is not null && !string.IsNullOrWhiteSpace(schedule.ScheduledTaskId))
-            {
-                RecipeScheduleModel.UnregisterTaskForRecipe(
-                    workspacePath, appRoot!, id, schedule.ScheduledTaskId);
-            }
             (int status, object responseBody) =
-                RecipeDeleteModel.Handle(workspacePath, id);
+                RecipeDeleteModel.Handle(workspacePath, appRoot!, id);
             return Results.Json(responseBody, statusCode: status);
         });
 
@@ -3775,7 +3748,7 @@ internal static class Program
         return new VersionInfo(cookbookVersion, releaseChannel, paxVersion, paxSha256,
             paxRelativePath, paxAcquisitionPolicy,
             engineManifestUrl, engineManifestTrustAnchorThumbprint, manifestSignaturePolicy,
-            buildTimestamp);
+            buildTimestamp) { AppRoot = Path.GetDirectoryName(Path.GetFullPath(versionFile)) };
     }
 
     // Static SPA serving — oracle parity with app\broker\Http\StaticHandler.ps1.
@@ -4180,7 +4153,10 @@ internal sealed record VersionInfo(
     string? EngineManifestUrl,
     string? EngineManifestTrustAnchorThumbprint,
     string ManifestSignaturePolicy,
-    string? BuildTimestamp);
+    string? BuildTimestamp)
+{
+    internal string? AppRoot { get; init; }
+}
 
 // Observe-only capture of a double-clicked recipe file handed to the EXE by
 // the Windows shell via the .paxlite / .pax associations. Kind is "paxlite"

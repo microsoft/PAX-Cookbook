@@ -129,6 +129,9 @@ internal static partial class PaxAdapter
 
     // Oracle: Get-PaxArgvArray. Returns the ordered, UNQUOTED logical tokens.
     public static List<string> GetArgvArray(Dictionary<string, object?> recipe, ChefKeyAuthRow? chefKey, string executionMode)
+        => ProjectDisplayArguments(GetParameters(recipe, chefKey, executionMode));
+
+    private static List<PaxParameter> GetParameters(Dictionary<string, object?> recipe, ChefKeyAuthRow? chefKey, string executionMode)
     {
         string execMode = executionMode;
         if (string.IsNullOrWhiteSpace(execMode) && recipe.ContainsKey("executionMode"))
@@ -137,7 +140,15 @@ internal static partial class PaxAdapter
         }
         CheckExecutionModeForLocalAdapter(execMode);
 
-        var tokens = new List<string>();
+        string extra = GetChild(recipe, "advanced") is { } advanced && advanced.ContainsKey("extraArguments")
+            ? JsonModel.Str(advanced["extraArguments"]).Trim() : string.Empty;
+        ScanRemovedSwitches(extra);
+        ScanSecretShape(extra);
+        if (!RecipeValidationModel.TryParseAdvancedArguments(extra, out var advancedParameters))
+        {
+            throw new ProjectionException(RecipeValidationModel.AdvancedArgumentsError);
+        }
+        var tokens = new List<PaxParameter>();
 
         // Run shape.
         string queryMode = string.Empty;
@@ -208,61 +219,57 @@ internal static partial class PaxAdapter
 
         if (isUserInfoOnly)
         {
-            tokens.Add("-OnlyUserInfo");
-            tokens.Add("-IncludeUserInfo");
+            tokens.Add(new("OnlyUserInfo", true));
+            tokens.Add(new("IncludeUserInfo", true));
         }
         else if (isAgent365Only)
         {
             // Agent-365-only: export just the Microsoft Agent 365 catalog. The
             // audit query, user info, rollup, and audit output switches are all
             // skipped. -Deidentify (engine-wide) is still emitted below.
-            tokens.Add("-OnlyAgent365Info");
+            tokens.Add(new("OnlyAgent365Info", true));
         }
         else
         {
-            if (includeM365) { tokens.Add("-IncludeM365Usage"); }
-            if (rollupTok.Length > 0) { tokens.Add(rollupTok); }
+            if (includeM365) { tokens.Add(new("IncludeM365Usage", true)); }
+            if (rollupTok.Length > 0) { tokens.Add(new(rollupTok[1..], true)); }
             // -Dashboard AIBV is emitted only with a rollup, never alongside
             // -IncludeM365Usage (PAX rejects that pair), and only when the recipe
             // selected AIBV. The switch name and value are two separate tokens,
             // mirroring -StartDate / -EndDate below.
             if (dashboardAibv && !includeM365 && rollupTok.Length > 0)
             {
-                tokens.Add("-Dashboard");
-                tokens.Add("AIBV");
+                tokens.Add(new("Dashboard", "AIBV"));
             }
             // -FillerLabel / -FillerLabelText: rollup-only and never with the M365
             // dashboard (PAX rejects that pair). Blank/default omits the switch;
             // -FillerLabelText only accompanies the 'Fixed' mode.
             if (fillerLabel.Length > 0 && rollupTok.Length > 0 && !includeM365)
             {
-                tokens.Add("-FillerLabel");
-                tokens.Add(fillerLabel);
+                tokens.Add(new("FillerLabel", fillerLabel));
                 if (CiEq(fillerLabel, "Fixed") && fillerLabelText.Length > 0)
                 {
-                    tokens.Add("-FillerLabelText");
-                    tokens.Add(fillerLabelText);
+                    tokens.Add(new("FillerLabelText", fillerLabelText));
                 }
             }
             // Bring-your-own-directory suppresses -IncludeUserInfo: -UserInfoFile
             // supplies the directory from a file and already implies user info.
             if (userInfoFile.Length > 0)
             {
-                tokens.Add("-UserInfoFile");
-                tokens.Add(userInfoFile);
+                tokens.Add(new("UserInfoFile", userInfoFile));
             }
             else if (includeUserInfo || projectingUserInfoDest)
             {
-                tokens.Add("-IncludeUserInfo");
+                tokens.Add(new("IncludeUserInfo", true));
             }
             // Microsoft Agent 365 catalog alongside the audit run.
-            if (includeAgent365Info) { tokens.Add("-IncludeAgent365Info"); }
+            if (includeAgent365Info) { tokens.Add(new("IncludeAgent365Info", true)); }
         }
 
         // -Deidentify anonymizes the raw audit + EntraUsers output and threads
         // --deidentify into the rollup processor. Valid in every run shape, so it
         // is emitted outside the audit / user-info branch.
-        if (deidentify) { tokens.Add("-Deidentify"); }
+        if (deidentify) { tokens.Add(new("Deidentify", true)); }
 
         // Dates (audit only).
         string startDate = string.Empty, endDate = string.Empty;
@@ -273,8 +280,8 @@ internal static partial class PaxAdapter
         }
         if (!skipAuditShape)
         {
-            if (startDate.Length > 0) { tokens.Add("-StartDate"); tokens.Add(startDate); }
-            if (endDate.Length > 0) { tokens.Add("-EndDate"); tokens.Add(endDate); }
+            if (startDate.Length > 0) { tokens.Add(new("StartDate", startDate)); }
+            if (endDate.Length > 0) { tokens.Add(new("EndDate", endDate)); }
         }
 
         // Tenant + auth.
@@ -286,7 +293,7 @@ internal static partial class PaxAdapter
             if (auth.ContainsKey("mode")) { authMode = JsonModel.Str(auth["mode"]); }
             if (auth.ContainsKey("chefKeyId")) { chefKeyId = JsonModel.Str(auth["chefKeyId"]); }
         }
-        if (tenantId.Length > 0) { tokens.Add("-TenantId"); tokens.Add(tenantId); }
+        if (tenantId.Length > 0) { tokens.Add(new("TenantId", tenantId)); }
 
         string paxAuthValue;
         if (CiEq(authMode, "AppRegistrationSecret") || CiEq(authMode, "AppRegistrationCertificate"))
@@ -301,7 +308,7 @@ internal static partial class PaxAdapter
         {
             paxAuthValue = authMode;
         }
-        if (paxAuthValue.Length > 0) { tokens.Add("-Auth"); tokens.Add(paxAuthValue); }
+        if (paxAuthValue.Length > 0) { tokens.Add(new("Auth", paxAuthValue)); }
 
         if (CiEq(authMode, "AppRegistrationSecret") || CiEq(authMode, "AppRegistrationCertificate"))
         {
@@ -317,8 +324,7 @@ internal static partial class PaxAdapter
                 throw new ProjectionException(
                     $"Get-PaxArgvArray: Chef's Key '{chefKeyId}' has no clientId. The Chef's Key metadata is malformed.");
             }
-            tokens.Add("-ClientId");
-            tokens.Add(keyClientId);
+            tokens.Add(new("ClientId", keyClientId));
             if (CiEq(authMode, "AppRegistrationCertificate"))
             {
                 // Cycle 15. A SANCTIONED engine selects by SHA-256 over the
@@ -332,8 +338,7 @@ internal static partial class PaxAdapter
                     string normalized = Sha256Hex.Normalize(keySha256)
                         ?? throw new ProjectionException(
                             "Get-PaxArgvArray: the bound certificate reference is not a 64-character hex SHA-256 value.");
-                    tokens.Add("-ClientCertificateSha256");
-                    tokens.Add(normalized);
+                    tokens.Add(new("ClientCertificateSha256", normalized));
                 }
                 else
                 {
@@ -343,8 +348,7 @@ internal static partial class PaxAdapter
                         throw new ProjectionException(
                             $"Get-PaxArgvArray: Chef's Key '{chefKeyId}' is mode AppRegistrationCertificate but has no certThumbprint.");
                     }
-                    tokens.Add("-ClientCertificateThumbprint");
-                    tokens.Add(keyThumb);
+                    tokens.Add(new("ClientCertificateThumbprint", keyThumb));
                 }
             }
         }
@@ -370,26 +374,25 @@ internal static partial class PaxAdapter
                 if (CiEq(afMode, "agentIds"))
                 {
                     List<object?>? aidArr = afHash.ContainsKey("agentIds") ? JsonModel.AsList(afHash["agentIds"]) : null;
-                    if (aidArr is not null && aidArr.Count > 0)
+                    if (aidArr is not null)
                     {
-                        tokens.Add("-AgentId");
-                        foreach (object? aid in aidArr) { tokens.Add(JsonModel.Str(aid)); }
+                        tokens.Add(new("AgentId", aidArr.Select(JsonModel.Str).ToArray()));
                     }
                 }
                 else if (CiEq(afMode, "agentsOnly"))
                 {
-                    tokens.Add("-AgentsOnly");
+                    tokens.Add(new("AgentsOnly", true));
                 }
                 else if (CiEq(afMode, "excludeAgents"))
                 {
-                    tokens.Add("-ExcludeAgents");
+                    tokens.Add(new("ExcludeAgents", true));
                 }
             }
 
             if (query.ContainsKey("promptFilter"))
             {
                 string pf = JsonModel.Str(query["promptFilter"]);
-                if (pf.Length > 0) { tokens.Add("-PromptFilter"); tokens.Add(pf); }
+                if (pf.Length > 0) { tokens.Add(new("PromptFilter", pf)); }
             }
         }
 
@@ -413,22 +416,22 @@ internal static partial class PaxAdapter
             {
                 // PAX -OutputPath is the output DIRECTORY (PAX names the file);
                 // pass the directory derived from the recipe's file-shaped path.
-                if (outputPath.Length > 0) { tokens.Add("-OutputPath"); tokens.Add(ResolveFactOutputDirectory(outputPath)); }
+                if (outputPath.Length > 0) { tokens.Add(new("OutputPath", ResolveFactOutputDirectory(outputPath))); }
             }
             else if (CiEq(effectiveFactMode, "append"))
             {
-                if (factAppendFile.Length > 0) { tokens.Add("-AppendFile"); tokens.Add(factAppendFile); }
+                if (factAppendFile.Length > 0) { tokens.Add(new("AppendFile", factAppendFile)); }
             }
         }
 
         // userInfo destination (both shapes).
         if (CiEq(uiMode, "outputPath"))
         {
-            if (uiPath.Length > 0) { tokens.Add("-OutputPathUserInfo"); tokens.Add(uiPath); }
+            if (uiPath.Length > 0) { tokens.Add(new("OutputPathUserInfo", uiPath)); }
         }
         else if (CiEq(uiMode, "append"))
         {
-            if (uiAppendFile.Length > 0) { tokens.Add("-AppendUserInfo"); tokens.Add(uiAppendFile); }
+            if (uiAppendFile.Length > 0) { tokens.Add(new("AppendUserInfo", uiAppendFile)); }
         }
 
         // Microsoft Agent 365 catalog destination. Emitted whenever the catalog
@@ -443,11 +446,11 @@ internal static partial class PaxAdapter
             string aAppendFile = a365Hash.ContainsKey("appendFile") ? JsonModel.Str(a365Hash["appendFile"]) : string.Empty;
             if (CiEq(aMode, "outputPath"))
             {
-                if (aPath.Length > 0) { tokens.Add("-OutputPathAgent365Info"); tokens.Add(aPath); }
+                if (aPath.Length > 0) { tokens.Add(new("OutputPathAgent365Info", aPath)); }
             }
             else if (CiEq(aMode, "append"))
             {
-                if (aAppendFile.Length > 0) { tokens.Add("-AppendAgent365Info"); tokens.Add(aAppendFile); }
+                if (aAppendFile.Length > 0) { tokens.Add(new("AppendAgent365Info", aAppendFile)); }
             }
         }
 
@@ -463,44 +466,27 @@ internal static partial class PaxAdapter
             }
             if (cpKeyExists && !cpValue)
             {
-                tokens.Add("-ExcludeCopilotInteraction");
+                tokens.Add(new("ExcludeCopilotInteraction", true));
             }
         }
 
-        // Verbatim trailer.
-        string extra = string.Empty;
-        Dictionary<string, object?>? advanced = GetChild(recipe, "advanced");
-        if (advanced is not null && advanced.ContainsKey("extraArguments"))
-        {
-            extra = JsonModel.Str(advanced["extraArguments"]);
-        }
-        extra = extra.Trim();
-        if (extra.Length > 0)
-        {
-            ScanRemovedSwitches(extra);
-            ScanSecretShape(extra);
-            tokens.Add(extra);
-        }
+        tokens.AddRange(advancedParameters);
 
         return tokens;
     }
 
-    private static void AddArrayValues(List<string> tokens, Dictionary<string, object?> query, string key, string switchToken)
+    private static void AddArrayValues(List<PaxParameter> tokens, Dictionary<string, object?> query, string key, string switchToken)
     {
         if (!query.ContainsKey(key))
         {
             return;
         }
         List<object?>? arr = JsonModel.AsList(query[key]);
-        if (arr is null || arr.Count == 0)
+        if (arr is null)
         {
             return;
         }
-        tokens.Add(switchToken);
-        foreach (object? v in arr)
-        {
-            tokens.Add(JsonModel.Str(v));
-        }
+        tokens.Add(new(switchToken[1..], arr.Select(JsonModel.Str).ToArray()));
     }
 
     private static Dictionary<string, object?>? GetChild(Dictionary<string, object?> node, string key) =>
@@ -535,13 +521,107 @@ internal static partial class PaxAdapter
         string PaxCommand,
         IReadOnlyList<string> SpawnArgv,
         string SpawnCommand,
-        string PaxScriptPath);
+        string PaxScriptPath)
+    {
+        public IReadOnlyList<PaxParameter> Parameters { get; init; } = Array.Empty<PaxParameter>();
+        internal string? ParameterJson { get; init; }
+    }
+
+    private static bool IsSupportedParameter(PaxParameter parameter) => parameter.Name switch
+    {
+        "OnlyUserInfo" or "IncludeUserInfo" or "OnlyAgent365Info" or "IncludeM365Usage" or "Rollup" or
+            "RollupPlusRaw" or "IncludeAgent365Info" or "Deidentify" or "AgentsOnly" or "ExcludeAgents" or
+            "ExcludeCopilotInteraction" => parameter.Value is bool,
+        "Dashboard" or "FillerLabel" or "FillerLabelText" or "UserInfoFile" or "StartDate" or "EndDate" or
+            "TenantId" or "Auth" or "ClientId" or "ClientCertificateSha256" or "ClientCertificateThumbprint" or
+            "ClientCertificateStoreLocation" or "PromptFilter" or "OutputPath" or "AppendFile" or "OutputPathUserInfo" or
+            "AppendUserInfo" or "OutputPathAgent365Info" or "AppendAgent365Info" => parameter.Value is string,
+        "ActivityTypes" or "UserIds" or "GroupNames" or "AgentId" or "RemainingArgs" =>
+            parameter.Value is string[] values && values.All(value => value is not null),
+        _ => RecipeValidationModel.IsAdvancedParameter(parameter),
+    };
+
+    private static string LiteralString(string value)
+    {
+        if (value.Contains('\0')) { throw new ProjectionException("A parameter contains an unsupported null character."); }
+        var parts = new List<string>();
+        var text = new System.Text.StringBuilder();
+        foreach (char character in value)
+        {
+            if (character is >= '\u2018' and <= '\u201f')
+            {
+                parts.Add("'" + text.ToString().Replace("'", "''") + "'");
+                parts.Add("[char]" + ((int)character).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                text.Clear();
+            }
+            else { text.Append(character); }
+        }
+        parts.Add("'" + text.ToString().Replace("'", "''") + "'");
+        return parts.Count == 1 ? parts[0] : "(" + string.Join("+", parts) + ")";
+    }
+
+    private static string LiteralValue(object value) => value switch
+    {
+        string text => LiteralString(text),
+        string[] values => "[string[]]@(" + string.Join(",", values.Select(LiteralString)) + ")",
+        bool flag => flag ? "$true" : "$false",
+        int integer => "[int]" + integer.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        double number when double.IsFinite(number) => "[double]" + number.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+        _ => throw new ProjectionException("Unsupported parameter type."),
+    };
+
+    private static List<string> ProjectDisplayArguments(IReadOnlyList<PaxParameter> parameters)
+    {
+        var result = new List<string>();
+        foreach (var parameter in parameters)
+        {
+            if (parameter.Name == "RemainingArgs")
+            {
+                result.AddRange((string[])parameter.Value);
+                continue;
+            }
+            result.Add("-" + parameter.Name);
+            if (parameter.Value is string[] values) { result.AddRange(values); }
+            else if (parameter.Value is not true)
+            {
+                result.Add(parameter.Value is string text ? text : LiteralValue(parameter.Value));
+            }
+        }
+        return result;
+    }
+
+    internal static InvocationPlan CreateInvocationPlan(
+        IReadOnlyList<PaxParameter> parameters, string paxScriptPath, string extra = "", string? appRoot = null)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var parameter in parameters)
+        {
+            if (!IsSupportedParameter(parameter) || !names.Add(parameter.Name))
+            {
+                throw new ProjectionException("Unsupported, duplicate, or incorrectly typed invocation parameter.");
+            }
+        }
+        var paxArgv = ProjectDisplayArguments(parameters);
+        string paxCommand = string.Join(" ", parameters.Select(parameter => parameter.Name == "RemainingArgs"
+            ? string.Join(" ", ((string[])parameter.Value).Select((value, index) => index == 0 ? "-Resume" : LiteralString(value)))
+            : "-" + parameter.Name + (parameter.Value is true ? "" : parameter.Value is bool ? ":$false" : " " + LiteralValue(parameter.Value))));
+        string launcherPath = Path.Combine(appRoot ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")),
+            "broker", "Pax", "Invoke-PaxParameters.ps1");
+        var spawnArgv = new[] { "-NoProfile", "-NoLogo", "-File", launcherPath, "-EnginePath", paxScriptPath };
+        string spawnCommand = "pwsh -NoProfile -NoLogo -File " + LiteralString(launcherPath) + " -EnginePath " + LiteralString(paxScriptPath);
+        return new InvocationPlan(paxArgv, extra, paxCommand, spawnArgv, spawnCommand, paxScriptPath)
+        {
+            Parameters = parameters.ToArray(),
+            ParameterJson = System.Text.Json.JsonSerializer.Serialize(
+                parameters.ToDictionary(parameter => parameter.Name, parameter => parameter.Value, StringComparer.Ordinal)),
+        };
+    }
 
     // Oracle: Get-PaxInvocationPlan.
-    public static InvocationPlan GetInvocationPlan(Dictionary<string, object?> recipe, string paxScriptPath, ChefKeyAuthRow? chefKey, string executionMode)
+    public static InvocationPlan GetInvocationPlan(
+        Dictionary<string, object?> recipe, string paxScriptPath, ChefKeyAuthRow? chefKey, string executionMode, string? appRoot = null)
     {
-        List<string> paxArgv = GetArgvArray(recipe, chefKey, executionMode);
-        string paxCommand = ConvertToCommandString(paxArgv);
+        List<PaxParameter> parameters = GetParameters(recipe, chefKey, executionMode);
 
         string extra = string.Empty;
         Dictionary<string, object?>? advanced = GetChild(recipe, "advanced");
@@ -550,14 +630,6 @@ internal static partial class PaxAdapter
             extra = JsonModel.Str(advanced["extraArguments"]).Trim();
         }
 
-        string escapedPath = paxScriptPath.Replace("'", "''");
-        string commandExpr = $"& '{escapedPath}' {paxCommand}";
-        commandExpr = commandExpr.TrimEnd();
-
-        var spawnArgv = new List<string> { "-NoProfile", "-NoLogo", "-Command", commandExpr };
-
-        string spawnCommand = "pwsh -NoProfile -NoLogo -Command \"" + commandExpr.Replace("\"", "\\\"") + "\"";
-
-        return new InvocationPlan(paxArgv, extra, paxCommand, spawnArgv, spawnCommand, paxScriptPath);
+        return CreateInvocationPlan(parameters, paxScriptPath, extra, appRoot);
     }
 }

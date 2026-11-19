@@ -9,10 +9,10 @@ namespace PAXCookbook.App;
 internal static partial class JsonModel
 {
     // Reads the request body and parses it into the CLR tree.
-    public static async Task<object?> ReadBodyAsync(HttpContext context)
+    public static async Task<object?> ReadBodyAsync(HttpContext context, bool rejectAmbiguousProperties = false)
     {
         using var reader = new StreamReader(context.Request.Body, Encoding.UTF8);
         string raw = await reader.ReadToEndAsync();
-        return Parse(raw);
+        return Parse(raw, rejectAmbiguousProperties);
     }
 }

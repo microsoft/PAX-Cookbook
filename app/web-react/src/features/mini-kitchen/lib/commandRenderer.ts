@@ -18,10 +18,6 @@
  *   - emit removed/unsupported switches
  */
 
-import {
-  REMOVED_OR_UNSUPPORTED_SWITCHES,
-  getSwitchDefinition,
-} from '../data/pax-switch-catalog';
 import type {
   AgentFilterMode,
   MiniKitchenRecipeState,
@@ -29,9 +25,8 @@ import type {
   RollupMode,
   WarningEntry,
 } from '../types';
-import { analyzeAdvancedArgs } from './advancedArgs';
+import { ADVANCED_ARGUMENTS_ERROR, parseAdvancedArguments, type PaxParameter } from './advancedArgs';
 import { normalizeRecipe } from './normalizeRecipe';
-import { containsLikelySecret } from './secretScanner';
 
 // -----------------------------------------------------------------------------
 // Public types
@@ -68,6 +63,7 @@ export interface CommandReadinessBlocker {
 
 export interface RenderedCommand {
   shell: 'pwsh';
+  parameters: readonly PaxParameter[];
   argv: readonly string[];
   multiline: string;
   singleLine: string;
@@ -104,9 +100,7 @@ export const MANAGED_PAX_ENGINE_LABEL = '(managed PAX engine)';
 export const CLIENT_SECRET_PLACEHOLDER = '<CLIENT_SECRET>';
 
 const MULTILINE_SEPARATOR = ' `\n  ';
-const SAFE_UNQUOTED = /^[A-Za-z][A-Za-z0-9]*$/;
 const SWITCH_TOKEN = /^-[A-Za-z][A-Za-z0-9_-]*$/;
-const DATE_LIKE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)?$/;
 
 // -----------------------------------------------------------------------------
 // Quoting / rendering primitives
@@ -123,20 +117,35 @@ const DATE_LIKE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)?$/;
  *                                (`` ` `` -> ` `` `, `"` -> `""`, `$` -> `` `$ ``)
  */
 export function quotePowerShellArg(value: string): string {
-  if (value === '') {
-    return '""';
+  if (value.includes('\0')) throw new Error('A parameter contains an unsupported null character.');
+  const parts: string[] = [];
+  let text = '';
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code >= 0x2018 && code <= 0x201f) {
+      parts.push(`'${text.replace(/'/g, "''")}'`, `[char]${code}`);
+      text = '';
+    } else text += character;
   }
-  if (SWITCH_TOKEN.test(value) || SAFE_UNQUOTED.test(value)) {
-    return value;
+  parts.push(`'${text.replace(/'/g, "''")}'`);
+  return parts.length === 1 ? parts[0]! : `(${parts.join('+')})`;
+}
+
+export function serializePaxValue(parameter: PaxParameter): string {
+  if (parameter.type === 'string[]' && Array.isArray(parameter.value)) {
+    return `[string[]]@(${parameter.value.map(quotePowerShellArg).join(',')})`;
   }
-  if (DATE_LIKE.test(value)) {
-    return value;
+  if (parameter.type === 'string' && typeof parameter.value === 'string') return quotePowerShellArg(parameter.value);
+  if (parameter.type === 'bool' && typeof parameter.value === 'boolean') return parameter.value ? '$true' : '$false';
+  if ((parameter.type === 'int' || parameter.type === 'double') && typeof parameter.value === 'number' && Number.isFinite(parameter.value)) {
+    return `[${parameter.type}]${parameter.value}`;
   }
-  const escaped = value
-    .replace(/`/g, '``')
-    .replace(/\$/g, '`$')
-    .replace(/"/g, '""');
-  return `"${escaped}"`;
+  throw new Error('Unsupported parameter type.');
+}
+
+export function renderTypedPaxCommand(parameters: readonly PaxParameter[], scriptLabel = MANAGED_PAX_ENGINE_LABEL): string {
+  const assignments = parameters.map(parameter => `${quotePowerShellArg(parameter.name)}=${serializePaxValue(parameter)}`).join(';');
+  return `$paxParameters=@{${assignments}}; & ${quotePowerShellArg(scriptLabel)} @paxParameters`;
 }
 
 /**
@@ -222,6 +231,7 @@ function groupArgvForMultiline(argv: readonly string[]): string[][] {
 // -----------------------------------------------------------------------------
 
 interface BuildContext {
+  parameters: PaxParameter[];
   argv: string[];
   /**
    * Indices into `argv` whose values are pre-rendered PowerShell literals
@@ -240,11 +250,13 @@ interface BuildContext {
 }
 
 function pushSwitch(ctx: BuildContext, name: string, ...values: string[]): void {
+  ctx.parameters.push({ name, type: 'string', value: values[0] ?? '' });
   ctx.argv.push(`-${name}`, ...values);
   ctx.emittedSwitches.add(name);
 }
 
 function pushFlag(ctx: BuildContext, name: string): void {
+  ctx.parameters.push({ name, type: 'bool', value: true });
   ctx.argv.push(`-${name}`);
   ctx.emittedSwitches.add(name);
 }
@@ -264,6 +276,7 @@ function pushArraySwitch(ctx: BuildContext, name: string, values: readonly strin
   if (values.length === 0) {
     return;
   }
+  ctx.parameters.push({ name, type: 'string[]', value: [...values] });
   const quoted = values.map(quotePowerShellArg).join(',');
   ctx.argv.push(`-${name}`);
   ctx.argv.push(quoted);
@@ -330,6 +343,7 @@ export function renderPaxCommand(recipe: MiniKitchenRecipeState): RenderedComman
   const state = normalizeRecipe(recipe);
 
   const ctx: BuildContext = {
+    parameters: [],
     argv: [],
     rawIndices: new Set<number>(),
     warnings: [],
@@ -359,12 +373,24 @@ export function renderPaxCommand(recipe: MiniKitchenRecipeState): RenderedComman
   emitGlobalAssumptions(ctx);
   emitExplanation(ctx, state);
 
-  const argv = ctx.argv;
-  const multiline = renderPowerShellMultiline(argv, ctx.rawIndices);
-  const singleLine = renderPowerShellSingleLine(argv, ctx.rawIndices);
+  let argv: string[] = [];
+  let singleLine = '';
+  let multiline = '';
+  if (ctx.blocked.length === 0) {
+    try {
+      const expression = renderTypedPaxCommand(ctx.parameters);
+      argv = ['pwsh', '-NoProfile', '-NoLogo', '-Command', expression];
+      singleLine = `pwsh -NoProfile -NoLogo -Command ${quotePowerShellArg(expression)}`;
+      multiline = singleLine;
+    } catch {
+      block(ctx, 'literal-invalid', 'secret-value', 'A parameter cannot be rendered as literal data.');
+      warnBlocking(ctx, 'literal-invalid', 'A parameter contains an unsupported value.');
+    }
+  }
 
   return {
     shell: 'pwsh',
+    parameters: ctx.blocked.length === 0 ? ctx.parameters : [],
     argv,
     multiline,
     singleLine,
@@ -373,7 +399,7 @@ export function renderPaxCommand(recipe: MiniKitchenRecipeState): RenderedComman
     blocked: ctx.blocked,
     assumptions: ctx.assumptions,
     explanation: ctx.explanation,
-    ready: ctx.blockers.length === 0,
+    ready: ctx.blockers.length === 0 && ctx.blocked.length === 0,
     blockers: ctx.blockers,
   };
 }
@@ -679,6 +705,8 @@ function emitCombineOutput(ctx: BuildContext, state: MiniKitchenRecipeState): vo
   if (state.query.mode !== 'audit-query') {
     return;
   }
+  const advanced = parseAdvancedArguments(state.advanced.extraArguments ?? '');
+  if (!advanced.error && advanced.parameters.some(parameter => parameter.name === 'CombineOutput')) return;
   // PAX v1.11.3 auto-enables -CombineOutput when -IncludeM365Usage is bound
   // (line 1716-1722) and again when -Rollup / -RollupPlusRaw is bound
   // (line 2243-2249). Emitting the switch in those cases would be redundant;
@@ -880,11 +908,10 @@ function emitAuthContext(ctx: BuildContext, state: MiniKitchenRecipeState): void
   }
 
   if (auth.mode === 'AppRegistrationSecret') {
-    pushSwitch(ctx, 'ClientSecret', CLIENT_SECRET_PLACEHOLDER);
     warnBlocking(
       ctx,
       'auth-secret-placeholder',
-      `The rendered command uses the ${CLIENT_SECRET_PLACEHOLDER} placeholder. Replace it with the real client secret on the machine that runs the command — the builder never collects or stores secrets.`,
+      "Select a bound Chef's Key. Credentials are supplied only by PAX Cookbook, never by a copied command.",
       'auth.mode',
     );
   }
@@ -901,137 +928,13 @@ function emitAuthContext(ctx: BuildContext, state: MiniKitchenRecipeState): void
 // -----------------------------------------------------------------------------
 
 function emitAdvancedArgs(ctx: BuildContext, state: MiniKitchenRecipeState): void {
-  const text = (state.advanced.extraArguments ?? '').trim();
-  if (!text) {
+  const parsed = parseAdvancedArguments(state.advanced.extraArguments ?? '');
+  if (parsed.error || parsed.parameters.some(parameter => ctx.emittedSwitches.has(parameter.name))) {
+    block(ctx, 'advanced-invalid', 'orphan-advanced-token', ADVANCED_ARGUMENTS_ERROR);
+    warnBlocking(ctx, 'advanced-invalid', ADVANCED_ARGUMENTS_ERROR, 'advanced.extraArguments');
     return;
   }
-
-  warn(
-    ctx,
-    'advanced-args-present',
-    'info',
-    'Advanced switches are present. The builder cannot fully validate advanced switches.',
-    'advanced.extraArguments',
-  );
-
-  const analysis = analyzeAdvancedArgs(text);
-
-  // Group the tokens into clusters: each leading switch + the value tokens
-  // until the next switch. Tokens that appear before any switch are orphans.
-  type Cluster = { switchName: string; rawSwitch: string; values: string[]; valueRaws: string[] };
-  const clusters: Cluster[] = [];
-  let current: Cluster | undefined;
-
-  for (const tok of analysis.tokens) {
-    if (tok.isSwitch && tok.switchName) {
-      current = {
-        switchName: tok.switchName,
-        rawSwitch: tok.raw,
-        values: [],
-        valueRaws: [],
-      };
-      clusters.push(current);
-      continue;
-    }
-    const unwrapped = unwrapAdvancedToken(tok.raw);
-    if (!current) {
-      // Orphan value token before any switch.
-      block(ctx, `orphan-${ctx.blocked.length}`, 'orphan-advanced-token', 'A value token appeared in advanced switches before any switch.');
-      warn(
-        ctx,
-        `advanced-orphan-${ctx.blocked.length}`,
-        'warning',
-        'Advanced switches contained a value with no preceding switch. The token was dropped from the rendered command.',
-        'advanced.extraArguments',
-      );
-      continue;
-    }
-    current.values.push(unwrapped);
-    current.valueRaws.push(tok.raw);
-  }
-
-  const seenAdvanced = new Set<string>();
-  for (const cluster of clusters) {
-    const name = cluster.switchName;
-
-    // Removed/unsupported switches.
-    const removed = REMOVED_OR_UNSUPPORTED_SWITCHES.find(s => s.name === name);
-    if (removed) {
-      const label = removed.userFacingName ?? `-${name}`;
-      block(ctx, `removed-${name}`, 'removed-switch', label);
-      warn(
-        ctx,
-        `removed-switch-${name}`,
-        'warning',
-        `Removed or unsupported switch ${label} was blocked. ${removed.reason}`,
-        'advanced.extraArguments',
-      );
-      continue;
-    }
-
-    // Secret-looking values: scan the raw value text and the unwrapped value.
-    const hasSecret = cluster.valueRaws.some(v => containsLikelySecret(v)) ||
-      cluster.values.some(v => containsLikelySecret(v));
-    if (hasSecret) {
-      block(ctx, `secret-${name}`, 'secret-value', name);
-      warn(
-        ctx,
-        `secret-blocked-${name}`,
-        'warning',
-        `A value for -${name} in advanced switches looked like a secret and was blocked. The builder never emits secret values.`,
-        'advanced.extraArguments',
-      );
-      continue;
-    }
-
-    // Duplicate of a structured-field switch.
-    if (ctx.emittedSwitches.has(name)) {
-      block(ctx, `duplicate-${name}`, 'duplicate-switch', name);
-      warn(
-        ctx,
-        `duplicate-switch-${name}`,
-        'warning',
-        `Advanced switch -${name} duplicates a switch already produced from a structured field. Structured fields win; the advanced copy was dropped.`,
-        'advanced.extraArguments',
-      );
-      continue;
-    }
-
-    // Duplicate within advanced args themselves.
-    if (seenAdvanced.has(name)) {
-      block(ctx, `dup-adv-${name}`, 'duplicate-switch', name);
-      warn(
-        ctx,
-        `duplicate-advanced-${name}`,
-        'warning',
-        `Advanced switches listed -${name} more than once. The rendered command keeps the first occurrence and drops the rest — remove the duplicates.`,
-        'advanced.extraArguments',
-      );
-      continue;
-    }
-    seenAdvanced.add(name);
-
-    // Unknown but allowed: emit with a warning.
-    const known = getSwitchDefinition(name);
-    if (!known) {
-      warn(
-        ctx,
-        `unknown-switch-${name}`,
-        'warning',
-        `Advanced switch -${name} is not in the builder's switch catalog. The renderer passes it through unchanged; double-check that PAX accepts it.`,
-        'advanced.extraArguments',
-      );
-    }
-
-    // PAX `[string[]]` parameters bind from a single comma-joined token; emit
-    // them through pushArraySwitch so the renderer skips re-quoting.
-    if (known?.kind === 'string-list') {
-      pushArraySwitch(ctx, name, cluster.values);
-      continue;
-    }
-
-    pushSwitch(ctx, name, ...cluster.values);
-  }
+  ctx.parameters.push(...parsed.parameters);
 }
 
 /**
@@ -1039,16 +942,6 @@ function emitAdvancedArgs(ctx: BuildContext, state: MiniKitchenRecipeState): voi
  * token, if present. Inner content is returned unchanged; argv stores logical
  * (unquoted) values, and the renderer re-quotes them per PowerShell rules.
  */
-function unwrapAdvancedToken(raw: string): string {
-  if (raw.length >= 2) {
-    const first = raw[0];
-    const last = raw[raw.length - 1];
-    if ((first === "'" && last === "'") || (first === '"' && last === '"')) {
-      return raw.slice(1, -1);
-    }
-  }
-  return raw;
-}
 
 // -----------------------------------------------------------------------------
 // Global assumptions + explanation

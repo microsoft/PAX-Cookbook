@@ -36,6 +36,7 @@
  */
 
 import { FULL_PAX_RECIPE_FILE_EXTENSION } from '../data/mini-kitchen-constants';
+import { parseAdvancedArguments } from './advancedArgs';
 import { buildRecipeRequestBody } from './candidateToRecipeBody';
 import { FULL_PAX_RECIPE_KIND } from './fullPaxRecipeImporter';
 import { scrubSavedRecipeState } from './recipeScrub';
@@ -84,6 +85,8 @@ export interface BuildFullPaxRecipeExportInput {
 export function buildFullPaxRecipeExport(
   input: BuildFullPaxRecipeExportInput,
 ): FullPaxRecipeExportResult {
+  const error = parseAdvancedArguments(input.state.advanced.extraArguments ?? '').error;
+  if (error) return { ok: false, recipe: null, warnings: [], droppedForSchema: [], error };
   const scrub = scrubSavedRecipeState(input.state);
   const translation = translateLiteRecipeToFullRecipe(scrub.state);
   const built = buildRecipeRequestBody(translation, { includeImportMetadata: true });
